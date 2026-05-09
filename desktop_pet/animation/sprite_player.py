@@ -43,6 +43,7 @@ class SpritePlayer(QObject):
         self.current_action = "idle"
         self.fallback_action = "idle"
         self.current_index = 0
+        self.force_single_cycle = False
         self.load()
 
     def load(self) -> None:
@@ -61,14 +62,20 @@ class SpritePlayer(QObject):
         self.scale = max(scale, 0.2)
         self.frame_changed.emit(self.current_pixmap())
 
-    def set_action(self, action_name: str, fallback_action: str = "idle") -> None:
-        """切换当前动作，并为非循环动作设置播放完成后的回退动作。"""
+    def set_action(
+        self,
+        action_name: str,
+        fallback_action: str = "idle",
+        force_single_cycle: bool = False,
+    ) -> None:
+        """切换当前动作，并可选择强制只播放一轮后回退。"""
         if action_name not in self.frames_by_action:
             logger.warning("Unknown action requested: %s", action_name)
             action_name = "idle"
         self.current_action = action_name
         self.fallback_action = fallback_action if fallback_action in self.frames_by_action else "idle"
         self.current_index = 0
+        self.force_single_cycle = force_single_cycle
         self._restart_timer_for_action(action_name)
         self.action_changed.emit(self.current_action)
         self.frame_changed.emit(self.current_pixmap())
@@ -92,6 +99,16 @@ class SpritePlayer(QObject):
         height = int(self.config.get("frame_height", 208) * self.scale)
         return width, height
 
+    def action_duration_ms(self, action_name: str, force_single_cycle: bool = False) -> int:
+        """返回指定动作完整播放一轮大约需要的时间。"""
+        action_config = self.config.get("actions", {}).get(action_name, {})
+        frame_count = len(self.frames_by_action.get(action_name, [])) or int(action_config.get("frames", 1))
+        fps = int(action_config.get("fps", self.config.get("default_fps", 8)))
+        interval_ms = max(400, int(1000 / max(fps, 1)))
+        if not force_single_cycle and bool(action_config.get("loop", True)):
+            return interval_ms
+        return max(interval_ms, frame_count * interval_ms)
+
     def _advance_frame(self) -> None:
         """推进到下一帧；非循环动作结束后自动回退。"""
         frames = self.frames_by_action.get(self.current_action, [])
@@ -99,7 +116,7 @@ class SpritePlayer(QObject):
             return
 
         action_config = self.config.get("actions", {}).get(self.current_action, {})
-        loop = bool(action_config.get("loop", True))
+        loop = bool(action_config.get("loop", True)) and not self.force_single_cycle
         if self.current_index >= len(frames) - 1:
             if loop:
                 self.current_index = 0

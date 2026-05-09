@@ -29,6 +29,7 @@ class SpeechBubble(QWidget):
         self.close_timer.timeout.connect(self.hide)
 
         self.source = "system"
+        self._last_anchor_rect = QRect()
 
     def show_message(
         self,
@@ -46,15 +47,26 @@ class SpeechBubble(QWidget):
         self.label.adjustSize()
         height = self.label.height() + 28
         self.resize(width, height)
-
-        x = anchor_rect.x() + anchor_rect.width() - width + 20
-        y = anchor_rect.y() - height - 10
-        if y < 0:
-            y = anchor_rect.y() + 12
-        self.move(QPoint(max(0, x), max(0, y)))
+        self._last_anchor_rect = QRect(anchor_rect)
+        self.reposition(anchor_rect)
         self.show()
         self.raise_()
         self.close_timer.start(duration_ms)
+
+    def reposition(self, anchor_rect: QRect | None = None) -> None:
+        """根据角色当前位置重新摆放气泡。"""
+        if anchor_rect is not None:
+            self._last_anchor_rect = QRect(anchor_rect)
+        if self._last_anchor_rect.isNull():
+            return
+
+        width = self.width()
+        height = self.height()
+        x = self._last_anchor_rect.x() + self._last_anchor_rect.width() - width + 20
+        y = self._last_anchor_rect.y() - height - 10
+        if y < 0:
+            y = self._last_anchor_rect.y() + 12
+        self.move(QPoint(max(0, x), max(0, y)))
 
     def paintEvent(self, event) -> None:  # noqa: N802
         """绘制圆角气泡背景和底部小尾巴。"""

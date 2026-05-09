@@ -30,5 +30,9 @@
     "max_consecutive_active_replies": 5,
     "max_local_lines_per_day": 10,
     "max_api_proactive_per_day": 3
+  },
+  "chat": {
+    "formal_qa_mode": false,
+    "formal_answer_display": "new_panel"
   }
 }

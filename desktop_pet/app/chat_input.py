@@ -36,18 +36,35 @@ class ChatInput(QWidget):
         self.send_button = QPushButton("发送", self)
         self.send_button.clicked.connect(self._submit)
         layout.addWidget(self.send_button)
+
+        self.close_button = QPushButton("×", self)
+        self.close_button.setFixedWidth(32)
+        self.close_button.setToolTip("关闭输入框")
+        self.close_button.clicked.connect(self.hide)
+        layout.addWidget(self.close_button)
         self.resize(300, 52)
+        self._last_anchor_rect = QRect()
 
     def show_near(self, anchor_rect: QRect) -> None:
         """把输入框显示在宠物附近，并聚焦到文本框。"""
-        x = anchor_rect.x() + anchor_rect.width() + 10
-        y = anchor_rect.y() + anchor_rect.height() // 3
-        self.move(x, max(0, y))
+        self._last_anchor_rect = QRect(anchor_rect)
+        self.reposition(anchor_rect)
         self.show()
         self.raise_()
         self.activateWindow()
         self.input.setFocus()
         self.input.selectAll()
+
+    def reposition(self, anchor_rect: QRect | None = None) -> None:
+        """根据角色当前位置重新摆放输入框。"""
+        if anchor_rect is not None:
+            self._last_anchor_rect = QRect(anchor_rect)
+        if self._last_anchor_rect.isNull():
+            return
+
+        x = self._last_anchor_rect.x() + self._last_anchor_rect.width() + 10
+        y = self._last_anchor_rect.y() + self._last_anchor_rect.height() // 3
+        self.move(x, max(0, y))
 
     def _submit(self) -> None:
         """提交输入内容；为空时仅关闭输入框。"""

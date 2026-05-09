@@ -63,6 +63,7 @@ class PromptBuilder:
         self,
         user_message: str,
         recent_messages: list[dict[str, Any]] | None = None,
+        formal_qa_mode: bool = False,
     ) -> list[dict[str, str]]:
         """组装发送给模型的完整 messages 列表。"""
         character = load_json(self.character_path, DEFAULT_CHARACTER)
@@ -110,6 +111,19 @@ class PromptBuilder:
         if memory_text:
             system_messages.append(
                 {"role": "system", "content": f"以下是你记得的用户信息，请自然参考：\n{memory_text}"}
+            )
+
+        if formal_qa_mode:
+            system_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "当前开启正式问答模式。"
+                        "对于用户的问题，请优先给出完整、清晰、有条理的回答，"
+                        "不要刻意压缩成两三句；必要时可以分点说明、补充步骤或例子，"
+                        "但仍然保持温柔自然。"
+                    ),
+                }
             )
 
         conversation_messages = [

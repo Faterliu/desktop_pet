@@ -104,6 +104,15 @@ class BehaviorController(QObject):
         self.notify_proactive_shown()
         self.speak_requested.emit(line, 6000, "waving")
 
+    def trigger_test_speak(self) -> bool:
+        """立即触发一次测试主动说话，不受冷却时间限制。"""
+        line_type = random.choice(["startup", "idle", "quiet", "encourage"])
+        line = self._random_line(line_type)
+        if not line:
+            return False
+        self.speak_requested.emit(line, 6000, "waving")
+        return True
+
     def _random_line(self, group_name: str) -> str:
         """从指定话术分组中随机抽取一句文本。"""
         payload = load_json(self.local_lines_path, {})

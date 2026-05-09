@@ -9,20 +9,31 @@ from PySide6.QtWidgets import QMenu, QWidget
 def build_context_menu(
     parent: QWidget,
     test_action_handler: Callable[[str], None],
+    on_test_move_left: Callable[[], None],
+    on_test_move_right: Callable[[], None],
+    on_test_jump: Callable[[], None],
+    on_test_proactive_speak: Callable[[], None],
+    on_test_api_proactive_speak: Callable[[], None],
+    on_request_exit: Callable[[], None],
     current_scale: float,
     do_not_disturb: bool,
     auto_move: bool,
     api_chat_enabled: bool,
+    formal_qa_mode: bool,
+    formal_answer_display: str,
     on_set_scale: Callable[[float], None],
     on_custom_scale: Callable[[], None],
     on_toggle_dnd: Callable[[bool], None],
     on_toggle_auto_move: Callable[[bool], None],
     on_toggle_api_chat: Callable[[bool], None],
-    on_clear_history: Callable[[], None],
+    on_toggle_formal_qa_mode: Callable[[bool], None],
+    on_set_formal_answer_display: Callable[[str], None],
     on_reload_config: Callable[[], None],
 ) -> QMenu:
     """构建桌宠右键菜单，并绑定各项操作回调。"""
     menu = QMenu(parent)
+    test_menu = menu.addMenu("测试")
+
     for action_name, title in [
         ("idle", "测试动作：idle"),
         ("waving", "测试动作：waving"),
@@ -30,9 +41,33 @@ def build_context_menu(
         ("review", "测试动作：review"),
         ("running", "测试动作：running"),
     ]:
-        action = QAction(title, menu)
+        action = QAction(title, test_menu)
         action.triggered.connect(lambda checked=False, name=action_name: test_action_handler(name))
-        menu.addAction(action)
+        test_menu.addAction(action)
+
+    test_menu.addSeparator()
+
+    move_left_action = QAction("测试左移", test_menu)
+    move_left_action.triggered.connect(on_test_move_left)
+    test_menu.addAction(move_left_action)
+
+    move_right_action = QAction("测试右移", test_menu)
+    move_right_action.triggered.connect(on_test_move_right)
+    test_menu.addAction(move_right_action)
+
+    jump_action = QAction("测试跳跃", test_menu)
+    jump_action.triggered.connect(on_test_jump)
+    test_menu.addAction(jump_action)
+
+    test_menu.addSeparator()
+
+    proactive_test_action = QAction("测试主动说话一次", test_menu)
+    proactive_test_action.triggered.connect(on_test_proactive_speak)
+    test_menu.addAction(proactive_test_action)
+
+    api_proactive_test_action = QAction("测试 API 主动说话一次", test_menu)
+    api_proactive_test_action.triggered.connect(on_test_api_proactive_speak)
+    test_menu.addAction(api_proactive_test_action)
 
     menu.addSeparator()
 
@@ -71,16 +106,34 @@ def build_context_menu(
     api_action.toggled.connect(on_toggle_api_chat)
     menu.addAction(api_action)
 
-    menu.addSeparator()
+    formal_qa_action = QAction("正式问答模式", menu)
+    formal_qa_action.setCheckable(True)
+    formal_qa_action.setChecked(formal_qa_mode)
+    formal_qa_action.toggled.connect(on_toggle_formal_qa_mode)
+    menu.addAction(formal_qa_action)
 
-    clear_action = QAction("清空聊天记录", menu)
-    clear_action.triggered.connect(on_clear_history)
-    menu.addAction(clear_action)
+    formal_display_menu = menu.addMenu("正式问答显示方式")
+    formal_display_group = QActionGroup(formal_display_menu)
+    formal_display_group.setExclusive(True)
+    for mode, title in [
+        ("new_panel", "每题新建文本框"),
+        ("append", "追加到同一文本框"),
+    ]:
+        action = QAction(title, formal_display_menu)
+        action.setCheckable(True)
+        action.setChecked(formal_answer_display == mode)
+        action.triggered.connect(
+            lambda checked=False, value=mode: on_set_formal_answer_display(value)
+        )
+        formal_display_group.addAction(action)
+        formal_display_menu.addAction(action)
 
     reload_action = QAction("重新加载配置", menu)
     reload_action.triggered.connect(on_reload_config)
     menu.addAction(reload_action)
 
     menu.addSeparator()
-    menu.addAction("退出", parent.close)
+    exit_action = QAction("退出", menu)
+    exit_action.triggered.connect(on_request_exit)
+    menu.addAction(exit_action)
     return menu

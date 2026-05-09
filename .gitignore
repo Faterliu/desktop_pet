@@ -1,9 +1,10 @@
-# 默认忽略仓库根目录的所有内容，只保留程序本体目录
+# 默认忽略仓库根目录的所有内容，只保留程序本体目录feedback.txt
 *
 !/.gitignore
 !/desktop_pet/
 !/desktop_pet/**
-
+!/README.md
+!/feedback.txt
 # Python 缓存与构建产物
 desktop_pet/**/__pycache__/
 desktop_pet/**/*.py[cod]
