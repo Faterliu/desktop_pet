@@ -1,0 +1,32 @@
+# 默认忽略仓库根目录的所有内容，只保留程序本体目录
+*
+!/.gitignore
+!/desktop_pet/
+!/desktop_pet/**
+
+# Python 缓存与构建产物
+desktop_pet/**/__pycache__/
+desktop_pet/**/*.py[cod]
+desktop_pet/**/*.pyo
+desktop_pet/**/*.pyd
+
+# 本地环境与编辑器配置
+desktop_pet/.venv/
+desktop_pet/venv/
+desktop_pet/env/
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+
+# 操作系统临时文件
+.DS_Store
+Thumbs.db
+
+# 用户个性化配置与敏感信息
+desktop_pet/config/app_config.json
+
+# 运行时数据、日志与本地调试产物
+desktop_pet/data/
+desktop_pet/**/*.log
