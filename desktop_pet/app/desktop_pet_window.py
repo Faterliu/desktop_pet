@@ -275,6 +275,9 @@ class DesktopPetWindow(QWidget):
             self.chat_thread.quit()
             self.chat_thread.wait(1000)
         super().closeEvent(event)
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _show_context_menu(self, global_pos: QPoint) -> None:
         """在指定屏幕坐标位置弹出右键菜单。"""
@@ -694,8 +697,15 @@ class DesktopPetWindow(QWidget):
         ui = self._ui_config()
         remember = ui.get("remember_last_position", True)
         if remember and state.get("x") is not None and state.get("y") is not None:
-            self.move(int(state["x"]), int(state["y"]))
-            return
+            saved_position = QPoint(int(state["x"]), int(state["y"]))
+            if self._position_visible_on_any_screen(saved_position):
+                self.move(saved_position)
+                return
+            logger.warning(
+                "Saved window position is outside visible screens: x=%s, y=%s. Falling back.",
+                state.get("x"),
+                state.get("y"),
+            )
 
         screen = QApplication.primaryScreen()
         if not screen:
@@ -712,6 +722,14 @@ class DesktopPetWindow(QWidget):
     def _save_window_position(self) -> None:
         """保存当前窗口位置到本地状态文件。"""
         save_json(self.window_state_path, {"x": self.x(), "y": self.y()})
+
+    def _position_visible_on_any_screen(self, position: QPoint) -> bool:
+        """判断窗口放在给定坐标后，是否至少有一部分仍位于某个屏幕可见区域内。"""
+        window_rect = QRect(position, self.size())
+        for screen in QApplication.screens():
+            if screen.availableGeometry().intersects(window_rect):
+                return True
+        return False
 
     def _refresh_auto_move_timer(self) -> None:
         """根据配置决定是否开启自主移动定时器。"""
