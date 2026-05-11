@@ -51,13 +51,15 @@ class PromptBuilder:
         character_path: str | Path,
         safety_path: str | Path,
         memory_path: str | Path,
-        summary_path: str | Path,
+        summary_path_formal: str | Path,
+        summary_path_informal: str | Path,
     ) -> None:
-        """初始化提示词构建器，并绑定角色、安全、记忆与摘要配置。"""
+        """初始化提示词构建器，并绑定角色、安全、记忆与正式/非正式摘要配置。"""
         self.character_path = Path(character_path)
         self.safety_path = Path(safety_path)
         self.memory_path = Path(memory_path)
-        self.summary_path = Path(summary_path)
+        self.summary_path_formal = Path(summary_path_formal)
+        self.summary_path_informal = Path(summary_path_informal)
 
     def build_messages(
         self,
@@ -69,7 +71,8 @@ class PromptBuilder:
         character = load_json(self.character_path, DEFAULT_CHARACTER)
         safety = load_json(self.safety_path, DEFAULT_SAFETY)
         memory = load_json(self.memory_path, DEFAULT_MEMORY)
-        summary = load_json(self.summary_path, DEFAULT_SUMMARY)
+        summary_path = self.summary_path_formal if formal_qa_mode else self.summary_path_informal
+        summary = load_json(summary_path, DEFAULT_SUMMARY)
 
         safety_rules = "\n".join(f"- {rule}" for rule in safety.get("rules", []))
         personality = "、".join(character.get("personality", []))

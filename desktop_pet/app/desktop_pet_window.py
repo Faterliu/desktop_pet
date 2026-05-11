@@ -35,6 +35,7 @@ from storage.memory_store import MemoryStore
 from storage.usage_store import UsageStore
 from utils.dwm_border import apply_transparent_window_fixes, suppress_dwm_border
 from utils.logger import get_logger
+from utils.time_utils import now_iso
 
 
 logger = get_logger(__name__)
@@ -63,7 +64,7 @@ class ChatWorker(QObject):
     def run(self) -> None:
         """在工作线程中构建消息并请求模型回复。"""
         try:
-            recent_messages = self.context_manager.recent_messages()
+            recent_messages = self.context_manager.recent_messages(self.formal_qa_mode)
             if (
                 recent_messages
                 and recent_messages[-1].get("role") == "user"
@@ -129,8 +130,10 @@ class DesktopPetWindow(QWidget):
         self.local_lines_path = self.config_dir / "local_lines.json"
         self.safety_rules_path = self.config_dir / "safety_rules.json"
         self.sprite_config_path = self.assets_dir / "sprite_config.json"
-        self.chat_history_path = self.data_dir / "chat_history.json"
-        self.summary_path = self.data_dir / "conversation_summary.json"
+        self.chat_history_formal_path = self.data_dir / "chat_history_formal.json"
+        self.chat_history_informal_path = self.data_dir / "chat_history_informal.json"
+        self.summary_formal_path = self.data_dir / "conversation_summary_formal.json"
+        self.summary_informal_path = self.data_dir / "conversation_summary_informal.json"
         self.memory_path = self.data_dir / "memory.json"
         self.daily_usage_path = self.data_dir / "daily_usage.json"
         self.window_state_path = self.data_dir / "window_state.json"
@@ -155,8 +158,10 @@ class DesktopPetWindow(QWidget):
         self.formal_answer_panels: list[FormalAnswerPanel] = []
         self.active_formal_answer_panel: FormalAnswerPanel | None = None
         self.pending_formal_question = ""
+        self._pending_was_formal = False
 
-        self.chat_store = ChatStore(self.chat_history_path)
+        self.chat_store_formal = ChatStore(self.chat_history_formal_path)
+        self.chat_store_informal = ChatStore(self.chat_history_informal_path)
         self.usage_store = UsageStore(self.daily_usage_path)
         self.memory_store = MemoryStore(self.memory_path)
         self.deepseek_client = DeepSeekClient(self.config_path, self.example_config_path)
@@ -164,16 +169,24 @@ class DesktopPetWindow(QWidget):
             self.character_path,
             self.safety_rules_path,
             self.memory_path,
-            self.summary_path,
+            self.summary_formal_path,
+            self.summary_informal_path,
         )
         self.context_manager = ContextManager(
             self.config_path,
-            self.chat_store,
+            self.chat_store_formal,
+            self.chat_store_informal,
             self.example_config_path,
         )
-        self.summarizer = Summarizer(
-            self.summary_path,
-            self.chat_store,
+        self.summarizer_formal = Summarizer(
+            self.summary_formal_path,
+            self.chat_store_formal,
+            self.memory_store,
+            self.deepseek_client,
+        )
+        self.summarizer_informal = Summarizer(
+            self.summary_informal_path,
+            self.chat_store_informal,
             self.memory_store,
             self.deepseek_client,
         )
@@ -189,6 +202,9 @@ class DesktopPetWindow(QWidget):
         )
         self.auto_move_timer = QTimer(self)
         self.auto_move_timer.timeout.connect(self._trigger_auto_move)
+        self._cleanup_timer = QTimer(self)
+        self._cleanup_timer.timeout.connect(self._check_time_based_cleanup)
+        self._cleanup_timer.start(3_600_000)
 
         self._setup_window()
         self._setup_ui()
@@ -310,6 +326,7 @@ class DesktopPetWindow(QWidget):
             event.ignore()
             self.request_exit()
             return
+        self._cleanup_timer.stop()
         self._destroy_formal_answer_panels()
         self._save_window_position()
         self.bubble.hide()
@@ -351,6 +368,9 @@ class DesktopPetWindow(QWidget):
             on_reload_config=self._reload_config,
             always_on_top=bool(self._ui_config().get("always_on_top", True)),
             show_test_menu=bool(self._ui_config().get("show_test_menu", False)),
+            show_clear_menu=bool(self._ui_config().get("show_clear_menu", False)),
+            on_clear_informal_chat=self._clear_informal_chat_history,
+            on_clear_formal_chat=self._clear_formal_chat_history,
         )
         menu.exec(global_pos)
 
@@ -463,7 +483,7 @@ class DesktopPetWindow(QWidget):
         self._save_app_config()
         if enabled and self.bubble.source == "proactive":
             self.bubble.hide()
-        self._display_message("免打扰已开启。" if enabled else "免打扰已关闭。", 3000, "system")
+        self._display_message("小胡接下来不会说话了。" if enabled else "来和小胡聊天吧。", 3000, "system")
 
     def _toggle_auto_move(self, enabled: bool) -> None:
         """切换自主移动功能并刷新定时器。"""
@@ -476,7 +496,7 @@ class DesktopPetWindow(QWidget):
         """切换用户聊天时是否调用外部 API。"""
         self.app_config.setdefault("api", {})["enable_chat_api"] = enabled
         self._save_app_config()
-        self._display_message("聊天已接入 API。" if enabled else "聊天已切换为本地回复。", 3200, "system")
+        self._display_message("我变的更聪明了。" if enabled else "我好像变笨了。", 3200, "system")
 
     def _toggle_formal_qa_mode(self, enabled: bool) -> None:
         """切换正式问答模式。"""
@@ -485,7 +505,7 @@ class DesktopPetWindow(QWidget):
         if not enabled:
             self._destroy_formal_answer_panels()
         self._display_message(
-            "正式问答模式已开启。" if enabled else "正式问答模式已关闭。",
+            "我会更加认真地回答你的问题。" if enabled else "现在就简简单单的聊天吧。",
             3200,
             "system",
         )
@@ -517,18 +537,36 @@ class DesktopPetWindow(QWidget):
             self._display_message(reply, 5000, "system")
 
     def _clear_chat_history(self) -> None:
-        """清空聊天历史和对应摘要数据。"""
-        self.chat_store.clear_history()
-        save_json(
-            self.summary_path,
-            {
-                "summary": "",
-                "covered_message_count": 0,
-                "highlights": [],
-                "last_updated": "",
-            },
-        )
+        """清空正式与非正式聊天历史及对应摘要数据。"""
+        default_summary = {
+            "summary": "",
+            "covered_message_count": 0,
+            "highlights": [],
+            "last_updated": "",
+        }
+        for store, summary_path in [
+            (self.chat_store_formal, self.summary_formal_path),
+            (self.chat_store_informal, self.summary_informal_path),
+        ]:
+            store.clear_history()
+            save_json(summary_path, default_summary)
         self._display_message("聊天记录已经清空啦。", 3500, "system")
+
+    def _clear_informal_chat_history(self) -> None:
+        """清空非正式聊天历史；若配置开启则在清空前强制总结。"""
+        if self._chat_config().get("force_summarize_before_clear", True):
+            self.summarizer_informal.maybe_summarize(0, force=True)
+        self.chat_store_informal.clear_history()
+        self.chat_store_informal.update_last_cleaned_at(now_iso())
+        self._display_message("非正式聊天记录已经清空啦。", 3500, "system")
+
+    def _clear_formal_chat_history(self) -> None:
+        """清空正式问答聊天历史；若配置开启则在清空前强制总结。"""
+        if self._chat_config().get("force_summarize_before_clear", True):
+            self.summarizer_formal.maybe_summarize(0, force=True)
+        self.chat_store_formal.clear_history()
+        self.chat_store_formal.update_last_cleaned_at(now_iso())
+        self._display_message("正式问答记录已经清空啦。", 3500, "system")
 
     def _reload_config(self) -> None:
         """重新读取配置文件，并刷新动画和行为控制状态。"""
@@ -559,8 +597,10 @@ class DesktopPetWindow(QWidget):
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
         self._waiting_timer.stop()
         self.behavior_controller.notify_user_interaction()
-        self.chat_store.append_message("user", message)
-        if self._formal_qa_enabled():
+        store = self._active_chat_store()
+        store.append_message("user", message)
+        self._pending_was_formal = self._formal_qa_enabled()
+        if self._pending_was_formal:
             self.pending_formal_question = message
 
         if (
@@ -572,7 +612,7 @@ class DesktopPetWindow(QWidget):
         ):
             poetry_line = self.behavior_controller.pick_poetry_line()
             if poetry_line:
-                self.chat_store.append_message("assistant", poetry_line)
+                store.append_message("assistant", poetry_line)
                 self.sprite_player.set_action("running", force_single_cycle=True)
                 self._show_answer_output(poetry_line, source="assistant", question=message)
                 return
@@ -582,14 +622,17 @@ class DesktopPetWindow(QWidget):
 
         if not self._api_chat_enabled():
             reply = self._generate_local_reply(message, formal_qa_mode=self._formal_qa_enabled())
-            self.chat_store.append_message("assistant", reply)
+            store.append_message("assistant", reply)
             self.sprite_player.set_action("idle")
             self._show_answer_output(reply, source="assistant", question=message)
             return
 
         if not self.deepseek_client.is_configured():
-            reply = "我已经收到你说的话啦。先在 config/app_config.json 里填好 DeepSeek API key，或者先关闭“聊天接入 API”。"
-            self.chat_store.append_message("assistant", reply)
+            reply = (
+                "我已经收到你说的话啦。先在 config/app_config.json 里填好 DeepSeek API key，"
+                "或者先关闭“聊天接入 API”。"
+            )
+            store.append_message("assistant", reply)
             self.sprite_player.set_action("failed")
             self._show_answer_output(reply, source="assistant", question=message)
             return
@@ -677,7 +720,8 @@ class DesktopPetWindow(QWidget):
     def _on_chat_success(self, reply: str) -> None:
         """处理模型成功返回后的界面更新与消息落盘。"""
         cleaned_reply = reply.strip() or "我在这里哦。"
-        self.chat_store.append_message("assistant", cleaned_reply)
+        store = self.chat_store_formal if self._pending_was_formal else self.chat_store_informal
+        store.append_message("assistant", cleaned_reply)
         self.sprite_player.set_action("idle")
         self._show_answer_output(
             cleaned_reply,
@@ -685,7 +729,9 @@ class DesktopPetWindow(QWidget):
             question=self.pending_formal_question,
         )
         self.pending_formal_question = ""
-        threading.Thread(target=self._maybe_summarize, daemon=True).start()
+        was_formal = self._pending_was_formal
+        self._pending_was_formal = False
+        threading.Thread(target=self._maybe_summarize, args=(was_formal,), daemon=True).start()
 
     def _on_chat_failure(self, error_message: str) -> None:
         """处理模型请求失败后的动作和气泡提示。"""
@@ -704,11 +750,14 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("failed")
         self._display_message(error_message, 12000, "assistant")
 
-    def _maybe_summarize(self) -> None:
-        """在后台线程中尝试触发聊天摘要。"""
+    def _maybe_summarize(self, formal_qa_mode: bool = False) -> None:
+        """在后台线程中尝试触发对应模式的聊天摘要。"""
         try:
             trigger_rounds = int(self._api_config().get("summary_trigger_rounds", 12))
-            self.summarizer.maybe_summarize(trigger_rounds)
+            if formal_qa_mode:
+                self.summarizer_formal.maybe_summarize(trigger_rounds)
+            else:
+                self.summarizer_informal.maybe_summarize(trigger_rounds)
         except Exception:  # noqa: BLE001
             logger.exception("Background summarization failed")
 
@@ -984,6 +1033,31 @@ class DesktopPetWindow(QWidget):
     def _chat_config(self) -> dict[str, Any]:
         """返回聊天配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("chat", {})
+
+    def _active_chat_store(self) -> ChatStore:
+        """返回当前模式对应的聊天存储实例。"""
+        return self.chat_store_formal if self._formal_qa_enabled() else self.chat_store_informal
+
+    def _check_time_based_cleanup(self) -> None:
+        """定期检查正式/非正式对话是否超过清理间隔，若超过则先摘要再清空消息。"""
+        if self._chat_in_progress():
+            return
+        chat_config = self._chat_config()
+        formal_days = int(chat_config.get("formal_cleanup_months", 6)) * 30
+        informal_days = int(chat_config.get("informal_cleanup_months", 3)) * 30
+        now = now_iso()
+
+        if self.chat_store_formal.should_trigger_time_cleanup(formal_days):
+            logger.info("Triggering time-based cleanup for formal chat")
+            self.summarizer_formal.maybe_summarize(0, force=True)
+            self.chat_store_formal.update_last_cleaned_at(now)
+            self.chat_store_formal.clear_history()
+
+        if self.chat_store_informal.should_trigger_time_cleanup(informal_days):
+            logger.info("Triggering time-based cleanup for informal chat")
+            self.summarizer_informal.maybe_summarize(0, force=True)
+            self.chat_store_informal.update_last_cleaned_at(now)
+            self.chat_store_informal.clear_history()
 
     def _config_snapshot(self) -> dict[str, Any]:
         """返回当前内存中的配置快照。"""

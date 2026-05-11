@@ -21,7 +21,8 @@
     "click_to_chat": true,
     "start_position": "bottom_right",
     "remember_last_position": true,
-    "show_test_menu": false
+    "show_test_menu": false,
+    "show_clear_menu": false
   },
   "behavior": {
     "do_not_disturb": false,
@@ -34,6 +35,9 @@
   },
   "chat": {
     "formal_qa_mode": false,
-    "formal_answer_display": "new_panel"
+    "formal_answer_display": "new_panel",
+    "formal_cleanup_months": 6,
+    "informal_cleanup_months": 3,
+    "force_summarize_before_clear": true
   }
 }

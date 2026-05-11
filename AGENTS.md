@@ -52,11 +52,11 @@ py main.py
 
 - 核心协调器。负责窗口属性、鼠标事件（单击聊天、双击回复/打招呼、拖拽移动、右键菜单，含置顶开关）、聊天流程、后台线程、正式问答面板、自动移动、位置恢复和退出动画（退出时播放 waving 并显示 `farewell` 道别气泡）。
 - 修改场景：几乎所有用户可见行为的入口都在这里接线。
-- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_click_timer`、`_suppress_click`、`_waiting_timer`。
+- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`、`_cleanup_timer`。
 
 `desktop_pet/app/context_menu.py`
 
-- 构建右键菜单，包括测试菜单（由 `ui.show_test_menu` 控制，默认关闭）、人物缩放、免打扰、窗口置顶、自主移动、聊天 API 开关、正式问答模式、重新加载配置和退出。
+- 构建右键菜单，包括测试菜单（由 `ui.show_test_menu` 控制，默认关闭）、清理菜单（由 `ui.show_clear_menu` 控制，默认关闭，可分别清除非正式和正式聊天记录）、人物缩放、免打扰、窗口置顶、自主移动、聊天 API 开关、正式问答模式、重新加载配置和退出。
 - 修改场景：新增菜单项或调整菜单可见入口。
 - 注意：菜单回调由 `DesktopPetWindow._show_context_menu()` 注入，新增菜单通常要同步改两处。
 
@@ -96,19 +96,19 @@ py main.py
 
 `desktop_pet/ai/prompt_builder.py`
 
-- 组装系统提示、角色设定、安全规则、摘要、记忆、正式问答模式提示和上下文消息。
+- 组装系统提示、角色设定、安全规则、摘要（按正式/非正式模式选择对应文件）、记忆、正式问答模式提示和上下文消息。
 - 修改场景：人格、回复风格、安全规则优先级、正式问答回答策略。
 - 风险：安全规则必须优先于角色 `custom_prompt`。
 
 `desktop_pet/ai/context_manager.py`
 
-- 根据配置读取最近聊天上下文，并判断是否达到摘要触发条件。
+- 根据配置读取最近聊天上下文（按正式/非正式模式选择对应 store），并判断是否达到摘要触发条件。
 - 修改场景：上下文长度、摘要轮数策略。
 
 `desktop_pet/ai/summarizer.py`
 
-- 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。
-- 修改场景：摘要结构、记忆提取、失败兜底。
+- 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。`maybe_summarize()` 支持 `force` 参数，为 True 时跳过轮数检查，供时间清理流程使用。
+- 修改场景：摘要结构、记忆提取、失败兜底、时间清理。
 - 风险：摘要在线程中触发，异常不能影响正常聊天。
 
 `desktop_pet/ai/safety_filter.py`
@@ -120,7 +120,7 @@ py main.py
 `desktop_pet/storage/*.py`
 
 - `json_store.py`：JSON 读写基础设施，缺文件时自动创建父目录和默认文件，解析失败时记录日志并尽量返回默认值。
-- `chat_store.py`：保存和读取 `data/chat_history.json`。
+- `chat_store.py`：保存和读取正式/非正式聊天记录（`chat_history_formal.json` / `chat_history_informal.json`），记录 `last_cleaned_at` 时间戳，提供 `should_trigger_time_cleanup()` 判断是否达到清理间隔。
 - `memory_store.py`：保存和合并 `data/memory.json`。
 - `usage_store.py`：每日主动话术和 API 主动次数计数。
 - 修改场景：数据结构、持久化策略、运行时数据兼容。
@@ -142,7 +142,7 @@ py main.py
 
 `desktop_pet/config/app_config.example.json`
 
-- 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）。
+- 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`chat.formal_cleanup_months`（默认 6）和 `chat.informal_cleanup_months`（默认 3）控制时间清理间隔。
 - 修改场景：新增可配置项时必须同步更新此文件，并确认读取路径。
 
 `desktop_pet/config/app_config.json`
@@ -178,7 +178,7 @@ py main.py
 3. `configure_logging()` 创建 `data/app.log`。
 4. 创建 `QApplication`，设置 `setQuitOnLastWindowClosed(False)`。
 5. 创建 `DesktopPetWindow(project_root)`。
-6. 主窗口初始化配置路径、数据路径、存储、AI 客户端、提示词构建器、动画播放器、气泡、输入框、主动行为控制器和自主移动计时器。
+6. 主窗口初始化配置路径、数据路径、正式/非正式双存储与双摘要器、AI 客户端、提示词构建器、动画播放器、气泡、输入框、主动行为控制器、自主移动计时器、时间清理定时器。
 7. 设置透明无边框置顶窗口，恢复上次位置或放到屏幕右下角。
 8. `window.show()` 后进入 `app.exec()`。
 9. `showEvent()` 首次触发 `BehaviorController.start()`，约 1.2 秒后尝试启动问候。
@@ -187,7 +187,7 @@ py main.py
 
 1. 用户左键点击角色，`_open_chat_input()` 显示输入框。
 2. `ChatInput` 提交 `message_submitted` 信号。
-3. `_handle_user_message()` 记录用户交互，写入 `chat_history.json`，显示“思考中”气泡，并切到 `running` 或 `review` 动作。
+3. `_handle_user_message()` 记录用户交互，按当前 `formal_qa_mode` 路由写入 `chat_history_formal.json` 或 `chat_history_informal.json`，显示”思考中”气泡，并切到 `running` 或 `review` 动作。
 4. 如果 `api.enable_chat_api` 为 false，走 `_generate_local_reply()`，直接显示和保存本地回复。
 5. 如果 API 开启但未配置 key，显示失败提示并切到 `failed`。
 6. 如果 API 可用，创建 `QThread` 和 `ChatWorker`。
@@ -437,7 +437,7 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - `UsageStore` 支持 API 主动次数统计，但当前 API 主动说话测试流程未看到每日 API 主动上限的完整接入。是否需要限制待确认。
 - `character/character_profile.py`、`character/emotion_state.py` 当前像是预留结构，主流程未明显依赖。后续是否发展角色状态系统待确认。
 - 当前项目里大量中文注释和字符串在 PowerShell 输出中显示为乱码。需要人工确认这是终端编码显示问题，还是源码文本已经发生 mojibake。若实际 UI 文案乱码，应优先修复编码和文案。
-- `README.md` 和 `xiaohu_codex_package/` 中部分早期任务提到“清空聊天记录”菜单，但当前右键菜单已移除该入口，仅保留底层 `_clear_chat_history()` 方法。是否需要其他入口待确认。
+- `README.md` 和 `xiaohu_codex_package/` 中部分早期任务提到”清空聊天记录”菜单。当前右键菜单通过 `show_clear_menu` 配置控制，提供了”清除非正式聊天记录”和”清理正式问答记录”两个独立入口。
 - 自动移动逻辑当前仍在聊天进行中跳过，测试移动逻辑只避开拖拽和退出。这个差异是否符合产品预期待确认。
 
 ## 12. 文档维护规则
@@ -462,3 +462,8 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-11：新增时段变化自动问候。`BehaviorController` 新增 `period_check_timer`（每 60 秒）和 `_check_period_change()`，跟踪 `_last_time_key` 和 `_last_season_key`。当时段（早/午/晚/深夜）或季节发生变化时，立即弹出新时段对应的话术问候。
 - 2026-05-11：新增主动问候后双击反馈。`BehaviorController` 新增 `is_within_proactive_reply_window()` 判断 60 秒回复窗口、`pick_feedback_line()` 从 `feedback` 分组抽取。`mouseDoubleClickEvent` 在窗口内双点击时优先用 `feedback` 话术，否则回退普通双击回复。`local_lines.json` 新增 `feedback` 分组。
 - 2026-05-11：新增念诗测试功能。右键测试菜单增加"念一首诗"，`_test_poetry()` 从 `poetry` 分组随机抽取并播放 waving 展示。`local_lines.json` 新增 `poetry` 分组。`BehaviorController` 新增 `pick_poetry_line()`。
+- 2026-05-11：聊天输入念诗关键词检测。`_handle_user_message()` 在特定条件下（API 关闭、正式问答关闭、自主移动关闭、窗口置顶关闭）检测念诗相关关键词，命中时直接从本地 `poetry` 话术回复并播放 `running` 动作。
+- 2026-05-11：聊天输入框置顶跟随。`ChatInput` 新增 `set_always_on_top()`，`_open_chat_input()` 和 `_toggle_always_on_top()` 中同步输入框置顶状态与主窗口一致。
+- 2026-05-11：聊天历史分裂为正式/非正式双轨。`ChatStore` 新增 `last_cleaned_at` 字段和时间清理判断方法；`ContextManager` 改为接收两个 store 并按模式选择；`PromptBuilder` 改为接收两个 summary 路径按模式选择；`Summarizer.maybe_summarize()` 新增 `force` 参数；`DesktopPetWindow` 新增双 store/双 summary 实例、`_pending_was_formal` 快照防止路由错乱、`_cleanup_timer` 每小时检查时间清理（正式 6 个月/非正式 3 个月）、`_active_chat_store()` 辅助方法。`app_config.example.json` 新增 `formal_cleanup_months`、`informal_cleanup_months`。
+- 2026-05-11：新增清理聊天记录右键菜单。`app_config.example.json` 新增 `ui.show_clear_menu` 配置（默认 `false`）；`context_menu.py` 新增"清除非正式聊天记录""清理正式问答记录"两个菜单项；`DesktopPetWindow` 新增 `_clear_informal_chat_history()`、`_clear_formal_chat_history()` 方法。
+- 2026-05-11：清理记录前先总结。`_clear_informal_chat_history()` 和 `_clear_formal_chat_history()` 在清空前先调用 `maybe_summarize(force=True)` 生成摘要，再清空消息并更新 `last_cleaned_at`。`app_config.example.json` 新增 `chat.force_summarize_before_clear` 配置（默认 `true`）控制是否强制总结。

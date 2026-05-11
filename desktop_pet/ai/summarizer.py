@@ -41,13 +41,13 @@ class Summarizer:
         """读取当前对话摘要数据。"""
         return load_json(self.summary_path, DEFAULT_SUMMARY)
 
-    def maybe_summarize(self, trigger_rounds: int) -> None:
-        """在达到轮数阈值时尝试生成并保存摘要。"""
+    def maybe_summarize(self, trigger_rounds: int, force: bool = False) -> None:
+        """在达到轮数阈值或强制触发时尝试生成并保存摘要。"""
         history = self.chat_store.all_messages()
         user_rounds = len([item for item in history if item.get("role") == "user"])
         current_summary = self.load_summary()
         covered_count = int(current_summary.get("covered_message_count", 0))
-        if user_rounds < trigger_rounds or len(history) <= covered_count:
+        if not force and (user_rounds < trigger_rounds or len(history) <= covered_count):
             return
 
         try:

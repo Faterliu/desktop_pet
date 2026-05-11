@@ -24,6 +24,7 @@ def build_context_menu(
     formal_answer_display: str,
     always_on_top: bool,
     show_test_menu: bool,
+    show_clear_menu: bool,
     on_set_scale: Callable[[float], None],
     on_custom_scale: Callable[[], None],
     on_toggle_dnd: Callable[[bool], None],
@@ -33,6 +34,8 @@ def build_context_menu(
     on_set_formal_answer_display: Callable[[str], None],
     on_toggle_always_on_top: Callable[[bool], None],
     on_reload_config: Callable[[], None],
+    on_clear_informal_chat: Callable[[], None],
+    on_clear_formal_chat: Callable[[], None],
 ) -> QMenu:
     """构建桌宠右键菜单，并绑定各项操作回调。"""
     menu = QMenu(parent)
@@ -147,6 +150,16 @@ def build_context_menu(
     top_action.setChecked(always_on_top)
     top_action.toggled.connect(on_toggle_always_on_top)
     menu.addAction(top_action)
+
+    if show_clear_menu:
+        menu.addSeparator()
+        clear_informal_action = QAction("清除非正式聊天记录", menu)
+        clear_informal_action.triggered.connect(on_clear_informal_chat)
+        menu.addAction(clear_informal_action)
+
+        clear_formal_action = QAction("清理正式问答记录", menu)
+        clear_formal_action.triggered.connect(on_clear_formal_chat)
+        menu.addAction(clear_formal_action)
 
     reload_action = QAction("重新加载配置", menu)
     reload_action.triggered.connect(on_reload_config)
