@@ -30,3 +30,7 @@
 2. 首次尝试移植程序，记录错误如下：
 （1）安装完Python 3.12后使用错误的pip指令安装requirements.txt，从而使得解释器指向错误的旧解释器。
 （2）后续移植时，使用py -m pip install -r requirements.txt绕过移植设备原本的python解释器。启动使用py main.py。
+
+[v0.1.3] - 20260511
+1. 修复位移测试。
+2. 增加AGENTS.md，为智能体提供快速了解项目的概括文件。

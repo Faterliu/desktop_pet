@@ -339,21 +339,21 @@ class DesktopPetWindow(QWidget):
 
     def _test_move_left(self) -> None:
         """手动测试人物向左平滑移动。"""
-        QTimer.singleShot(0, lambda: self._start_horizontal_move_test(-140))
+        QTimer.singleShot(120, lambda: self._start_horizontal_move_test(-140))
 
     def _test_move_right(self) -> None:
         """手动测试人物向右平滑移动。"""
-        QTimer.singleShot(0, lambda: self._start_horizontal_move_test(140))
+        QTimer.singleShot(120, lambda: self._start_horizontal_move_test(140))
 
     def _test_jump(self) -> None:
         """手动测试人物原地跳跃。"""
-        QTimer.singleShot(0, self._run_jump_test)
+        QTimer.singleShot(120, self._run_jump_test)
 
     def _run_jump_test(self) -> None:
         """在菜单关闭后真正执行一次原地跳跃测试。"""
-        if self._chat_in_progress() or self.dragging:
+        if self._movement_locked():
             return
-        screen = QApplication.primaryScreen()
+        screen = self._current_screen()
         if not screen:
             return
         self._start_jump_auto_move(self.pos(), screen.availableGeometry())
@@ -372,7 +372,7 @@ class DesktopPetWindow(QWidget):
             return
 
         self.sprite_player.set_action("waving")
-        self._display_message("我试着通过 API 主动和你打个招呼。", 2800, "system")
+        self._display_message("我试着努力思考，主动和你打个招呼。", 2800, "system")
         self._start_proactive_api_worker()
 
     def _set_scale(self, scale: float) -> None:
@@ -741,9 +741,9 @@ class DesktopPetWindow(QWidget):
     def _trigger_auto_move(self) -> None:
         """随机触发一次桌宠横向移动动画。"""
         self._refresh_auto_move_timer()
-        if self._chat_in_progress() or self.dragging:
+        if self._chat_in_progress() or self._movement_locked():
             return
-        screen = QApplication.primaryScreen()
+        screen = self._current_screen()
         if not screen:
             return
         available = screen.availableGeometry()
@@ -757,15 +757,16 @@ class DesktopPetWindow(QWidget):
 
     def _start_horizontal_move_test(self, delta_x: int, available: QRect | None = None) -> None:
         """执行一次平滑的左右移动测试或自主移动。"""
-        if self._chat_in_progress() or self.dragging:
+        if self._movement_locked():
             return
 
-        screen = QApplication.primaryScreen()
         if not available:
+            screen = self._current_screen()
             if not screen:
                 return
             available = screen.availableGeometry()
 
+        self._stop_active_move_animation()
         current = self.pos()
         target_x = max(available.left(), min(current.x() + delta_x, available.right() - self.width()))
         target = QPoint(target_x, max(available.top(), min(current.y(), available.bottom() - self.height())))
@@ -785,6 +786,7 @@ class DesktopPetWindow(QWidget):
 
     def _start_jump_auto_move(self, current: QPoint, available: QRect) -> None:
         """执行一次带 jumping 动作的自主跳跃。"""
+        self._stop_active_move_animation()
         jump_height = max(24, self.height() // 2)
         peak_y = max(available.top(), current.y() - jump_height)
         peak = QPoint(current.x(), peak_y)
@@ -804,8 +806,22 @@ class DesktopPetWindow(QWidget):
     def _finish_auto_move(self) -> None:
         """在自主移动结束后恢复 idle 动作并保存位置。"""
         self.sprite_player.set_action("idle")
+        self.move_animation = None
         self._save_window_position()
         self._sync_floating_widgets()
+
+    def _stop_active_move_animation(self) -> None:
+        if self.move_animation and self.move_animation.state() == QPropertyAnimation.State.Running:
+            self.move_animation.stop()
+        self.move_animation = None
+
+    def _movement_locked(self) -> bool:
+        return self.dragging or self.exit_animation_in_progress
+
+    def _current_screen(self):
+        anchor_point = self.frameGeometry().center()
+        screen = QApplication.screenAt(anchor_point)
+        return screen or QApplication.primaryScreen()
 
     def _sync_floating_widgets(self) -> None:
         """让气泡和输入框跟随角色当前位置。"""

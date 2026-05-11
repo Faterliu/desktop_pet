@@ -1,6 +1,7 @@
 # 默认忽略仓库根目录的所有内容，只保留程序本体目录feedback.txt
 *
 !/.gitignore
+!/AGENTS.md
 !/desktop_pet/
 !/desktop_pet/**
 !/README.md
