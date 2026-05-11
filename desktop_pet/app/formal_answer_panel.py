@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from utils.dwm_border import suppress_dwm_border
+
 
 class FormalAnswerPanel(QWidget):
     def __init__(self, title: str = "正式问答") -> None:
@@ -100,6 +102,13 @@ class FormalAnswerPanel(QWidget):
         self._place_near(anchor_rect, offset_index)
         self.show()
         self.raise_()
+
+    def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
+        """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""
+        ok, result = suppress_dwm_border(eventType, message)
+        if ok:
+            return True, result
+        return super().nativeEvent(eventType, message)
 
     def append_entry(self, question: str, answer: str) -> None:
         """把新的正式回答追加到现有面板中，不覆盖旧内容。"""

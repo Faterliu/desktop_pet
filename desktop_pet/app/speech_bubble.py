@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPainterPath
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QRegion
 from PySide6.QtWidgets import QLabel, QWidget
+
+from utils.dwm_border import apply_transparent_window_fixes, suppress_dwm_border
 
 
 class SpeechBubble(QWidget):
@@ -12,10 +14,14 @@ class SpeechBubble(QWidget):
             None,
             Qt.WindowType.Tool
             | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint,
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.NoDropShadowWindowHint,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAutoFillBackground(False)
+        self.setStyleSheet("SpeechBubble { background: transparent; border: none; }")
 
         self.label = QLabel(self)
         self.label.setWordWrap(True)
@@ -41,6 +47,20 @@ class SpeechBubble(QWidget):
         if self.isVisible():
             self.hide()
         self.show()
+        apply_transparent_window_fixes(self)
+
+    def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
+        """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""
+        ok, result = suppress_dwm_border(eventType, message)
+        if ok:
+            return True, result
+        return super().nativeEvent(eventType, message)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """窗口显示后再次应用形状和 Windows 透明窗口修正。"""
+        super().showEvent(event)
+        self._apply_bubble_mask()
+        apply_transparent_window_fixes(self)
 
     def show_message(
         self,
@@ -58,9 +78,12 @@ class SpeechBubble(QWidget):
         self.label.adjustSize()
         height = self.label.height() + 28
         self.resize(width, height)
+        self._apply_bubble_mask()
         self._last_anchor_rect = QRect(anchor_rect)
         self.reposition(anchor_rect)
         self.show()
+        self._apply_bubble_mask()
+        apply_transparent_window_fixes(self)
         self.raise_()
         self.close_timer.start(duration_ms)
 
@@ -84,12 +107,22 @@ class SpeechBubble(QWidget):
         _ = event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        path = self._bubble_path()
+        painter.fillPath(path, QColor("#fff3d7"))
+        painter.setPen(QColor("#d8b27a"))
+        painter.drawPath(path)
+
+    def _bubble_path(self) -> QPainterPath:
+        """返回气泡主体和尾巴的轮廓，供绘制和窗口裁剪共用。"""
         path = QPainterPath()
         path.addRoundedRect(0, 0, self.width(), self.height() - 8, 18, 18)
         path.moveTo(self.width() - 44, self.height() - 8)
         path.lineTo(self.width() - 32, self.height())
         path.lineTo(self.width() - 20, self.height() - 8)
         path.closeSubpath()
-        painter.fillPath(path, QColor("#fff3d7"))
-        painter.setPen(QColor("#d8b27a"))
-        painter.drawPath(path)
+        return path
+
+    def _apply_bubble_mask(self) -> None:
+        """按气泡轮廓裁剪窗口，避免系统沿矩形外接框补边。"""
+        region = QRegion(self._bubble_path().toFillPolygon().toPolygon())
+        self.setMask(region)

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 
 from storage.json_store import load_json
 from utils.logger import get_logger
@@ -154,9 +154,79 @@ class SpritePlayer(QObject):
             for index in range(frame_count):
                 x = index * frame_width
                 y = row * frame_height
-                frames.append(sheet.copy(x, y, frame_width, frame_height))
+                frame = sheet.copy(x, y, frame_width, frame_height)
+                frames.append(self._restore_edge_transparency(frame))
             frames_by_action[action_name] = frames or [self._placeholder_frame()]
         return frames_by_action
+
+    def _restore_edge_transparency(self, pixmap: QPixmap) -> QPixmap:
+        """兜底修复被读成白底的素材帧，只移除从画面边缘连通的浅色背景。"""
+        image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        if self._edge_has_transparency(image):
+            return pixmap
+
+        width = image.width()
+        height = image.height()
+        visited = bytearray(width * height)
+        stack: list[tuple[int, int]] = []
+
+        for x in range(width):
+            stack.append((x, 0))
+            stack.append((x, height - 1))
+        for y in range(height):
+            stack.append((0, y))
+            stack.append((width - 1, y))
+
+        changed = False
+        while stack:
+            x, y = stack.pop()
+            if x < 0 or y < 0 or x >= width or y >= height:
+                continue
+            index = y * width + x
+            if visited[index]:
+                continue
+            visited[index] = 1
+
+            color = image.pixelColor(x, y)
+            if not self._is_edge_background_color(color):
+                continue
+
+            color.setAlpha(0)
+            image.setPixelColor(x, y, color)
+            changed = True
+            stack.append((x + 1, y))
+            stack.append((x - 1, y))
+            stack.append((x, y + 1))
+            stack.append((x, y - 1))
+
+        if not changed:
+            return pixmap
+        return QPixmap.fromImage(image)
+
+    def _edge_has_transparency(self, image: QImage) -> bool:
+        """检查帧边缘是否已经存在透明像素。"""
+        width = image.width()
+        height = image.height()
+        for x in range(width):
+            if image.pixelColor(x, 0).alpha() < 16:
+                return True
+            if image.pixelColor(x, height - 1).alpha() < 16:
+                return True
+        for y in range(height):
+            if image.pixelColor(0, y).alpha() < 16:
+                return True
+            if image.pixelColor(width - 1, y).alpha() < 16:
+                return True
+        return False
+
+    def _is_edge_background_color(self, color: QColor) -> bool:
+        """判断一个边缘连通像素是否属于需要被还原为透明的浅色背景。"""
+        if color.alpha() < 16:
+            return True
+        red = color.red()
+        green = color.green()
+        blue = color.blue()
+        return min(red, green, blue) >= 230 and max(red, green, blue) - min(red, green, blue) <= 32
 
     def _placeholder_actions(self) -> dict[str, list[QPixmap]]:
         """在素材缺失时，为每个动作生成占位帧。"""

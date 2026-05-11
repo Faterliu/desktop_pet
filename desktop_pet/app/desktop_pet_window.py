@@ -16,7 +16,7 @@ from PySide6.QtCore import (
     Signal,
     QObject,
 )
-from PySide6.QtGui import QAction, QCloseEvent, QMouseEvent
+from PySide6.QtGui import QAction, QCloseEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QWidget
 
 from ai.context_manager import ContextManager
@@ -33,6 +33,7 @@ from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.memory_store import MemoryStore
 from storage.usage_store import UsageStore
+from utils.dwm_border import apply_transparent_window_fixes, suppress_dwm_border
 from utils.logger import get_logger
 
 
@@ -208,12 +209,18 @@ class DesktopPetWindow(QWidget):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, False)
+        self.setAutoFillBackground(False)
+        self.setStyleSheet("DesktopPetWindow { background: transparent; border: none; }")
 
     def _setup_ui(self) -> None:
         """创建用于显示精灵帧的标签并设置初始尺寸。"""
         self.sprite_label = QLabel(self)
         self.sprite_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.sprite_label.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.sprite_label.setAutoFillBackground(False)
+        self.sprite_label.setStyleSheet("QLabel { background: transparent; border: none; }")
         self.sprite_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         width, height = self.sprite_player.base_size()
         self.resize(width, height)
@@ -231,6 +238,17 @@ class DesktopPetWindow(QWidget):
         if not self.behavior_started:
             self.behavior_started = True
             self.behavior_controller.start()
+        apply_transparent_window_fixes(self)
+        pixmap = self.sprite_label.pixmap()
+        if pixmap:
+            self._apply_sprite_window_mask(pixmap)
+
+    def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
+        """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""
+        ok, result = suppress_dwm_border(eventType, message)
+        if ok:
+            return True, result
+        return super().nativeEvent(eventType, message)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """处理鼠标按下事件，用于拖拽和右键菜单。"""
@@ -777,7 +795,18 @@ class DesktopPetWindow(QWidget):
             return
         self.resize(pixmap.width(), pixmap.height())
         self.sprite_label.setGeometry(0, 0, pixmap.width(), pixmap.height())
+        self._apply_sprite_window_mask(pixmap)
         self._sync_floating_widgets()
+
+    def _apply_sprite_window_mask(self, pixmap: QPixmap) -> None:
+        """按精灵帧的透明区域裁剪窗口，避免系统沿矩形外接框绘制边框。"""
+        mask = pixmap.mask()
+        if mask.isNull():
+            self.clearMask()
+            self.sprite_label.clearMask()
+            return
+        self.setMask(mask)
+        self.sprite_label.setMask(mask)
 
     def _restore_position(self) -> None:
         """恢复上次窗口位置；首次启动则放到屏幕右下角。"""
