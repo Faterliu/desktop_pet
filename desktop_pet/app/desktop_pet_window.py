@@ -144,6 +144,13 @@ class DesktopPetWindow(QWidget):
         self.behavior_started = False
         self.exit_animation_in_progress = False
         self.allow_immediate_close = False
+        self._suppress_click = False
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.timeout.connect(self._open_chat_input)
+        self._waiting_timer = QTimer(self)
+        self._waiting_timer.setSingleShot(True)
+        self._waiting_timer.timeout.connect(self._show_waiting_prompt)
         self.formal_answer_panels: list[FormalAnswerPanel] = []
         self.active_formal_answer_panel: FormalAnswerPanel | None = None
         self.pending_formal_question = ""
@@ -253,13 +260,31 @@ class DesktopPetWindow(QWidget):
         self._sync_floating_widgets()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """处理鼠标释放事件，区分点击聊天和拖拽结束。"""
+        """处理鼠标释放事件，区分点击聊天和拖拽结束；双击通过计时器抑制单击。"""
         if event.button() == Qt.MouseButton.LeftButton:
             if self.dragging:
                 self._save_window_position()
             elif self._ui_config().get("click_to_chat", True):
-                self._open_chat_input()
+                if self._suppress_click:
+                    self._suppress_click = False
+                else:
+                    self._click_timer.start(QApplication.doubleClickInterval())
         super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """双击人物视为回复/打招呼；若在主动问候后窗口内则回复 feedback 话术。"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._click_timer.stop()
+            self._suppress_click = True
+            if self.behavior_controller.is_within_proactive_reply_window():
+                reply = self.behavior_controller.pick_feedback_line()
+            else:
+                reply = self.behavior_controller.pick_reply_line()
+            if reply:
+                self.behavior_controller.notify_user_interaction()
+                self.sprite_player.set_action("waving")
+                self._display_message(reply, 7000, "system")
+        super().mouseDoubleClickEvent(event)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """关闭窗口前保存位置并安全回收后台线程。"""
@@ -289,6 +314,7 @@ class DesktopPetWindow(QWidget):
             on_test_jump=self._test_jump,
             on_test_proactive_speak=self._test_proactive_speak_once,
             on_test_api_proactive_speak=self._test_api_proactive_speak_once,
+            on_test_poetry=self._test_poetry,
             on_request_exit=self.request_exit,
             current_scale=self._ui_scale(),
             do_not_disturb=bool(self._behavior_config().get("do_not_disturb", False)),
@@ -303,7 +329,10 @@ class DesktopPetWindow(QWidget):
             on_toggle_api_chat=self._toggle_api_chat,
             on_toggle_formal_qa_mode=self._toggle_formal_qa_mode,
             on_set_formal_answer_display=self._set_formal_answer_display,
+            on_toggle_always_on_top=self._toggle_always_on_top,
             on_reload_config=self._reload_config,
+            always_on_top=bool(self._ui_config().get("always_on_top", True)),
+            show_test_menu=bool(self._ui_config().get("show_test_menu", False)),
         )
         menu.exec(global_pos)
 
@@ -315,15 +344,19 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action(action_name, fallback_action="idle", force_single_cycle=True)
 
     def request_exit(self) -> None:
-        """请求优雅退出：先播放 waving，再真正关闭窗口。"""
+        """请求优雅退出：播放 waving 并显示道别语，再关闭窗口。"""
         if self.allow_immediate_close or self.exit_animation_in_progress:
             return
 
         self.exit_animation_in_progress = True
-        self.bubble.hide()
         self.chat_input.hide()
+        farewell = self.behavior_controller.pick_farewell_line()
         self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
         duration_ms = self.sprite_player.action_duration_ms("waving", force_single_cycle=True)
+        if farewell:
+            self.bubble.show_message(farewell, self.geometry(), duration_ms + 400, "system")
+        else:
+            self.bubble.hide()
         QTimer.singleShot(duration_ms + 50, self._finalize_exit)
 
     def _finalize_exit(self) -> None:
@@ -372,8 +405,15 @@ class DesktopPetWindow(QWidget):
             return
 
         self.sprite_player.set_action("waving")
-        self._display_message("我试着努力思考，主动和你打个招呼。", 2800, "system")
+        self._display_message("我在努力思考，想要和你打个招呼。", 2800, "system")
         self._start_proactive_api_worker()
+
+    def _test_poetry(self) -> None:
+        """念一首诗，将换行诗文字展示为气泡消息。"""
+        line = self.behavior_controller.pick_poetry_line()
+        if line:
+            self.sprite_player.set_action("running", force_single_cycle=True)
+            self._display_message(line, 12000, "system")
 
     def _set_scale(self, scale: float) -> None:
         """设置人物显示缩放比例并持久化到配置文件。"""
@@ -412,7 +452,7 @@ class DesktopPetWindow(QWidget):
         self.app_config.setdefault("ui", {})["enable_free_move"] = enabled
         self._save_app_config()
         self._refresh_auto_move_timer()
-        self._display_message("自主移动已开启。" if enabled else "自主移动已关闭。", 3000, "system")
+        self._display_message("小胡跑起来了！" if enabled else "我不会乱动啦。", 3000, "system")
 
     def _toggle_api_chat(self, enabled: bool) -> None:
         """切换用户聊天时是否调用外部 API。"""
@@ -443,6 +483,20 @@ class DesktopPetWindow(QWidget):
             else "正式问答将把新回答追加到同一个文本框。"
         )
         self._display_message(message, 3600, "system")
+
+    def _toggle_always_on_top(self, enabled: bool) -> None:
+        """切换窗口置顶状态，开启时回复 return_after_idle，关闭时回复 ignored。"""
+        self._ui_config()["always_on_top"] = enabled
+        self._save_app_config()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
+        self.show()
+        self.chat_input.set_always_on_top(enabled)
+        if enabled:
+            reply = self.behavior_controller.pick_return_after_idle_line()
+        else:
+            reply = self.behavior_controller.pick_ignored_line()
+        if reply:
+            self._display_message(reply, 5000, "system")
 
     def _clear_chat_history(self) -> None:
         """清空聊天历史和对应摘要数据。"""
@@ -477,14 +531,34 @@ class DesktopPetWindow(QWidget):
             self._display_message("我还在想上一条呢，等我一下下。", 3200, "system")
             return
         self.behavior_controller.notify_user_interaction()
+        self.chat_input.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
         self.chat_input.show_near(self.geometry())
+        self._waiting_timer.start(30_000)
+
+    _poetry_keywords = {"诗", "诗歌", "写诗", "念诗", "吟诗", "背诗", "来首", "作诗", "赋诗"}
 
     def _handle_user_message(self, message: str) -> None:
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
+        self._waiting_timer.stop()
         self.behavior_controller.notify_user_interaction()
         self.chat_store.append_message("user", message)
         if self._formal_qa_enabled():
             self.pending_formal_question = message
+
+        if (
+            self._is_poetry_request(message)
+            and not self._api_chat_enabled()
+            and not self._formal_qa_enabled()
+            and not self._ui_config().get("enable_free_move", False)
+            and not self._ui_config().get("always_on_top", True)
+        ):
+            poetry_line = self.behavior_controller.pick_poetry_line()
+            if poetry_line:
+                self.chat_store.append_message("assistant", poetry_line)
+                self.sprite_player.set_action("running", force_single_cycle=True)
+                self._show_answer_output(poetry_line, source="assistant", question=message)
+                return
+
         self._display_message("我收到啦，让我想一想。", 3200, "system")
         self.sprite_player.set_action("review" if len(message) > 24 else "running")
 
@@ -503,6 +577,10 @@ class DesktopPetWindow(QWidget):
             return
 
         self._start_chat_worker(message)
+
+    def _is_poetry_request(self, message: str) -> bool:
+        """检查用户消息是否包含念诗/写诗相关的关键词。"""
+        return any(kw in message for kw in self._poetry_keywords)
 
     def _generate_local_reply(self, message: str, formal_qa_mode: bool = False) -> str:
         """在本地模式下按当前问答风格生成回复。"""
@@ -625,8 +703,18 @@ class DesktopPetWindow(QWidget):
 
     def _display_message(self, text: str, duration_ms: int, source: str) -> None:
         """通过气泡组件显示一条消息。"""
+        self.bubble.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
         self.bubble.show_message(text, self.geometry(), duration_ms, source)
         self._sync_floating_widgets()
+
+    def _show_waiting_prompt(self) -> None:
+        """聊天输入框打开后长时间未回复时，显示 waiting 话术并重启计时器。"""
+        if not self.chat_input.isVisible():
+            return
+        reply = self.behavior_controller.pick_waiting_line()
+        if reply:
+            self._display_message(reply, 6000, "system")
+        self._waiting_timer.start(25_000)
 
     def _show_answer_output(self, text: str, source: str, question: str = "") -> None:
         """根据当前模式决定用气泡还是正式问答面板展示回答。"""

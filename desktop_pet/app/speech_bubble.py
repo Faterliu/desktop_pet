@@ -30,6 +30,17 @@ class SpeechBubble(QWidget):
 
         self.source = "system"
         self._last_anchor_rect = QRect()
+        self._always_on_top = True
+
+    def set_always_on_top(self, enabled: bool) -> None:
+        """同步气泡窗口的置顶状态与主窗口一致。"""
+        if self._always_on_top == enabled:
+            return
+        self._always_on_top = enabled
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
+        if self.isVisible():
+            self.hide()
+        self.show()
 
     def show_message(
         self,

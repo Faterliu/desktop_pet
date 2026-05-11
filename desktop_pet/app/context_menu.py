@@ -14,6 +14,7 @@ def build_context_menu(
     on_test_jump: Callable[[], None],
     on_test_proactive_speak: Callable[[], None],
     on_test_api_proactive_speak: Callable[[], None],
+    on_test_poetry: Callable[[], None],
     on_request_exit: Callable[[], None],
     current_scale: float,
     do_not_disturb: bool,
@@ -21,6 +22,8 @@ def build_context_menu(
     api_chat_enabled: bool,
     formal_qa_mode: bool,
     formal_answer_display: str,
+    always_on_top: bool,
+    show_test_menu: bool,
     on_set_scale: Callable[[float], None],
     on_custom_scale: Callable[[], None],
     on_toggle_dnd: Callable[[bool], None],
@@ -28,48 +31,57 @@ def build_context_menu(
     on_toggle_api_chat: Callable[[bool], None],
     on_toggle_formal_qa_mode: Callable[[bool], None],
     on_set_formal_answer_display: Callable[[str], None],
+    on_toggle_always_on_top: Callable[[bool], None],
     on_reload_config: Callable[[], None],
 ) -> QMenu:
     """构建桌宠右键菜单，并绑定各项操作回调。"""
     menu = QMenu(parent)
-    test_menu = menu.addMenu("测试")
 
-    for action_name, title in [
-        ("idle", "测试动作：idle"),
-        ("waving", "测试动作：waving"),
-        ("failed", "测试动作：failed"),
-        ("review", "测试动作：review"),
-        ("running", "测试动作：running"),
-    ]:
-        action = QAction(title, test_menu)
-        action.triggered.connect(lambda checked=False, name=action_name: test_action_handler(name))
-        test_menu.addAction(action)
+    if show_test_menu:
+        test_menu = menu.addMenu("测试")
 
-    test_menu.addSeparator()
+        for action_name, title in [
+            ("idle", "测试动作：idle"),
+            ("waving", "测试动作：waving"),
+            ("failed", "测试动作：failed"),
+            ("review", "测试动作：review"),
+            ("running", "测试动作：running"),
+        ]:
+            action = QAction(title, test_menu)
+            action.triggered.connect(lambda checked=False, name=action_name: test_action_handler(name))
+            test_menu.addAction(action)
 
-    move_left_action = QAction("测试左移", test_menu)
-    move_left_action.triggered.connect(on_test_move_left)
-    test_menu.addAction(move_left_action)
+        test_menu.addSeparator()
 
-    move_right_action = QAction("测试右移", test_menu)
-    move_right_action.triggered.connect(on_test_move_right)
-    test_menu.addAction(move_right_action)
+        move_left_action = QAction("测试左移", test_menu)
+        move_left_action.triggered.connect(on_test_move_left)
+        test_menu.addAction(move_left_action)
 
-    jump_action = QAction("测试跳跃", test_menu)
-    jump_action.triggered.connect(on_test_jump)
-    test_menu.addAction(jump_action)
+        move_right_action = QAction("测试右移", test_menu)
+        move_right_action.triggered.connect(on_test_move_right)
+        test_menu.addAction(move_right_action)
 
-    test_menu.addSeparator()
+        jump_action = QAction("测试跳跃", test_menu)
+        jump_action.triggered.connect(on_test_jump)
+        test_menu.addAction(jump_action)
 
-    proactive_test_action = QAction("测试主动说话一次", test_menu)
-    proactive_test_action.triggered.connect(on_test_proactive_speak)
-    test_menu.addAction(proactive_test_action)
+        test_menu.addSeparator()
 
-    api_proactive_test_action = QAction("测试 API 主动说话一次", test_menu)
-    api_proactive_test_action.triggered.connect(on_test_api_proactive_speak)
-    test_menu.addAction(api_proactive_test_action)
+        proactive_test_action = QAction("测试主动说话一次", test_menu)
+        proactive_test_action.triggered.connect(on_test_proactive_speak)
+        test_menu.addAction(proactive_test_action)
 
-    menu.addSeparator()
+        api_proactive_test_action = QAction("测试 API 主动说话一次", test_menu)
+        api_proactive_test_action.triggered.connect(on_test_api_proactive_speak)
+        test_menu.addAction(api_proactive_test_action)
+
+        test_menu.addSeparator()
+
+        poetry_action = QAction("念一首诗", test_menu)
+        poetry_action.triggered.connect(on_test_poetry)
+        test_menu.addAction(poetry_action)
+
+        menu.addSeparator()
 
     scale_menu = menu.addMenu("人物缩放")
     scale_group = QActionGroup(scale_menu)
@@ -127,6 +139,14 @@ def build_context_menu(
         )
         formal_display_group.addAction(action)
         formal_display_menu.addAction(action)
+
+    menu.addSeparator()
+
+    top_action = QAction("窗口置顶", menu)
+    top_action.setCheckable(True)
+    top_action.setChecked(always_on_top)
+    top_action.toggled.connect(on_toggle_always_on_top)
+    menu.addAction(top_action)
 
     reload_action = QAction("重新加载配置", menu)
     reload_action.triggered.connect(on_reload_config)

@@ -50,13 +50,13 @@ py main.py
 
 `desktop_pet/app/desktop_pet_window.py`
 
-- 核心协调器。负责窗口属性、鼠标事件、右键菜单、聊天流程、后台线程、正式问答面板、自动移动、位置恢复和退出动画。
+- 核心协调器。负责窗口属性、鼠标事件（单击聊天、双击回复/打招呼、拖拽移动、右键菜单，含置顶开关）、聊天流程、后台线程、正式问答面板、自动移动、位置恢复和退出动画（退出时播放 waving 并显示 `farewell` 道别气泡）。
 - 修改场景：几乎所有用户可见行为的入口都在这里接线。
-- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`。
+- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_click_timer`、`_suppress_click`、`_waiting_timer`。
 
 `desktop_pet/app/context_menu.py`
 
-- 构建右键菜单，包括测试菜单、人物缩放、免打扰、自主移动、聊天 API 开关、正式问答模式、重新加载配置和退出。
+- 构建右键菜单，包括测试菜单（由 `ui.show_test_menu` 控制，默认关闭）、人物缩放、免打扰、窗口置顶、自主移动、聊天 API 开关、正式问答模式、重新加载配置和退出。
 - 修改场景：新增菜单项或调整菜单可见入口。
 - 注意：菜单回调由 `DesktopPetWindow._show_context_menu()` 注入，新增菜单通常要同步改两处。
 
@@ -67,7 +67,7 @@ py main.py
 
 `desktop_pet/app/speech_bubble.py`
 
-- 短消息气泡，自动关闭，跟随角色位置。
+- 短消息气泡，自动关闭，跟随角色位置。`show_message()` 前由主窗口调用 `set_always_on_top()` 同步置顶状态。
 - 修改场景：本地提示、普通聊天回复、系统提示的展示样式和定位。
 
 `desktop_pet/app/formal_answer_panel.py`
@@ -127,12 +127,22 @@ py main.py
 
 `desktop_pet/character/behavior_controller.py`
 
-- 管理启动问候和空闲主动话术。用 `QTimer` 每 60 秒检查，受免打扰、每日上限、空闲时间和等待用户回复状态约束。
-- 修改场景：主动行为频率、话术分组、免打扰逻辑。
+- 管理启动问候、空闲主动话术和时段变化检测。用 `QTimer` 每 60 秒检查空闲和时段，受免打扰、每日上限、空闲时间和等待用户回复状态约束。
+- `_startup_greeting()` 优先使用时段问候（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），对应分组为空时回退到 `startup`。每 5 天周期的第一天额外优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`）。
+- `_maybe_idle_prompt()` 和 `trigger_test_speak()` 的话术池会混入当前时段分组。
+- `_check_period_change()` 由 `period_check_timer` 每 60 秒驱动，检测时段或季节是否变化，变化时立即弹出新时段问候。
+- `pick_farewell_line()` 从 `farewell` 分组随机抽取道别语，供退出流程使用。
+- `pick_reply_line()` 从 `break_reminder`/`comfort`/`encourage` 三组随机选取回应话术，供普通双击回复使用。
+- `pick_feedback_line()` 从 `feedback` 分组随机选取，用于用户在主动问候窗口内双击回应。
+- `is_within_proactive_reply_window(window_seconds=60)` 判断当前是否在上次主动问候后 60 秒内。
+- `pick_ignored_line()` 从 `ignored` 分组随机选取话术，供关闭置顶时使用。
+- `pick_return_after_idle_line()` 从 `return_after_idle` 分组随机选取话术，供开启置顶时使用。
+- `pick_waiting_line()` 从 `waiting` 分组随机选取等待提示话术，供聊天输入框长时间无输入时使用。
+- 修改场景：主动行为频率、话术分组、免打扰逻辑、时段判断规则。
 
 `desktop_pet/config/app_config.example.json`
 
-- 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。
+- 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）。
 - 修改场景：新增可配置项时必须同步更新此文件，并确认读取路径。
 
 `desktop_pet/config/app_config.json`
@@ -145,7 +155,7 @@ py main.py
 
 `desktop_pet/config/local_lines.json`
 
-- 本地主动话术和提示文案。`BehaviorController` 当前主要使用 `startup`、`idle`、`quiet`、`encourage`。
+- 本地主动话术和提示文案。`BehaviorController` 当前主要使用 `startup`、`idle`、`quiet`、`encourage`，以及时段分组 `greeting_morning`、`greeting_noon`、`greeting_evening`、`sleepy`，季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter`。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。
 
 `desktop_pet/config/safety_rules.json`
 
@@ -195,8 +205,8 @@ py main.py
 主动行为流：
 
 1. `BehaviorController` 启动后设置空闲检查计时器，每 60 秒检查一次。
-2. 启动问候受 `do_not_disturb`、`startup_greeting`、每日本地话术上限约束。
-3. 空闲主动话术受 `proactive_chat`、`min_proactive_interval_minutes`、`awaiting_user_reply`、`last_proactive_at` 和每日上限约束。
+2. 启动问候受 `do_not_disturb`、`startup_greeting`、每日本地话术上限约束，优先使用当前时段对应的问候分组（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），该分组为空时回退到 `startup`。
+3. 空闲主动话术受 `proactive_chat`、`min_proactive_interval_minutes`、`awaiting_user_reply`、`last_proactive_at` 和每日上限约束，话术池从 `idle`/`quiet`/`encourage` 加当前时段分组中随机选取。
 4. 触发后发出 `speak_requested(text, duration_ms, action_name)`。
 5. `DesktopPetWindow._handle_behavior_speak()` 在未聊天且输入框不可见时显示气泡并切动作。
 
@@ -442,3 +452,13 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 ## 文档同步记录
 
 - 2026-05-11：新建 `AGENTS.md`。基于当前项目入口、配置、依赖、需求文档、核心业务目录和现有代码梳理项目结构、运行流程、模块关系、常见修改路径、风险区域、常用命令、依赖服务和待确认问题；同时在 `.gitignore` 中放行根目录 `AGENTS.md`，确保该智能体文档可随程序本体提交。本次未改变程序代码。
+- 2026-05-11：`BehaviorController` 新增 `_time_greeting_key()` 根据本地时间返回时段问候分组（早/午/晚/深夜），启动问候优先时段话术、空闲和测试话术池混入时段分组；新增 `pick_farewell_line()` 退出时从 `farewell` 组抽取道别语。`DesktopPetWindow.request_exit()` 退出时播放 waving 并显示道别气泡。同步更新 `AGENTS.md` 中 behavior_controller、local_lines、主动行为流、DesktopPetWindow 描述。
+- 2026-05-11：新增双击识别功能。`DesktopPetWindow` 新增 `mouseDoubleClickEvent`，双击人物触发 `pick_reply_line()` 从 `break_reminder`/`comfort`/`encourage` 随机抽取话术并播放 waving；`mouseReleaseEvent` 改用 `_click_timer` 延迟区分单击与双击，避免双击时误开聊天输入框。`BehaviorController` 新增 `pick_reply_line()`。
+- 2026-05-11：新增季节周期问候。`BehaviorController` 新增 `_season_key()` 按月份划分四季、`_is_cycle_start()` 按每年第几天判断 5 天周期首日。`_startup_greeting()` 在周期首日优先季节问候，其次时段问候，最后回退 `startup`。`local_lines.json` 新增 `greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter` 四组季节话术。
+- 2026-05-11：新增窗口置顶开关。右键菜单增加"窗口置顶"可勾选项，`_toggle_always_on_top()` 控制 `WindowStaysOnTopHint` 并持久化到 `ui.always_on_top`。关闭置顶时从 `return_after_idle` 分组随机抽取话术展示。`BehaviorController` 新增 `pick_ignored_line()`。
+- 2026-05-11：新增聊天输入等待提示。`DesktopPetWindow` 新增 `_waiting_timer`，打开输入框 30 秒后无提交则从 `waiting` 分组抽取话术展示，之后每 25 秒重复提醒；用户提交时停止计时器。`BehaviorController` 新增 `pick_waiting_line()`。
+- 2026-05-11：新增测试菜单显隐配置。`app_config.example.json` 的 `ui` 节新增 `show_test_menu` 项（默认 `false`）。`context_menu.py` 的 `build_context_menu()` 新增同名参数，整个测试子菜单在条件不满足时跳过构建。`DesktopPetWindow._show_context_menu()` 从配置读取并传入。
+- 2026-05-11：修复窗口置顶两个问题。(1) `SpeechBubble` 新增 `set_always_on_top()`，`_display_message()` 每次显示前同步主窗口置顶状态，消除气泡不受置顶开关控制的问题。(2) 纠正话术对应关系：`_toggle_always_on_top()` 开启置顶时调用 `pick_return_after_idle_line()` 回复 `return_after_idle`，关闭时调用 `pick_ignored_line()` 回复 `ignored`。
+- 2026-05-11：新增时段变化自动问候。`BehaviorController` 新增 `period_check_timer`（每 60 秒）和 `_check_period_change()`，跟踪 `_last_time_key` 和 `_last_season_key`。当时段（早/午/晚/深夜）或季节发生变化时，立即弹出新时段对应的话术问候。
+- 2026-05-11：新增主动问候后双击反馈。`BehaviorController` 新增 `is_within_proactive_reply_window()` 判断 60 秒回复窗口、`pick_feedback_line()` 从 `feedback` 分组抽取。`mouseDoubleClickEvent` 在窗口内双点击时优先用 `feedback` 话术，否则回退普通双击回复。`local_lines.json` 新增 `feedback` 分组。
+- 2026-05-11：新增念诗测试功能。右键测试菜单增加"念一首诗"，`_test_poetry()` 从 `poetry` 分组随机抽取并播放 waving 展示。`local_lines.json` 新增 `poetry` 分组。`BehaviorController` 新增 `pick_poetry_line()`。

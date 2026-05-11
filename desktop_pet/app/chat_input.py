@@ -44,6 +44,17 @@ class ChatInput(QWidget):
         layout.addWidget(self.close_button)
         self.resize(300, 52)
         self._last_anchor_rect = QRect()
+        self._always_on_top = True
+
+    def set_always_on_top(self, enabled: bool) -> None:
+        """同步输入框窗口的置顶状态与主窗口一致。"""
+        if self._always_on_top == enabled:
+            return
+        self._always_on_top = enabled
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
+        if self.isVisible():
+            self.hide()
+        self.show()
 
     def show_near(self, anchor_rect: QRect) -> None:
         """把输入框显示在宠物附近，并聚焦到文本框。"""
@@ -62,8 +73,8 @@ class ChatInput(QWidget):
         if self._last_anchor_rect.isNull():
             return
 
-        x = self._last_anchor_rect.x() + self._last_anchor_rect.width() + 10
-        y = self._last_anchor_rect.y() + self._last_anchor_rect.height() // 3
+        x = self._last_anchor_rect.x() + (self._last_anchor_rect.width() - self.width()) // 2
+        y = self._last_anchor_rect.y() + self._last_anchor_rect.height() + 4
         self.move(x, max(0, y))
 
     def _submit(self) -> None:
