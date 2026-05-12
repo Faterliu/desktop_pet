@@ -14,6 +14,7 @@ from utils.time_utils import now_local
 
 class BehaviorController(QObject):
     speak_requested = Signal(str, int, str)
+    knowledge_speak_requested = Signal()
 
     def __init__(
         self,
@@ -28,10 +29,13 @@ class BehaviorController(QObject):
         self.local_lines_path = Path(local_lines_path)
         self.usage_store = usage_store
         self.config_loader = config_loader
+        self.memory_path = self.app_config_path.parent.parent / "data" / "memory.json"
 
         self.last_user_interaction = now_local()
         self.last_proactive_at = None
         self.awaiting_user_reply = False
+        self._consecutive_unanswered = 0
+        self._last_proactive_type = ""
         self._last_time_key = self._time_greeting_key()
         self._last_season_key = self._season_key()
 
@@ -51,18 +55,42 @@ class BehaviorController(QObject):
         """重置行为状态，供重新加载配置后继续使用。"""
         self.last_user_interaction = now_local()
         self.awaiting_user_reply = False
+        self._consecutive_unanswered = 0
+        self._last_proactive_type = ""
         self._last_time_key = self._time_greeting_key()
         self._last_season_key = self._season_key()
 
     def notify_user_interaction(self) -> None:
-        """记录用户刚刚发生过交互，并取消等待回复状态。"""
+        """记录用户刚刚发生过交互，取消等待回复状态，重置连续未回应计数。"""
         self.last_user_interaction = now_local()
         self.awaiting_user_reply = False
+        self._consecutive_unanswered = 0
 
-    def notify_proactive_shown(self) -> None:
-        """记录刚展示过主动消息，并标记等待用户回应。"""
+    def notify_proactive_shown(self, proactive_type: str = "regular_greeting") -> None:
+        """记录刚展示过主动消息、类型，并标记等待用户回应。"""
         self.last_proactive_at = now_local()
         self.awaiting_user_reply = True
+        self._last_proactive_type = proactive_type
+
+    def notify_proactive_response(self) -> None:
+        """用户回应主动问候后，调整对应问候类型的比例。"""
+        if self._last_proactive_type:
+            self._adjust_ratio(self._last_proactive_type)
+
+    def _proactive_ratio(self) -> dict[str, float]:
+        """读取当前主动问候内容比例配置。"""
+        config = self.config_loader()
+        default = {"extra_knowledge": 0.5, "regular_greeting": 0.5}
+        return config.setdefault("proactive_content_ratio", default)
+
+    def _adjust_ratio(self, responded_type: str) -> None:
+        """用户回应对应类型后增加该类型比例 0.02，降低互斥类型 0.01。"""
+        config = self.config_loader()
+        ratio = self._proactive_ratio()
+        other_type = "extra_knowledge" if responded_type == "regular_greeting" else "regular_greeting"
+        ratio[responded_type] = min(0.7, round(ratio.get(responded_type, 0.5) + 0.02, 4))
+        ratio[other_type] = max(0.3, round(ratio.get(other_type, 0.5) - 0.01, 4))
+        config["proactive_content_ratio"] = ratio
 
     def set_do_not_disturb(self, enabled: bool) -> None:
         """更新内存中的免打扰开关状态。"""
@@ -91,6 +119,27 @@ class BehaviorController(QObject):
             self.notify_proactive_shown()
             self.speak_requested.emit(line, 7000, "waving")
 
+    def _dynamic_proactive_interval_minutes(self) -> int:
+        """根据连续未回应次数返回动态主动问候间隔（分钟）。"""
+        if self._consecutive_unanswered <= 1:
+            return 15
+        if self._consecutive_unanswered == 2:
+            return 30
+        if self._consecutive_unanswered == 3:
+            return random.randint(30, 60)
+        return 60
+
+    def _has_memory_content(self) -> bool:
+        """检查 memory.json 中是否含有对用户有用的记忆信息。"""
+        memory = load_json(self.memory_path, {})
+        user_profile = memory.get("user_profile", {})
+        work_study = memory.get("work_study", {})
+        if user_profile.get("preferences") or user_profile.get("important_personal_notes"):
+            return True
+        if work_study.get("current_learning_topics") or work_study.get("current_projects"):
+            return True
+        return False
+
     def _maybe_idle_prompt(self) -> None:
         """在用户空闲足够久时尝试发送一条主动陪伴消息。"""
         config = self.config_loader()
@@ -102,13 +151,22 @@ class BehaviorController(QObject):
         if not self.usage_store.can_use_local(max_daily):
             return
 
-        min_minutes = int(behavior.get("min_proactive_interval_minutes", 20))
+        interval_minutes = self._dynamic_proactive_interval_minutes()
         now = now_local()
-        if now - self.last_user_interaction < timedelta(minutes=min_minutes):
+        if now - self.last_user_interaction < timedelta(minutes=interval_minutes):
             return
+        if self.last_proactive_at and now - self.last_proactive_at < timedelta(minutes=interval_minutes):
+            return
+
         if self.awaiting_user_reply:
-            return
-        if self.last_proactive_at and now - self.last_proactive_at < timedelta(minutes=min_minutes):
+            self._consecutive_unanswered += 1
+
+        # 根据比例选择问候类型
+        ratio = self._proactive_ratio()
+        extra_weight = ratio.get("extra_knowledge", 0.5)
+        if self._has_memory_content() and random.random() < extra_weight:
+            self.notify_proactive_shown("extra_knowledge")
+            self.knowledge_speak_requested.emit()
             return
 
         line_types = ["idle", "quiet", "encourage"]
@@ -120,7 +178,7 @@ class BehaviorController(QObject):
         if not line:
             return
         self.usage_store.increment_local_line()
-        self.notify_proactive_shown()
+        self.notify_proactive_shown("regular_greeting")
         self.speak_requested.emit(line, 6000, "waving")
 
     def _check_period_change(self) -> None:
@@ -160,6 +218,31 @@ class BehaviorController(QObject):
         self.speak_requested.emit(line, 6000, "waving")
         return True
 
+    def trigger_test_idle_prompt(self) -> str:
+        """立即触发一次空闲问候逻辑，绕过时间间隔限制，返回触发的问候类型。"""
+        saved_interaction = self.last_user_interaction
+        saved_proactive = self.last_proactive_at
+        saved_type = self._last_proactive_type
+        long_ago = now_local() - timedelta(hours=24)
+        self.last_user_interaction = long_ago
+        self.last_proactive_at = None
+        self._last_proactive_type = ""
+        try:
+            self._maybe_idle_prompt()
+            result_type = self._last_proactive_type
+        finally:
+            self._last_proactive_type = saved_type
+            self.last_user_interaction = saved_interaction
+            self.last_proactive_at = saved_proactive
+        ratio = self._proactive_ratio()
+        extra = ratio.get("extra_knowledge", 0.5)
+        regular = ratio.get("regular_greeting", 0.5)
+        if result_type == "extra_knowledge":
+            return f"知识问候 (比例 extra={extra:.2f} regular={regular:.2f})"
+        if result_type == "regular_greeting":
+            return f"普通问候 (比例 extra={extra:.2f} regular={regular:.2f})"
+        return f"未触发 (可能被免打扰/上限/无话术阻断, 比例 extra={extra:.2f} regular={regular:.2f})"
+
     def pick_farewell_line(self) -> str:
         """从 farewell 分组中随机抽取一句道别话术。"""
         return self._random_line("farewell")
@@ -190,6 +273,10 @@ class BehaviorController(QObject):
     def pick_waiting_line(self) -> str:
         """从 waiting 分组中随机抽取一句等待提示话术。"""
         return self._random_line("waiting")
+
+    def pick_reply_ack_line(self) -> str:
+        """从 reply 分组中随机抽取一句简短应答话术。"""
+        return self._random_line("reply")
 
     def pick_poetry_line(self) -> str:
         """从 poetry 分组中随机抽取一首诗。"""

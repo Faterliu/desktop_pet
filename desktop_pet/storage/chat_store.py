@@ -55,34 +55,11 @@ class ChatStore:
         messages = self.all_messages()
         return self.round_count() >= trigger_rounds and len(messages) > covered_message_count
 
-    def last_cleaned_at(self) -> str:
-        """返回上次清理时间戳（ISO 格式），从未清理过则返回空字符串。"""
-        payload = load_json(self.path, DEFAULT_CHAT_HISTORY)
-        return str(payload.get("last_cleaned_at", ""))
-
     def update_last_cleaned_at(self, timestamp: str) -> None:
         """更新上次清理时间戳。"""
         payload = load_json(self.path, DEFAULT_CHAT_HISTORY)
         payload["last_cleaned_at"] = timestamp
         save_json(self.path, payload)
-
-    def should_trigger_time_cleanup(self, interval_days: int) -> bool:
-        """判断距离上次清理是否已超过指定天数，且当前有消息可清理。"""
-        messages = self.all_messages()
-        if not messages:
-            return False
-        last = self.last_cleaned_at()
-        if not last:
-            last = messages[0].get("timestamp", "")
-            if not last:
-                return False
-        try:
-            from datetime import datetime
-            last_dt = datetime.fromisoformat(last)
-            days_passed = (datetime.now() - last_dt).days
-            return days_passed >= interval_days
-        except (ValueError, TypeError):
-            return False
 
     def clear_history(self) -> None:
         """清空聊天记录文件。"""

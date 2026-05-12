@@ -27,7 +27,7 @@ from animation.sprite_player import SpritePlayer
 from app.chat_input import ChatInput
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
-from app.speech_bubble import SpeechBubble
+from app.speech_bubble import ReplyBubble, SpeechBubble
 from character.behavior_controller import BehaviorController
 from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
@@ -115,6 +115,50 @@ class ProactiveSpeakWorker(QObject):
             self.failed.emit(f"测试 API 主动说话失败：{exc}")
 
 
+class KnowledgeSpeakWorker(QObject):
+    finished = Signal(str)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        client: DeepSeekClient,
+        prompt_builder: PromptBuilder,
+        memory: dict[str, Any],
+    ) -> None:
+        """初始化记忆增强的知识问候 API 任务。"""
+        super().__init__()
+        self.client = client
+        self.prompt_builder = prompt_builder
+        self.memory = memory
+
+    def run(self) -> None:
+        """基于用户记忆随机选取一个偏好方向，生成 3-4 句针对性知识问候。"""
+        try:
+            user_profile = self.memory.get("user_profile", {})
+            work_study = self.memory.get("work_study", {})
+            prefs = user_profile.get("preferences", [])
+            topics = work_study.get("current_learning_topics", [])
+            projects = work_study.get("current_projects", [])
+            all_context = "、".join(topics + projects) or "暂无"
+            focus = random.choice(prefs) if prefs else "编程学习"
+
+            prompt = (
+                f"用户偏好中有一条是：{focus}。其他背景：{all_context}。"
+                f"请针对「{focus}」这个方向，主动给用户提供一段简短有用的内容，"
+                "比如一个实用技巧、一条学习建议、一个冷知识或效率方法。"
+                "严格控制在 3-4 句话以内，温柔自然，不要像AI助手那样正式。"
+                "请以「你知道吗」「说起来」「对了」「我突然想到」这类口语化开头来开始。"
+            )
+            messages = self.prompt_builder.build_messages(prompt, [])
+            reply = self.client.chat(messages)
+            self.finished.emit(reply)
+        except DeepSeekError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Unexpected knowledge worker failure")
+            self.failed.emit(f"知识问候走神了：{exc}")
+
+
 class DesktopPetWindow(QWidget):
     def __init__(self, project_root: Path) -> None:
         """初始化桌宠主窗口、依赖模块与 UI 组件。"""
@@ -193,6 +237,7 @@ class DesktopPetWindow(QWidget):
 
         self.sprite_player = SpritePlayer(self.sprite_config_path, self._ui_scale())
         self.bubble = SpeechBubble()
+        self.reply_bubble = ReplyBubble()
         self.chat_input = ChatInput()
         self.behavior_controller = BehaviorController(
             self.config_path,
@@ -202,9 +247,6 @@ class DesktopPetWindow(QWidget):
         )
         self.auto_move_timer = QTimer(self)
         self.auto_move_timer.timeout.connect(self._trigger_auto_move)
-        self._cleanup_timer = QTimer(self)
-        self._cleanup_timer.timeout.connect(self._check_time_based_cleanup)
-        self._cleanup_timer.start(3_600_000)
 
         self._setup_window()
         self._setup_ui()
@@ -247,6 +289,8 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.frame_changed.connect(self._update_sprite)
         self.chat_input.message_submitted.connect(self._handle_user_message)
         self.behavior_controller.speak_requested.connect(self._handle_behavior_speak)
+        self.behavior_controller.knowledge_speak_requested.connect(self._handle_knowledge_speak)
+        self.reply_bubble.clicked.connect(self._handle_reply_bubble_clicked)
 
     def showEvent(self, event) -> None:  # noqa: N802
         """窗口首次显示时启动主动行为控制器。"""
@@ -312,6 +356,7 @@ class DesktopPetWindow(QWidget):
             self._suppress_click = True
             if self.behavior_controller.is_within_proactive_reply_window():
                 reply = self.behavior_controller.pick_feedback_line()
+                self.behavior_controller.notify_proactive_response()
             else:
                 reply = self.behavior_controller.pick_reply_line()
             if reply:
@@ -326,10 +371,10 @@ class DesktopPetWindow(QWidget):
             event.ignore()
             self.request_exit()
             return
-        self._cleanup_timer.stop()
         self._destroy_formal_answer_panels()
         self._save_window_position()
         self.bubble.hide()
+        self.reply_bubble.hide()
         self.chat_input.hide()
         if self.chat_thread and self.chat_thread.isRunning():
             self.chat_thread.quit()
@@ -348,7 +393,9 @@ class DesktopPetWindow(QWidget):
             on_test_move_right=self._test_move_right,
             on_test_jump=self._test_jump,
             on_test_proactive_speak=self._test_proactive_speak_once,
+            on_test_idle_prompt=self._test_idle_prompt_once,
             on_test_api_proactive_speak=self._test_api_proactive_speak_once,
+            on_test_knowledge_speak=self._test_knowledge_speak_once,
             on_test_poetry=self._test_poetry,
             on_request_exit=self.request_exit,
             current_scale=self._ui_scale(),
@@ -408,6 +455,15 @@ class DesktopPetWindow(QWidget):
             return
         self._display_message("本地话术里暂时没有可测试的内容。", 3200, "system")
 
+    def _test_idle_prompt_once(self) -> None:
+        """手动触发一次空闲问候逻辑，测试内容比例分流（普通/知识）。"""
+        if self._chat_in_progress():
+            self._display_message("我还在忙上一条请求呢，等我一下下。", 3200, "system")
+            return
+        result = self.behavior_controller.trigger_test_idle_prompt()
+        if result.startswith("未触发"):
+            self._display_message(result, 3500, "system")
+
     def _test_move_left(self) -> None:
         """手动测试人物向左平滑移动。"""
         QTimer.singleShot(120, lambda: self._start_horizontal_move_test(-140))
@@ -445,6 +501,13 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("waving")
         self._display_message("我在努力思考，想要和你打个招呼。", 2800, "system")
         self._start_proactive_api_worker()
+
+    def _test_knowledge_speak_once(self) -> None:
+        """手动触发一次知识问候，便于测试记忆增强内容和气泡。"""
+        if self._chat_in_progress():
+            self._display_message("我还在忙上一条请求呢，等我一下下。", 3200, "system")
+            return
+        self._handle_knowledge_speak()
 
     def _test_poetry(self) -> None:
         """念一首诗，将换行诗文字展示为气泡消息。"""
@@ -529,6 +592,7 @@ class DesktopPetWindow(QWidget):
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
         self.show()
         self.chat_input.set_always_on_top(enabled)
+        self.reply_bubble.set_always_on_top(enabled)
         if enabled:
             reply = self.behavior_controller.pick_return_after_idle_line()
         else:
@@ -577,7 +641,7 @@ class DesktopPetWindow(QWidget):
         self._resize_for_sprite()
         self._refresh_auto_move_timer()
         self.behavior_controller.reload()
-        self._display_message("配置已经重新加载。", 3500, "system")
+        self._display_message("嘿嘿，我更了解你了。", 3500, "system")
 
     def _open_chat_input(self) -> None:
         """在宠物附近打开输入框；若有主动气泡则先关闭。"""
@@ -768,7 +832,62 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action(action_name)
         self._display_message(text, duration_ms, "proactive")
 
-    def _display_message(self, text: str, duration_ms: int, source: str) -> None:
+    def _handle_knowledge_speak(self) -> None:
+        """响应主动知识问候请求：基于 memory 调用 API 生成额外内容。"""
+        if self._chat_in_progress() or self.chat_input.isVisible():
+            return
+
+        if not self.deepseek_client.is_configured():
+            # API 不可用时回退到本地主动说话
+            self.behavior_controller.trigger_test_speak()
+            return
+
+        self.sprite_player.set_action("waving")
+        self._display_message("小胡想和你分享一些知识。", 2800, "system")
+        self._start_knowledge_worker()
+
+    def _start_knowledge_worker(self) -> None:
+        """创建后台线程执行记忆增强的知识问候 API 请求。"""
+        if self.chat_thread and self.chat_thread.isRunning():
+            return
+
+        memory = load_json(self.memory_path, {})
+        self.chat_thread = QThread(self)
+        self.chat_worker = KnowledgeSpeakWorker(
+            self.deepseek_client,
+            self.prompt_builder,
+            memory,
+        )
+        self.chat_worker.moveToThread(self.chat_thread)
+        self.chat_thread.started.connect(self.chat_worker.run)
+        self.chat_worker.finished.connect(self._on_knowledge_speak_success)
+        self.chat_worker.failed.connect(self._on_knowledge_speak_failure)
+        self.chat_worker.finished.connect(self.chat_thread.quit)
+        self.chat_worker.failed.connect(self.chat_thread.quit)
+        self.chat_thread.finished.connect(self._cleanup_chat_thread)
+        self.chat_thread.start()
+
+    def _on_knowledge_speak_success(self, reply: str) -> None:
+        """知识问候 API 成功返回后，展示内容并在右侧弹出可点击的应答气泡。"""
+        cleaned_reply = reply.strip() or "让我再看看哦。"
+        self.sprite_player.set_action("idle")
+        self._display_message(cleaned_reply, 15000, "proactive")
+        ack = self.behavior_controller.pick_reply_ack_line()
+        if ack:
+            self.reply_bubble.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
+            self.reply_bubble.show_message(ack, self.geometry(), 8000)
+
+    def _on_knowledge_speak_failure(self, error_message: str) -> None:
+        """知识问候 API 失败后展示错误提示。"""
+        self.sprite_player.set_action("failed")
+        self._display_message(error_message, 8000, "assistant")
+
+    def _handle_reply_bubble_clicked(self) -> None:
+        """用户点击右侧应答气泡，视为回应主动问候并更新间隔。"""
+        self.behavior_controller.notify_user_interaction()
+        self.behavior_controller.notify_proactive_response()
+
+    def _display_message(self, text: str, duration_ms: int, source: str = "system") -> None:
         """通过气泡组件显示一条消息。"""
         self.bubble.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
         self.bubble.show_message(text, self.geometry(), duration_ms, source)
@@ -994,6 +1113,8 @@ class DesktopPetWindow(QWidget):
         anchor_rect = self.geometry()
         if self.bubble.isVisible():
             self.bubble.reposition(anchor_rect)
+        if self.reply_bubble.isVisible():
+            self.reply_bubble._reposition()
         if self.chat_input.isVisible():
             self.chat_input.reposition(anchor_rect)
 
@@ -1037,27 +1158,6 @@ class DesktopPetWindow(QWidget):
     def _active_chat_store(self) -> ChatStore:
         """返回当前模式对应的聊天存储实例。"""
         return self.chat_store_formal if self._formal_qa_enabled() else self.chat_store_informal
-
-    def _check_time_based_cleanup(self) -> None:
-        """定期检查正式/非正式对话是否超过清理间隔，若超过则先摘要再清空消息。"""
-        if self._chat_in_progress():
-            return
-        chat_config = self._chat_config()
-        formal_days = int(chat_config.get("formal_cleanup_months", 6)) * 30
-        informal_days = int(chat_config.get("informal_cleanup_months", 3)) * 30
-        now = now_iso()
-
-        if self.chat_store_formal.should_trigger_time_cleanup(formal_days):
-            logger.info("Triggering time-based cleanup for formal chat")
-            self.summarizer_formal.maybe_summarize(0, force=True)
-            self.chat_store_formal.update_last_cleaned_at(now)
-            self.chat_store_formal.clear_history()
-
-        if self.chat_store_informal.should_trigger_time_cleanup(informal_days):
-            logger.info("Triggering time-based cleanup for informal chat")
-            self.summarizer_informal.maybe_summarize(0, force=True)
-            self.chat_store_informal.update_last_cleaned_at(now)
-            self.chat_store_informal.clear_history()
 
     def _config_snapshot(self) -> dict[str, Any]:
         """返回当前内存中的配置快照。"""

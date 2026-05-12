@@ -13,7 +13,9 @@ def build_context_menu(
     on_test_move_right: Callable[[], None],
     on_test_jump: Callable[[], None],
     on_test_proactive_speak: Callable[[], None],
+    on_test_idle_prompt: Callable[[], None],
     on_test_api_proactive_speak: Callable[[], None],
+    on_test_knowledge_speak: Callable[[], None],
     on_test_poetry: Callable[[], None],
     on_request_exit: Callable[[], None],
     current_scale: float,
@@ -77,6 +79,16 @@ def build_context_menu(
         api_proactive_test_action = QAction("测试 API 主动说话一次", test_menu)
         api_proactive_test_action.triggered.connect(on_test_api_proactive_speak)
         test_menu.addAction(api_proactive_test_action)
+
+        idle_prompt_action = QAction("测试空闲问候逻辑", test_menu)
+        idle_prompt_action.triggered.connect(on_test_idle_prompt)
+        test_menu.addAction(idle_prompt_action)
+
+        test_menu.addSeparator()
+
+        knowledge_speak_action = QAction("测试主动问候知识内容", test_menu)
+        knowledge_speak_action.triggered.connect(on_test_knowledge_speak)
+        test_menu.addAction(knowledge_speak_action)
 
         test_menu.addSeparator()
 
