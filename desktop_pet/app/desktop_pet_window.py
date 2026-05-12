@@ -33,7 +33,7 @@ from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.memory_store import MemoryStore
 from storage.usage_store import UsageStore
-from utils.dwm_border import apply_transparent_window_fixes, suppress_dwm_border
+from utils.dwm_border import apply_transparent_window_fixes, force_window_topmost, suppress_dwm_border
 from utils.logger import get_logger
 from utils.time_utils import now_iso
 
@@ -247,6 +247,8 @@ class DesktopPetWindow(QWidget):
         )
         self.auto_move_timer = QTimer(self)
         self.auto_move_timer.timeout.connect(self._trigger_auto_move)
+        self._topmost_enforcement_timer = QTimer(self)
+        self._topmost_enforcement_timer.timeout.connect(self._enforce_topmost)
 
         self._setup_window()
         self._setup_ui()
@@ -293,12 +295,14 @@ class DesktopPetWindow(QWidget):
         self.reply_bubble.clicked.connect(self._handle_reply_bubble_clicked)
 
     def showEvent(self, event) -> None:  # noqa: N802
-        """窗口首次显示时启动主动行为控制器。"""
+        """窗口首次显示时启动主动行为控制器和置顶强制计时器。"""
         super().showEvent(event)
         if not self.behavior_started:
             self.behavior_started = True
             self.behavior_controller.start()
         apply_transparent_window_fixes(self)
+        self._enforce_topmost()
+        self._topmost_enforcement_timer.start(30_000)
         pixmap = self.sprite_label.pixmap()
         if pixmap:
             self._apply_sprite_window_mask(pixmap)
@@ -596,8 +600,10 @@ class DesktopPetWindow(QWidget):
         self.chat_input.set_always_on_top(enabled)
         self.reply_bubble.set_always_on_top(enabled)
         if enabled:
+            self._topmost_enforcement_timer.start(30_000)
             reply = self.behavior_controller.pick_return_after_idle_line()
         else:
+            self._topmost_enforcement_timer.stop()
             reply = self.behavior_controller.pick_ignored_line()
         if reply:
             self._display_message(reply, 5000, "system")
@@ -1033,6 +1039,17 @@ class DesktopPetWindow(QWidget):
             if screen.availableGeometry().intersects(window_rect):
                 return True
         return False
+
+    def _enforce_topmost(self) -> None:
+        """在 Windows API 级别强制置顶主窗口，防止 WS_EX_TOPMOST 被系统清除。"""
+        if not self._ui_config().get("always_on_top", True):
+            self._topmost_enforcement_timer.stop()
+            return
+        try:
+            hwnd = int(self.winId())
+            force_window_topmost(hwnd, True)
+        except Exception:
+            pass
 
     def _refresh_auto_move_timer(self) -> None:
         """根据配置决定是否开启自主移动定时器。"""

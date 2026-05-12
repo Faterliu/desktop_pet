@@ -134,6 +134,36 @@ def _set_dwm_int_attribute(hwnd: int, attribute: int, value: int) -> None:
         return
 
 
+def force_window_topmost(hwnd: int, enabled: bool = True) -> None:
+    """使用 Windows API 直接设置窗口的 WS_EX_TOPMOST 样式并调整 Z-order。
+
+    Qt 的 WindowStaysOnTopHint 在频繁 setMask/resize 的透明分层窗口上可能被
+    Windows 系统清除，此函数直接操作原生 HWND 确保置顶生效。
+    """
+    if sys.platform != "win32":
+        return
+
+    try:
+        user32 = ctypes.windll.user32
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_NOACTIVATE = 0x0010
+        hwnd_insert = wintypes.HWND(HWND_TOPMOST if enabled else HWND_NOTOPMOST)
+        user32.SetWindowPos(
+            wintypes.HWND(hwnd),
+            hwnd_insert,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    except (AttributeError, OSError):
+        return
+
+
 def _set_dwm_color_attribute(hwnd: int, attribute: int, value: int) -> None:
     """设置 DWM 颜色属性；用于声明边框、标题栏等颜色不存在。"""
     try:
