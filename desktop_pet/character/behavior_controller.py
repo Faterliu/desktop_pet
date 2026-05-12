@@ -167,6 +167,7 @@ class BehaviorController(QObject):
         if self._has_memory_content() and random.random() < extra_weight:
             self.notify_proactive_shown("extra_knowledge")
             self.knowledge_speak_requested.emit()
+            self._consecutive_unanswered = 0
             return
 
         line_types = ["idle", "quiet", "encourage"]
@@ -180,6 +181,7 @@ class BehaviorController(QObject):
         self.usage_store.increment_local_line()
         self.notify_proactive_shown("regular_greeting")
         self.speak_requested.emit(line, 6000, "waving")
+        self._consecutive_unanswered = 0
 
     def _check_period_change(self) -> None:
         """检测时段或季节是否变化，变化时立即弹出新时段问候。"""

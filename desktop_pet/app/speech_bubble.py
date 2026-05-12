@@ -43,10 +43,12 @@ class SpeechBubble(QWidget):
         if self._always_on_top == enabled:
             return
         self._always_on_top = enabled
+        was_visible = self.isVisible()
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
-        if self.isVisible():
+        if was_visible:
             self.hide()
-        self.show()
+        if was_visible:
+            self.show()
         apply_transparent_window_fixes(self)
 
     def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
@@ -161,10 +163,12 @@ class ReplyBubble(QWidget):
 
     def set_always_on_top(self, enabled: bool) -> None:
         """同步气泡窗口置顶状态。"""
+        was_visible = self.isVisible()
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
-        if self.isVisible():
+        if was_visible:
             self.hide()
-        self.show()
+        if was_visible:
+            self.show()
         apply_transparent_window_fixes(self)
 
     def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
@@ -196,12 +200,17 @@ class ReplyBubble(QWidget):
         self.resize(width, height)
         self._apply_mask()
         self._anchor_rect = QRect(anchor_rect)
-        self._reposition()
         self.show()
+        self._reposition()
         self._apply_mask()
         apply_transparent_window_fixes(self)
         self.raise_()
         self.close_timer.start(duration_ms)
+
+    def reposition(self, anchor_rect: QRect) -> None:
+        """更新锚点并重新摆放气泡位置。"""
+        self._anchor_rect = QRect(anchor_rect)
+        self._reposition()
 
     def _reposition(self) -> None:
         """将气泡放置到角色右侧，垂直居中对齐。"""

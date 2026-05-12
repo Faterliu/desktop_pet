@@ -589,8 +589,10 @@ class DesktopPetWindow(QWidget):
         """切换窗口置顶状态，开启时回复 return_after_idle，关闭时回复 ignored。"""
         self._ui_config()["always_on_top"] = enabled
         self._save_app_config()
-        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
+        self._reapply_window_flags()
         self.show()
+        self.raise_()
+        apply_transparent_window_fixes(self)
         self.chat_input.set_always_on_top(enabled)
         self.reply_bubble.set_always_on_top(enabled)
         if enabled:
@@ -599,6 +601,19 @@ class DesktopPetWindow(QWidget):
             reply = self.behavior_controller.pick_ignored_line()
         if reply:
             self._display_message(reply, 5000, "system")
+
+    def _reapply_window_flags(self) -> None:
+        """根据当前配置重建窗口标志，不依赖 setWindowFlag 的单属性切换。"""
+        flags = (
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        if self._ui_config().get("always_on_top", True):
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
     def _clear_chat_history(self) -> None:
         """清空正式与非正式聊天历史及对应摘要数据。"""
@@ -639,6 +654,9 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.load()
         self._setup_window()
         self._resize_for_sprite()
+        self.show()
+        self.raise_()
+        apply_transparent_window_fixes(self)
         self._refresh_auto_move_timer()
         self.behavior_controller.reload()
         self._display_message("嘿嘿，我更了解你了。", 3500, "system")
@@ -1114,7 +1132,7 @@ class DesktopPetWindow(QWidget):
         if self.bubble.isVisible():
             self.bubble.reposition(anchor_rect)
         if self.reply_bubble.isVisible():
-            self.reply_bubble._reposition()
+            self.reply_bubble.reposition(anchor_rect)
         if self.chat_input.isVisible():
             self.chat_input.reposition(anchor_rect)
 

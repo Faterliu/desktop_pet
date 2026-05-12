@@ -53,10 +53,12 @@ class ChatInput(QWidget):
         if self._always_on_top == enabled:
             return
         self._always_on_top = enabled
+        was_visible = self.isVisible()
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
-        if self.isVisible():
+        if was_visible:
             self.hide()
-        self.show()
+        if was_visible:
+            self.show()
 
     def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
         """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""

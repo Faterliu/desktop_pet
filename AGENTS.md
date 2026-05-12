@@ -69,6 +69,7 @@ py main.py
 
 - 短消息气泡，自动关闭，跟随角色位置。`show_message()` 前由主窗口调用 `set_always_on_top()` 同步置顶状态。
 - 修改场景：本地提示、普通聊天回复、系统提示的展示样式和定位。
+- `ReplyBubble`：知识问候右侧独立应答气泡，可点击、无尾巴、绿色配色，点击发出 `clicked` 信号供主窗口处理用户回应。
 
 `desktop_pet/app/formal_answer_panel.py`
 
@@ -129,7 +130,7 @@ py main.py
 
 - 管理启动问候、空闲主动话术和时段变化检测。用 `QTimer` 每 60 秒检查空闲和时段，受免打扰、每日上限、空闲时间和等待用户回复状态约束。
 - `_startup_greeting()` 优先使用时段问候（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），对应分组为空时回退到 `startup`。每 5 天周期的第一天额外优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`）。
-- `_maybe_idle_prompt()` 和 `trigger_test_speak()` 的话术池会混入当前时段分组。
+- `_maybe_idle_prompt()` 和 `trigger_test_speak()` 的话术池会混入当前时段分组。`trigger_test_idle_prompt()` 绕过时间限制测试完整空闲逻辑，返回触发类型和比例字符串。
 - `_check_period_change()` 由 `period_check_timer` 每 60 秒驱动，检测时段或季节是否变化，变化时立即弹出新时段问候。
 - `pick_farewell_line()` 从 `farewell` 分组随机抽取道别语，供退出流程使用。
 - `pick_reply_line()` 从 `break_reminder`/`comfort`/`encourage` 三组随机选取回应话术，供普通双击回复使用。
@@ -139,7 +140,7 @@ py main.py
 - `pick_return_after_idle_line()` 从 `return_after_idle` 分组随机选取话术，供开启置顶时使用。
 - `pick_waiting_line()` 从 `waiting` 分组随机选取等待提示话术，供聊天输入框长时间无输入时使用。
 - `pick_reply_ack_line()` 从 `reply` 分组随机选取简短应答话术，供知识问候展示后确认。
-- `_consecutive_unanswered` 计数器驱动动态问候间隔：首次 15min → 第二次 15min → 第三次 30min → 第四次起 30-60min 随机（最高 60min）。`notify_user_interaction()` 重置计数。
+- `_consecutive_unanswered` 计数器驱动动态问候间隔：首次 15min → 第二次 15min → 第三次 30min → 第四次起 30-60min 随机（最高 60min）。`notify_user_interaction()` 和每次 `_maybe_idle_prompt()` 成功触发问候后均重置计数。
 - `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整。
 - 修改场景：主动行为频率、话术分组、免打扰逻辑、时段判断规则、知识问候与内容比例。
 
@@ -476,3 +477,9 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-11：新增测试知识问候按钮。右键测试菜单增加"测试主动问候知识内容"，`DesktopPetWindow._test_knowledge_speak_once()` 直接调用 `_handle_knowledge_speak()` 触发记忆增强问候。`context_menu.py` 新增 `on_test_knowledge_speak` 回调参数。
 - 2026-05-11：新增测试空闲问候逻辑按钮。`BehaviorController` 新增 `trigger_test_idle_prompt()` 绕过时间间隔限制直接调用 `_maybe_idle_prompt()`，保留免打扰/主动聊天/每日上限守卫，便于测试内容比例分流。右键测试菜单增加"测试空闲问候逻辑"，`DesktopPetWindow._test_idle_prompt_once()` 处理。`context_menu.py` 新增 `on_test_idle_prompt` 回调参数。
 - 2026-05-11：知识问候右侧应答气泡改造。`speech_bubble.py` 新增 `ReplyBubble` 类：独立圆角矩形气泡，无尾巴、绿色配色、`PointingHandCursor`，位于角色右侧，点击时发出 `clicked` 信号。`_on_knowledge_speak_success()` 改用 `reply_bubble` 展示 `reply` 应答话术。`_handle_reply_bubble_clicked()` 调用 `notify_user_interaction()` 和 `notify_proactive_response()` 将用户回应计入问候间隔机制。`closeEvent`、`_toggle_always_on_top`、`_sync_floating_widgets` 同步适配。
+- 2026-05-12：内容比例钳制 3:7。`_adjust_ratio()` 上界从 1.0 改为 0.7，下界从 0.0 改为 0.3，知识问候与普通问候比例始终在 3:7 到 7:3 之间。
+- 2026-05-12：`trigger_test_idle_prompt()` 返回类型改为 str，返回当前比例和触发的问候类型（知识/普通/未触发）。`_test_idle_prompt_once()` 仅在未触发时显示结果气泡，避免覆盖已弹出的普通问候话术。
+- 2026-05-12：知识问候提示词优化。`KnowledgeSpeakWorker.run()` 改为 `random.choice(preferences)` 随机选取一个偏好方向聚焦生成 3-4 句针对性内容，以「你知道吗」「说起来」等口语化开头。
+- 2026-05-12：`_maybe_idle_prompt()` 每次成功触发问候后重置 `_consecutive_unanswered = 0`，使下一轮间隔回到 15 分钟。
+- 2026-05-12：`ReplyBubble` 定位修复。`show_message()` 中 `show()` 提前到 `_reposition()` 之前，避免 `height()` 未就绪导致 y 坐标落入角色正中。新增公开 `reposition(anchor_rect)` 方法，`_sync_floating_widgets` 改用此方法传入最新锚点坐标。
+- 2026-05-12：窗口置顶修复。`_toggle_always_on_top` 改为调用 `_reapply_window_flags()` 一次性重建所有 flags 并重新设置透明属性，`show()` 后调用 `raise_()` + `apply_transparent_window_fixes()` 恢复 Z-order。`_reload_config` 在 `_setup_window()` 后补充 `self.show()` + `raise_()` + `apply_transparent_window_fixes()`，修复重新加载配置后人物消失问题。
