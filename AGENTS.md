@@ -108,7 +108,7 @@ py main.py
 
 `desktop_pet/ai/summarizer.py`
 
-- 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。`maybe_summarize()` 支持 `force` 参数，为 True 时跳过轮数检查，供手动清空聊天记录前使用。
+- 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。`maybe_summarize()` 支持 `force` 参数，为 True 时跳过轮数检查，供手动清空聊天记录前使用；但若历史中没有非空用户消息，会直接跳过，避免空聊天记录生成错误记忆。
 - 修改场景：摘要结构、记忆提取、失败兜底。
 - 风险：摘要在线程中触发，异常不能影响正常聊天。
 
@@ -129,7 +129,7 @@ py main.py
 `desktop_pet/character/behavior_controller.py`
 
 - 管理启动问候、空闲主动话术和时段变化检测。用 `QTimer` 每 60 秒检查空闲和时段，受免打扰、每日上限、空闲时间和等待用户回复状态约束。
-- `_startup_greeting()` 优先使用时段问候（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），对应分组为空时回退到 `startup`。每 5 天周期的第一天额外优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`）。
+- `_startup_greeting()` 优先使用时段问候（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），对应分组为空时回退到 `startup`。每 5 天周期的第一天额外优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`）。启动问候仍受每日本地话术上限拦截，但成功展示后不再递增 `local_proactive_lines_used`。
 - `_maybe_idle_prompt()` 和 `trigger_test_speak()` 的话术池会混入当前时段分组。`trigger_test_idle_prompt()` 绕过时间限制测试完整空闲逻辑，返回触发类型和比例字符串。
 - `_check_period_change()` 由 `period_check_timer` 每 60 秒驱动，检测时段或季节是否变化，变化时立即弹出新时段问候。
 - `pick_farewell_line()` 从 `farewell` 分组随机抽取道别语，供退出流程使用。
@@ -141,7 +141,7 @@ py main.py
 - `pick_waiting_line()` 从 `waiting` 分组随机选取等待提示话术，供聊天输入框长时间无输入时使用。
 - `pick_reply_ack_line()` 从 `reply` 分组随机选取简短应答话术，供知识问候展示后确认。
 - `_consecutive_unanswered` 计数器驱动动态问候间隔：首次 15min → 第二次 15min → 第三次 30min → 第四次起 30-60min 随机（最高 60min）。`notify_user_interaction()` 和每次 `_maybe_idle_prompt()` 成功触发问候后均重置计数。
-- `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整。
+- `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整：回应类型 +0.005，互斥类型 -0.001，并继续受 0.3-0.7 钳制。
 - 修改场景：主动行为频率、话术分组、免打扰逻辑、时段判断规则、知识问候与内容比例。
 
 `desktop_pet/config/app_config.example.json`
@@ -209,7 +209,7 @@ py main.py
 主动行为流：
 
 1. `BehaviorController` 启动后设置空闲检查计时器，每 60 秒检查一次。
-2. 启动问候受 `do_not_disturb`、`startup_greeting`、每日本地话术上限约束，优先使用当前时段对应的问候分组（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），该分组为空时回退到 `startup`。
+2. 启动问候受 `do_not_disturb`、`startup_greeting`、每日本地话术上限约束，优先使用当前时段对应的问候分组（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），该分组为空时回退到 `startup`；成功展示后不计入本地主动话术次数。
 3. 空闲主动话术受 `proactive_chat`、`min_proactive_interval_minutes`、`awaiting_user_reply`、`last_proactive_at` 和每日上限约束，话术池从 `idle`/`quiet`/`encourage` 加当前时段分组中随机选取。
 4. 触发后发出 `speak_requested(text, duration_ms, action_name)`。
 5. `DesktopPetWindow._handle_behavior_speak()` 在未聊天且输入框不可见时显示气泡并切动作。
@@ -473,7 +473,7 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-11：清理记录前先总结。`_clear_informal_chat_history()` 和 `_clear_formal_chat_history()` 在清空前先调用 `maybe_summarize(force=True)` 生成摘要，再清空消息并更新 `last_cleaned_at`。`app_config.example.json` 新增 `chat.force_summarize_before_clear` 配置（默认 `true`）控制是否强制总结。
 - 2026-05-11：移除时间清理功能。删除 `DesktopPetWindow._check_time_based_cleanup()` 和 `_cleanup_timer`、`ChatStore.should_trigger_time_cleanup()` 和 `last_cleaned_at()`、`app_config.example.json` 中 `chat.formal_cleanup_months` 和 `chat.informal_cleanup_months` 配置项。原清理策略冗余（每小时检查 90/180 天阈值）、与摘要增量处理重叠。保留 `update_last_cleaned_at()` 供手动清空时标记。同步更新 `AGENTS.md`。
 - 2026-05-11：主动问候频率动态调整。`BehaviorController` 新增 `_consecutive_unanswered` 计数器，根据连续未回应次数调整问候间隔（首次 15min → 第二次 15min → 第三次 30min → 第四次 30-60min 随机 → 最高 60min）。用户交互时 `notify_user_interaction()` 重置计数。`_maybe_idle_prompt()` 移除 `awaiting_user_reply` 硬阻断，改为依赖动态间隔。
-- 2026-05-11：新增知识问候与内容比例系统。`BehaviorController` 新增 `knowledge_speak_requested` 信号、`_has_memory_content()` 检查记忆、`_proactive_ratio()` / `_adjust_ratio()` 管理问候类型比例。`_maybe_idle_prompt()` 按 `proactive_content_ratio` 随机选择普通问候或知识问候。`DesktopPetWindow` 新增 `KnowledgeSpeakWorker`（基于 memory.json 调用 API 生成内容）和 `_handle_knowledge_speak()` 处理展示及 `pick_reply_ack_line()` 回复确认。`mouseDoubleClickEvent` 在回复窗口内调用 `notify_proactive_response()` 调整比例（回应类型 +0.02，互斥类型 -0.01）。`local_lines.json` 新增 `reply` 分组（10 条简短应答话术）。`app_config.example.json` 新增 `proactive_content_ratio`（初始 1:1）。
+- 2026-05-11：新增知识问候与内容比例系统。`BehaviorController` 新增 `knowledge_speak_requested` 信号、`_has_memory_content()` 检查记忆、`_proactive_ratio()` / `_adjust_ratio()` 管理问候类型比例。`_maybe_idle_prompt()` 按 `proactive_content_ratio` 随机选择普通问候或知识问候。`DesktopPetWindow` 新增 `KnowledgeSpeakWorker`（基于 memory.json 调用 API 生成内容）和 `_handle_knowledge_speak()` 处理展示及 `pick_reply_ack_line()` 回复确认。`mouseDoubleClickEvent` 在回复窗口内调用 `notify_proactive_response()` 调整比例。`local_lines.json` 新增 `reply` 分组（10 条简短应答话术）。`app_config.example.json` 新增 `proactive_content_ratio`（初始 1:1）。
 - 2026-05-11：新增测试知识问候按钮。右键测试菜单增加"测试主动问候知识内容"，`DesktopPetWindow._test_knowledge_speak_once()` 直接调用 `_handle_knowledge_speak()` 触发记忆增强问候。`context_menu.py` 新增 `on_test_knowledge_speak` 回调参数。
 - 2026-05-11：新增测试空闲问候逻辑按钮。`BehaviorController` 新增 `trigger_test_idle_prompt()` 绕过时间间隔限制直接调用 `_maybe_idle_prompt()`，保留免打扰/主动聊天/每日上限守卫，便于测试内容比例分流。右键测试菜单增加"测试空闲问候逻辑"，`DesktopPetWindow._test_idle_prompt_once()` 处理。`context_menu.py` 新增 `on_test_idle_prompt` 回调参数。
 - 2026-05-11：知识问候右侧应答气泡改造。`speech_bubble.py` 新增 `ReplyBubble` 类：独立圆角矩形气泡，无尾巴、绿色配色、`PointingHandCursor`，位于角色右侧，点击时发出 `clicked` 信号。`_on_knowledge_speak_success()` 改用 `reply_bubble` 展示 `reply` 应答话术。`_handle_reply_bubble_clicked()` 调用 `notify_user_interaction()` 和 `notify_proactive_response()` 将用户回应计入问候间隔机制。`closeEvent`、`_toggle_always_on_top`、`_sync_floating_widgets` 同步适配。
@@ -484,3 +484,6 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-12：`ReplyBubble` 定位修复。`show_message()` 中 `show()` 提前到 `_reposition()` 之前，避免 `height()` 未就绪导致 y 坐标落入角色正中。新增公开 `reposition(anchor_rect)` 方法，`_sync_floating_widgets` 改用此方法传入最新锚点坐标。
 - 2026-05-12：窗口置顶修复。`_toggle_always_on_top` 改为调用 `_reapply_window_flags()` 一次性重建所有 flags 并重新设置透明属性，`show()` 后调用 `raise_()` + `apply_transparent_window_fixes()` 恢复 Z-order。`_reload_config` 在 `_setup_window()` 后补充 `self.show()` + `raise_()` + `apply_transparent_window_fixes()`，修复重新加载配置后人物消失问题。
 - 2026-05-13：单击人物打开聊天输入框后播放一遍 `waiting` 动作。`DesktopPetWindow._open_chat_input()` 在 `chat_input.show_near()` 后调用 `sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)`，动作结束后回到 `idle`，后续提交消息时仍由聊天流程切换到 `running` / `review` 等动作。
+- 2026-05-13：启动问候不再计入本地主动话术次数。`BehaviorController._startup_greeting()` 移除成功展示前的 `usage_store.increment_local_line()`，保留免打扰、`startup_greeting` 开关和每日上限检查；空闲主动话术和时段变化问候仍按原逻辑计入 `local_proactive_lines_used`。
+- 2026-05-13：主动问候回应后的内容比例微调幅度降低。`BehaviorController._adjust_ratio()` 改为回应类型 +0.005、互斥类型 -0.001，仍保持知识问候与普通问候比例在 0.3-0.7 范围内。
+- 2026-05-13：摘要和记忆更新增加空聊天保护。`Summarizer.maybe_summarize()` 新增 `_has_summarizable_history()` 检查，只有存在非空用户消息时才继续生成摘要和合并 `memory_updates`；即使 `force=True`，空历史或仅有空内容/助手消息也会跳过，避免模型基于空 transcript 写入“用户不希望被总结或记录”等错误记忆。

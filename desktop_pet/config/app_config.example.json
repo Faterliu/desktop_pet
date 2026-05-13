@@ -2,7 +2,7 @@
   "app": {
     "name": "Desktop AI Pet",
     "character_name": "小胡",
-    "version": "0.1"
+    "version": "1.0"
   },
   "api": {
     "provider": "deepseek",
@@ -11,8 +11,8 @@
     "api_key": "",
     "enable_chat_api": true,
     "timeout_seconds": 30,
-    "max_recent_messages": 8,
-    "summary_trigger_rounds": 12
+    "max_recent_messages": 15,
+    "summary_trigger_rounds": 30
   },
   "ui": {
     "always_on_top": true,
@@ -31,7 +31,7 @@
     "min_proactive_interval_minutes": 20,
     "max_consecutive_active_replies": 5,
     "max_local_lines_per_day": 50,
-    "max_api_proactive_per_day": 10
+    "max_api_proactive_per_day": 30
   },
   "chat": {
     "formal_qa_mode": false,

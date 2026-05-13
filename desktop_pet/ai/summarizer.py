@@ -44,6 +44,10 @@ class Summarizer:
     def maybe_summarize(self, trigger_rounds: int, force: bool = False) -> None:
         """在达到轮数阈值或强制触发时尝试生成并保存摘要。"""
         history = self.chat_store.all_messages()
+        if not self._has_summarizable_history(history):
+            logger.info("Skip summary because chat history has no user content")
+            return
+
         user_rounds = len([item for item in history if item.get("role") == "user"])
         current_summary = self.load_summary()
         covered_count = int(current_summary.get("covered_message_count", 0))
@@ -62,6 +66,13 @@ class Summarizer:
         extracted_memory = payload.pop("memory_updates", {})
         if extracted_memory:
             self.memory_store.merge(extracted_memory)
+
+    def _has_summarizable_history(self, history: list[dict[str, Any]]) -> bool:
+        """只有存在非空用户消息时才允许摘要和记忆更新。"""
+        return any(
+            item.get("role") == "user" and str(item.get("content", "")).strip()
+            for item in history
+        )
 
     def _summarize_history(self, history: list[dict[str, Any]]) -> dict[str, Any]:
         """优先调用模型生成结构化摘要，失败时退回本地摘要。"""

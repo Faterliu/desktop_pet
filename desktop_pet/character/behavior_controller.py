@@ -84,12 +84,12 @@ class BehaviorController(QObject):
         return config.setdefault("proactive_content_ratio", default)
 
     def _adjust_ratio(self, responded_type: str) -> None:
-        """用户回应对应类型后增加该类型比例 0.02，降低互斥类型 0.01。"""
+        """用户回应对应类型后微调问候类型比例。"""
         config = self.config_loader()
         ratio = self._proactive_ratio()
         other_type = "extra_knowledge" if responded_type == "regular_greeting" else "regular_greeting"
-        ratio[responded_type] = min(0.7, round(ratio.get(responded_type, 0.5) + 0.02, 4))
-        ratio[other_type] = max(0.3, round(ratio.get(other_type, 0.5) - 0.01, 4))
+        ratio[responded_type] = min(0.7, round(ratio.get(responded_type, 0.5) + 0.005, 4))
+        ratio[other_type] = max(0.3, round(ratio.get(other_type, 0.5) - 0.001, 4))
         config["proactive_content_ratio"] = ratio
 
     def set_do_not_disturb(self, enabled: bool) -> None:
@@ -115,7 +115,6 @@ class BehaviorController(QObject):
         if not line:
             line = self._random_line("startup")
         if line:
-            self.usage_store.increment_local_line()
             self.notify_proactive_shown()
             self.speak_requested.emit(line, 7000, "waving")
 
