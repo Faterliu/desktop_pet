@@ -16,6 +16,10 @@ desktop_pet/**/*.pyd
 
 # 本地环境与编辑器配置
 desktop_pet/.venv/
+desktop_pet/.pet_venv/
+desktop_pet/.desktop_pet_venv/
+desktop_pet/.tmp/
+desktop_pet/tmp_work/
 desktop_pet/venv/
 desktop_pet/env/
 .venv/
@@ -23,6 +27,7 @@ venv/
 env/
 .idea/
 .vscode/
+tmp_work
 
 # 操作系统临时文件
 .DS_Store
