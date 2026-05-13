@@ -1,5 +1,5 @@
 {
-  "sprite_file": "assets/spritesheet_cleaned_no_blue.webp",
+  "sprite_file": "assets/raw_spritesheet_short_arm.webp",
   "frame_width": 192,
   "frame_height": 208,
   "rows": 9,
@@ -39,25 +39,25 @@
     "failed": {
       "row": 5,
       "frames": 8,
-      "fps": 7,
+      "fps": 1.7,
       "loop": false
     },
     "waiting": {
       "row": 6,
       "frames": 6,
-      "fps": 6,
+      "fps": 1.5,
       "loop": true
     },
     "running": {
       "row": 7,
       "frames": 6,
-      "fps": 8,
+      "fps": 1.9,
       "loop": true
     },
     "review": {
       "row": 8,
       "frames": 6,
-      "fps": 6,
+      "fps": 1.6,
       "loop": true
     }
   }

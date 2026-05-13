@@ -483,3 +483,4 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-12：`_maybe_idle_prompt()` 每次成功触发问候后重置 `_consecutive_unanswered = 0`，使下一轮间隔回到 15 分钟。
 - 2026-05-12：`ReplyBubble` 定位修复。`show_message()` 中 `show()` 提前到 `_reposition()` 之前，避免 `height()` 未就绪导致 y 坐标落入角色正中。新增公开 `reposition(anchor_rect)` 方法，`_sync_floating_widgets` 改用此方法传入最新锚点坐标。
 - 2026-05-12：窗口置顶修复。`_toggle_always_on_top` 改为调用 `_reapply_window_flags()` 一次性重建所有 flags 并重新设置透明属性，`show()` 后调用 `raise_()` + `apply_transparent_window_fixes()` 恢复 Z-order。`_reload_config` 在 `_setup_window()` 后补充 `self.show()` + `raise_()` + `apply_transparent_window_fixes()`，修复重新加载配置后人物消失问题。
+- 2026-05-13：单击人物打开聊天输入框后播放一遍 `waiting` 动作。`DesktopPetWindow._open_chat_input()` 在 `chat_input.show_near()` 后调用 `sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)`，动作结束后回到 `idle`，后续提交消息时仍由聊天流程切换到 `running` / `review` 等动作。

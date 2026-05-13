@@ -677,6 +677,7 @@ class DesktopPetWindow(QWidget):
         self.behavior_controller.notify_user_interaction()
         self.chat_input.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
         self.chat_input.show_near(self.geometry())
+        self.sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)
         self._waiting_timer.start(30_000)
 
     _poetry_keywords = {"诗", "诗歌", "写诗", "念诗", "吟诗", "背诗", "来首", "作诗", "赋诗"}
