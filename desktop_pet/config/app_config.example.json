@@ -7,17 +7,17 @@
   "api": {
     "provider": "deepseek",
     "base_url": "https://api.deepseek.com",
-    "model": "deepseek-chat",
+    "model": "deepseek-v4-flash",
     "api_key": "",
     "enable_chat_api": true,
     "timeout_seconds": 30,
-    "max_recent_messages": 15,
-    "summary_trigger_rounds": 30
+    "max_recent_messages": 37,
+    "summary_trigger_rounds": 74
   },
   "ui": {
     "always_on_top": true,
-    "scale": 0.65,
-    "enable_free_move": false,
+    "scale": 0.6,
+    "enable_free_move": true,
     "click_to_chat": true,
     "start_position": "bottom_right",
     "remember_last_position": true,

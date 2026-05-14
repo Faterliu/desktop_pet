@@ -169,7 +169,7 @@ class BehaviorController(QObject):
             self._consecutive_unanswered = 0
             return
 
-        line_types = ["idle", "quiet", "encourage"]
+        line_types = ["idle", "quiet", "encourage","break_reminder"]
         time_key = self._time_greeting_key()
         if time_key:
             line_types.append(time_key)
@@ -250,7 +250,7 @@ class BehaviorController(QObject):
 
     def pick_reply_line(self) -> str:
         """从回复系分组中随机抽取一句回应话术。"""
-        group = random.choice(["break_reminder", "comfort", "encourage"])
+        group = random.choice(["break_reminder", "comfort", "encourage","happy"])
         return self._random_line(group)
 
     def pick_feedback_line(self) -> str:
