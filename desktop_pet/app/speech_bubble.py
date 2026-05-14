@@ -2,9 +2,46 @@ from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QRegion
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from utils.dwm_border import apply_transparent_window_fixes, suppress_dwm_border
+
+
+def _find_bubble_position(
+    bubble_width: int,
+    bubble_height: int,
+    anchor_rect: QRect,
+    candidates: list[QPoint],
+    exclusion_rects: list[QRect] | None = None,
+) -> QPoint:
+    """从候选位置中选取第一个完全在屏幕内且不与角色窗口重叠的位置。
+
+    所有候选都不满足时，将首选位置 clamp 到屏幕可用区域内。
+    exclusion_rects 为额外的避让区域（如另一个可见气泡的几何）。
+    """
+    screen = QApplication.screenAt(anchor_rect.center())
+    if screen is None:
+        screen = QApplication.primaryScreen()
+    if screen is None:
+        return candidates[0] if candidates else QPoint(0, 0)
+
+    available = screen.availableGeometry()
+    _exclusions = exclusion_rects or []
+
+    for pos in candidates:
+        bubble_rect = QRect(pos.x(), pos.y(), bubble_width, bubble_height)
+        if not available.contains(bubble_rect):
+            continue
+        if bubble_rect.intersects(anchor_rect):
+            continue
+        if any(bubble_rect.intersects(ex) for ex in _exclusions):
+            continue
+        return pos
+
+    first = candidates[0]
+    x = max(available.x(), min(first.x(), available.x() + available.width() - bubble_width))
+    y = max(available.y(), min(first.y(), available.y() + available.height() - bubble_height))
+    return QPoint(max(0, x), max(0, y))
 
 
 class SpeechBubble(QWidget):
@@ -89,20 +126,29 @@ class SpeechBubble(QWidget):
         self.raise_()
         self.close_timer.start(duration_ms)
 
-    def reposition(self, anchor_rect: QRect | None = None) -> None:
-        """根据角色当前位置重新摆放气泡。"""
+    def reposition(
+        self,
+        anchor_rect: QRect | None = None,
+        exclusion_rects: list[QRect] | None = None,
+    ) -> None:
+        """根据角色当前位置，在屏幕内找到不覆盖角色和其他气泡的最佳位置。"""
         if anchor_rect is not None:
             self._last_anchor_rect = QRect(anchor_rect)
         if self._last_anchor_rect.isNull():
             return
 
-        width = self.width()
-        height = self.height()
-        x = self._last_anchor_rect.x() + self._last_anchor_rect.width() - width + 20
-        y = self._last_anchor_rect.y() - height - 10
-        if y < 0:
-            y = self._last_anchor_rect.y() + 12
-        self.move(QPoint(max(0, x), max(0, y)))
+        a = self._last_anchor_rect
+        bw = self.width()
+        bh = self.height()
+        candidates = [
+            QPoint(a.x() + a.width() - bw + 20, a.y() - bh - 10),
+            QPoint(a.x() - 20, a.y() - bh - 10),
+            QPoint(a.x() + a.width() - bw + 20, a.y() + a.height() + 10),
+            QPoint(a.x() - 20, a.y() + a.height() + 10),
+            QPoint(a.x() + a.width() + 10, a.y() + a.height() // 2 - bh // 2),
+            QPoint(a.x() - bw - 10, a.y() + a.height() // 2 - bh // 2),
+        ]
+        self.move(_find_bubble_position(bw, bh, a, candidates, exclusion_rects))
 
     def paintEvent(self, event) -> None:  # noqa: N802
         """绘制圆角气泡背景和底部小尾巴。"""
@@ -207,19 +253,34 @@ class ReplyBubble(QWidget):
         self.raise_()
         self.close_timer.start(duration_ms)
 
-    def reposition(self, anchor_rect: QRect) -> None:
-        """更新锚点并重新摆放气泡位置。"""
+    def reposition(
+        self,
+        anchor_rect: QRect,
+        exclusion_rects: list[QRect] | None = None,
+    ) -> None:
+        """更新锚点并重新摆放气泡位置，可传入其他气泡作为避让区域。"""
         self._anchor_rect = QRect(anchor_rect)
-        self._reposition()
+        self._reposition(exclusion_rects)
 
-    def _reposition(self) -> None:
-        """将气泡放置到角色右侧，垂直居中对齐。"""
+    def _reposition(
+        self,
+        exclusion_rects: list[QRect] | None = None,
+    ) -> None:
+        """在角色四周找到屏幕内不覆盖角色和其他气泡的最佳应答气泡位置。"""
         if self._anchor_rect.isNull():
             return
-        center_y = self._anchor_rect.y() + self._anchor_rect.height() // 2
-        x = self._anchor_rect.x() + self._anchor_rect.width() + 12
-        y = center_y - self.height() // 2
-        self.move(QPoint(max(0, x), max(0, y)))
+        a = self._anchor_rect
+        bw = self.width()
+        bh = self.height()
+        cx = a.x() + a.width() // 2
+        cy = a.y() + a.height() // 2
+        candidates = [
+            QPoint(a.x() + a.width() + 12, cy - bh // 2),
+            QPoint(a.x() - bw - 12, cy - bh // 2),
+            QPoint(cx - bw // 2, a.y() - bh - 10),
+            QPoint(cx - bw // 2, a.y() + a.height() + 10),
+        ]
+        self.move(_find_bubble_position(bw, bh, a, candidates, exclusion_rects))
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         """点击气泡视为用户回应知识问候。"""

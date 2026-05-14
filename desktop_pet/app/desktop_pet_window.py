@@ -132,7 +132,7 @@ class KnowledgeSpeakWorker(QObject):
         self.memory = memory
 
     def run(self) -> None:
-        """基于用户记忆随机选取一个偏好方向，生成 3-4 句针对性知识问候。"""
+        """基于用户记忆随机选取一个偏好方向，生成 2-3 句针对性知识问候。"""
         try:
             user_profile = self.memory.get("user_profile", {})
             work_study = self.memory.get("work_study", {})
@@ -146,7 +146,7 @@ class KnowledgeSpeakWorker(QObject):
                 f"用户偏好中有一条是：{focus}。其他背景：{all_context}。"
                 f"请针对「{focus}」这个方向，主动给用户提供一段简短有用的内容，"
                 "比如一个实用技巧、一条学习建议、一个冷知识或效率方法。"
-                "严格控制在 3-4 句话以内，温柔自然，不要像AI助手那样正式。"
+                "严格控制在 2-3 句话以内，温柔自然，不要像AI助手那样正式。"
                 "请以「你知道吗」「说起来」「对了」「我突然想到」这类口语化开头来开始。"
             )
             messages = self.prompt_builder.build_messages(prompt, [])
@@ -901,6 +901,7 @@ class DesktopPetWindow(QWidget):
         if ack:
             self.reply_bubble.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
             self.reply_bubble.show_message(ack, self.geometry(), 8000)
+            self._sync_floating_widgets()
 
     def _on_knowledge_speak_failure(self, error_message: str) -> None:
         """知识问候 API 失败后展示错误提示。"""
@@ -1145,12 +1146,16 @@ class DesktopPetWindow(QWidget):
         return screen or QApplication.primaryScreen()
 
     def _sync_floating_widgets(self) -> None:
-        """让气泡和输入框跟随角色当前位置。"""
+        """让气泡和输入框跟随角色当前位置，两个气泡互相避让。"""
         anchor_rect = self.geometry()
-        if self.bubble.isVisible():
-            self.bubble.reposition(anchor_rect)
-        if self.reply_bubble.isVisible():
-            self.reply_bubble.reposition(anchor_rect)
+        bubble_visible = self.bubble.isVisible()
+        reply_visible = self.reply_bubble.isVisible()
+        if bubble_visible:
+            exclusions = [self.reply_bubble.geometry()] if reply_visible else None
+            self.bubble.reposition(anchor_rect, exclusion_rects=exclusions)
+        if reply_visible:
+            exclusions = [self.bubble.geometry()] if bubble_visible else None
+            self.reply_bubble.reposition(anchor_rect, exclusion_rects=exclusions)
         if self.chat_input.isVisible():
             self.chat_input.reposition(anchor_rect)
 

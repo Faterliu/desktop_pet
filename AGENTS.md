@@ -62,8 +62,10 @@ wscript.exe .\start_main.vbs
 `desktop_pet/app/desktop_pet_window.py`
 
 - 核心协调器。负责窗口属性、鼠标事件（单击聊天、双击回复/打招呼、拖拽移动、右键菜单，含置顶开关）、聊天流程、后台线程、正式问答面板、自动移动、位置恢复和退出动画（退出时播放 waving 并显示 `farewell` 道别气泡）。
+- `_enforce_topmost()` 由 `_topmost_enforcement_timer` 每 30 秒驱动，通过 `force_window_topmost()` 在 Windows API 级别强制 `WS_EX_TOPMOST`，防止频繁 `setMask()` 导致置顶样式被系统清除。
+- `_sync_floating_widgets()` 在气泡/输入框跟随角色位置时，将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入 `reposition()`，使两个气泡互相避让不重叠。
 - 修改场景：几乎所有用户可见行为的入口都在这里接线。
-- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`。
+- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`、`_topmost_enforcement_timer`。
 
 `desktop_pet/app/context_menu.py`
 
@@ -79,8 +81,10 @@ wscript.exe .\start_main.vbs
 `desktop_pet/app/speech_bubble.py`
 
 - 短消息气泡，自动关闭，跟随角色位置。`show_message()` 前由主窗口调用 `set_always_on_top()` 同步置顶状态。
-- 修改场景：本地提示、普通聊天回复、系统提示的展示样式和定位。
+- 模块级 `_find_bubble_position()` 为两个气泡提供屏幕感知定位：遍历候选方位列表，选取第一个完全在屏幕可用区域内、不与角色锚点重叠、且不与 `exclusion_rects` 交叉的位置；所有候选不满足时 clamp 首选到屏幕内。
+- `SpeechBubble.reposition()` 和 `ReplyBubble._reposition()` 均通过 `_find_bubble_position()` 实现多方位自动避让（上/下/左/右），避免气泡超出屏幕或覆盖人物。
 - `ReplyBubble`：知识问候右侧独立应答气泡，可点击、无尾巴、绿色配色，点击发出 `clicked` 信号供主窗口处理用户回应。
+- 修改场景：本地提示、普通聊天回复、系统提示的展示样式和定位；新增气泡方位或避让规则。
 
 `desktop_pet/app/formal_answer_panel.py`
 
@@ -175,6 +179,13 @@ wscript.exe .\start_main.vbs
 `desktop_pet/config/safety_rules.json`
 
 - 注入模型提示的安全规则。
+
+`desktop_pet/utils/dwm_border.py`
+
+- `suppress_dwm_border()`：在 `nativeEvent` 中拦截 `WM_NCCALCSIZE` 消除 DWM 为无边框窗口添加的细线边框。
+- `apply_transparent_window_fixes()`：对窗口 HWND 移除扩展边缘样式、禁用 DWM 圆角和系统背景渲染。
+- `force_window_topmost(hwnd, enabled)`：通过 `SetWindowPos(HWND_TOPMOST)` 直接在 Windows API 级别设置/取消窗口置顶。Qt 的 `WindowStaysOnTopHint` 在频繁 `setMask()`/`resize()` 的透明分层窗口上可能被系统清除，此函数供 `DesktopPetWindow._enforce_topmost()` 每 30 秒周期性调用以确保置顶持久生效。
+- 修改场景：窗口透明/边框/置顶在 Windows 侧的底层行为调整。
 
 `desktop_pet/utils/logger.py`
 
@@ -508,4 +519,6 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-13：摘要和记忆更新增加空聊天保护。`Summarizer.maybe_summarize()` 新增 `_has_summarizable_history()` 检查，只有存在非空用户消息时才继续生成摘要和合并 `memory_updates`；即使 `force=True`，空历史或仅有空内容/助手消息也会跳过，避免模型基于空 transcript 写入“用户不希望被总结或记录”等错误记忆。
 - 2026-05-13：拆分快速启动与环境准备脚本。`desktop_pet/setup_env.bat` 负责查找或安装带 `pip` 的 Python（优先 Miniforge，避免无 pip 的 MSYS Python 被误选）、安装并校验 `PySide6`/`requests`，再把最终解释器路径写入 `data/runtime_python.txt`；`desktop_pet/start_main.vbs` 作为默认无终端启动入口，读取该路径隐藏运行 `main.py`，错误时打开终端显示 `data/start_main_error.log`；`desktop_pet/start_main.bat` 保留为兼容入口并支持 `--console` 前台排查，避免日常启动阶段隐式改动依赖环境。
 - 2026-05-13：修复无终端启动读取 Python 路径失败。`setup_env.bat` 改为将 `runtime_python.txt` 写成无换行的纯路径；`start_main.vbs` 新增路径规范化，读取后移除回车、换行、制表符和 BOM，避免 `FileExists()` 因路径尾部换行误判 Python 不存在。
+- 2026-05-14：窗口置顶持久化修复。`utils/dwm_border.py` 新增 `force_window_topmost(hwnd, enabled)`，通过 `SetWindowPos(HWND_TOPMOST)` 在 Windows API 级别直接设置置顶样式。`DesktopPetWindow` 新增 `_topmost_enforcement_timer`（每 30 秒）和 `_enforce_topmost()` 方法，在 `showEvent` 中启动并在 `_toggle_always_on_top` 中管理启停，防止频繁 `setMask()` 导致 `WS_EX_TOPMOST` 被系统清除。同步更新 `AGENTS.md` 中 `desktop_pet_window.py` 描述和新增 `dwm_border.py` 章节。
+- 2026-05-14：气泡智能定位与互斥避让。`speech_bubble.py` 新增模块级 `_find_bubble_position(bubble_width, bubble_height, anchor_rect, candidates, exclusion_rects)` 屏幕感知定位函数，支持额外避让区域。`SpeechBubble.reposition()` 和 `ReplyBubble._reposition()` 改用此函数，候选方位覆盖上/下/左/右。`DesktopPetWindow._sync_floating_widgets()` 在重定位时将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入，使两个气泡互相避让不重叠。`_on_knowledge_speak_success()` 在两个气泡均显示后调用 `_sync_floating_widgets()` 触发互相避让。同步更新 `AGENTS.md` 中 `speech_bubble.py` 和 `desktop_pet_window.py` 描述。
 - 2026-05-13：增强快速启动脚本的新环境兼容性。`start_main.bat --console` 读取 `runtime_python.txt` 时也通过 PowerShell 清理 BOM、回车、换行、制表符和空格；`setup_env.bat` 在 `winget` 安装 Python 后若当前终端还找不到可用解释器，会提示重新运行脚本，仍失败再重开终端或重启系统。
