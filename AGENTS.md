@@ -6,7 +6,7 @@
 
 - 一句话概览：这是一个基于 Python 和 PySide6 的 Windows 桌面 AI 宠物原型，角色通过像素 spritesheet 显示在桌面上，可聊天、主动问候、保存本地 JSON 数据，并可调用 DeepSeek API。
 - 实际可运行程序在 `desktop_pet/` 目录内，入口是 `desktop_pet/main.py`。根目录的 `README.md` 是更新日志，`xiaohu_codex_package/xiaohu_codex/` 是早期需求、任务和素材说明。
-- 启动建议第一次先运行 `desktop_pet/setup_env.bat` 检查 Python 并安装依赖，之后日常双击 `desktop_pet/start_main.vbs` 无终端启动。`start_main.bat` 保留为兼容入口并会转交给 VBS；手动启动仍可 `cd desktop_pet` 后执行 `py -m pip install -r requirements.txt` 和 `py main.py`。不要默认信任 `python` 或 `pip`，它们在 Windows 上可能指向应用商店别名或旧解释器。
+- 启动建议第一次先运行 `desktop_pet/setup_env.bat` 创建项目本地虚拟环境并安装依赖，之后日常双击 `desktop_pet/start_main.vbs` 无终端启动。手动启动仍可 `cd desktop_pet` 后执行 `py -m pip install -r requirements.txt` 和 `py main.py`。不要默认信任 `python` 或 `pip`，它们在 Windows 上可能指向应用商店别名或旧解释器。
 - 主协调器是 `desktop_pet/app/desktop_pet_window.py`。多数 UI、聊天、配置、动作、自动移动、正式问答、退出流程都从这里串起来。
 - 运行时个性化数据不应提交：`desktop_pet/config/app_config.json`、`desktop_pet/data/`、日志和缓存都由 `.gitignore` 忽略。默认配置模板是 `desktop_pet/config/app_config.example.json`。
 - 当前没有专门的测试框架、构建脚本或打包流程。常用校验是 JSON 合法性、Python AST/语法检查、手动运行桌宠。
@@ -46,9 +46,8 @@ wscript.exe .\start_main.vbs
 
 - `python main.py` 只有在 `python` 指向真实解释器时才可靠。此前移植排查中，`python` 指到 `Microsoft\WindowsApps\python.exe` 时会出现无输出、无窗口、无 `data/` 的情况。
 - `pip install -r requirements.txt` 可能命中旧版 Python 的坏掉 `pip.exe` 启动器。优先使用 `py -m pip install -r requirements.txt`。
-- `setup_env.bat` 负责环境准备：只接受能运行 `python -m pip --version` 的解释器，优先查找 Miniforge，其次查找 `uv` 安装的 CPython 3.13、`py -3.13`、`py -3`、当前 `python`；如果都不可用，会尝试通过 `winget install --id Python.Python.3.13 -e --source winget --accept-package-agreements --accept-source-agreements` 安装 Python。随后校验/安装 `requirements.txt`，并把最终解释器路径无换行保存到 `data/runtime_python.txt`。
-- `start_main.vbs` 是默认无终端启动入口：读取并清理 `data/runtime_python.txt` 中的回车、换行、制表符和 BOM，隐藏执行对应 Python 的 `main.py`，输出写入 `data/start_main_error.log`；只有缺环境、缺依赖或 `main.py` 非零退出时，才打开错误终端并显示日志。
-- `start_main.bat` 保留为兼容入口：默认转交 `start_main.vbs`，`start_main.bat --console` 可显式以前台终端方式启动和排查；不在启动阶段自动安装依赖。
+- `setup_env.bat` 负责环境准备：只接受能运行 `python -m pip --version` 且支持 `venv` 的解释器，优先查找 Miniforge，其次查找 `uv` 安装的 CPython 3.13、`py -3.13`、`py -3`、当前 `python`；如果都不可用，会尝试通过 `winget install --id Python.Python.3.13 -e --source winget --accept-package-agreements --accept-source-agreements` 安装 Python。随后创建项目本地 `desktop_pet/.desktop_pet_venv`，依赖安装进该本地环境，并把 `.desktop_pet_venv/Scripts/python.exe` 无换行保存到 `data/runtime_python.txt`。该脚本不再向全局 Python 安装项目依赖。
+- `start_main.vbs` 是默认无终端启动入口：先在仓库根目录执行 `git pull --ff-only` 尝试拉取当前分支最新代码，再读取并清理 `data/runtime_python.txt` 中的回车、换行、制表符和 BOM，隐藏执行对应 Python 的 `main.py`，输出写入 `data/start_main_error.log`；拉取失败只写入 warning 并继续启动，只有缺环境、缺依赖或 `main.py` 非零退出时，才打开错误终端并显示日志。
 - 程序启动后应创建 `desktop_pet/data/startup_bootstrap.log` 和 `desktop_pet/data/app.log`。前者在导入 PySide6 前写入，用于早期启动排查。
 
 ## 3. 关键目录和文件说明
@@ -517,8 +516,10 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-13：启动问候不再计入本地主动话术次数。`BehaviorController._startup_greeting()` 移除成功展示前的 `usage_store.increment_local_line()`，保留免打扰、`startup_greeting` 开关和每日上限检查；空闲主动话术和时段变化问候仍按原逻辑计入 `local_proactive_lines_used`。
 - 2026-05-13：主动问候回应后的内容比例微调幅度降低。`BehaviorController._adjust_ratio()` 改为回应类型 +0.005、互斥类型 -0.001，仍保持知识问候与普通问候比例在 0.3-0.7 范围内。
 - 2026-05-13：摘要和记忆更新增加空聊天保护。`Summarizer.maybe_summarize()` 新增 `_has_summarizable_history()` 检查，只有存在非空用户消息时才继续生成摘要和合并 `memory_updates`；即使 `force=True`，空历史或仅有空内容/助手消息也会跳过，避免模型基于空 transcript 写入“用户不希望被总结或记录”等错误记忆。
-- 2026-05-13：拆分快速启动与环境准备脚本。`desktop_pet/setup_env.bat` 负责查找或安装带 `pip` 的 Python（优先 Miniforge，避免无 pip 的 MSYS Python 被误选）、安装并校验 `PySide6`/`requests`，再把最终解释器路径写入 `data/runtime_python.txt`；`desktop_pet/start_main.vbs` 作为默认无终端启动入口，读取该路径隐藏运行 `main.py`，错误时打开终端显示 `data/start_main_error.log`；`desktop_pet/start_main.bat` 保留为兼容入口并支持 `--console` 前台排查，避免日常启动阶段隐式改动依赖环境。
+- 2026-05-13：拆分快速启动与环境准备脚本。`desktop_pet/setup_env.bat` 负责查找或安装带 `pip` 的 Python（优先 Miniforge，避免无 pip 的 MSYS Python 被误选）、安装并校验 `PySide6`/`requests`，再把最终解释器路径写入 `data/runtime_python.txt`；`desktop_pet/start_main.vbs` 作为默认无终端启动入口，读取该路径隐藏运行 `main.py`，错误时打开终端显示 `data/start_main_error.log`，避免日常启动阶段隐式改动依赖环境。
 - 2026-05-13：修复无终端启动读取 Python 路径失败。`setup_env.bat` 改为将 `runtime_python.txt` 写成无换行的纯路径；`start_main.vbs` 新增路径规范化，读取后移除回车、换行、制表符和 BOM，避免 `FileExists()` 因路径尾部换行误判 Python 不存在。
 - 2026-05-14：窗口置顶持久化修复。`utils/dwm_border.py` 新增 `force_window_topmost(hwnd, enabled)`，通过 `SetWindowPos(HWND_TOPMOST)` 在 Windows API 级别直接设置置顶样式。`DesktopPetWindow` 新增 `_topmost_enforcement_timer`（每 30 秒）和 `_enforce_topmost()` 方法，在 `showEvent` 中启动并在 `_toggle_always_on_top` 中管理启停，防止频繁 `setMask()` 导致 `WS_EX_TOPMOST` 被系统清除。同步更新 `AGENTS.md` 中 `desktop_pet_window.py` 描述和新增 `dwm_border.py` 章节。
 - 2026-05-14：气泡智能定位与互斥避让。`speech_bubble.py` 新增模块级 `_find_bubble_position(bubble_width, bubble_height, anchor_rect, candidates, exclusion_rects)` 屏幕感知定位函数，支持额外避让区域。`SpeechBubble.reposition()` 和 `ReplyBubble._reposition()` 改用此函数，候选方位覆盖上/下/左/右。`DesktopPetWindow._sync_floating_widgets()` 在重定位时将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入，使两个气泡互相避让不重叠。`_on_knowledge_speak_success()` 在两个气泡均显示后调用 `_sync_floating_widgets()` 触发互相避让。同步更新 `AGENTS.md` 中 `speech_bubble.py` 和 `desktop_pet_window.py` 描述。
 - 2026-05-13：增强快速启动脚本的新环境兼容性。`start_main.bat --console` 读取 `runtime_python.txt` 时也通过 PowerShell 清理 BOM、回车、换行、制表符和空格；`setup_env.bat` 在 `winget` 安装 Python 后若当前终端还找不到可用解释器，会提示重新运行脚本，仍失败再重开终端或重启系统。
+- 2026-05-15：启动脚本增加代码更新步骤。`desktop_pet/start_main.vbs` 在启动 `main.py` 前切到仓库根目录执行 `git pull --ff-only`，将输出写入 `data/start_main_error.log`；若 Git 不可用、当前分支无上游、拉取冲突或网络失败，仅写入 warning 并继续启动，避免开机自启时因网络尚未连接而阻止桌宠运行。
+- 2026-05-15：环境配置脚本改为项目本地虚拟环境策略。`setup_env.bat` 不再对全局/Miniforge base 环境执行项目依赖安装，而是创建 `desktop_pet/.desktop_pet_venv`，将依赖安装到本地虚拟环境，并把 `.desktop_pet_venv/Scripts/python.exe` 写入 `data/runtime_python.txt` 供 `start_main.vbs` 使用；为兼容当前机器的临时目录/代理问题，脚本会清理 pip 相关环境变量并使用项目内 `.pip_tmp`、`.pip_cache`。

@@ -5,7 +5,27 @@ cd /d "%~dp0"
 
 set "DATA_DIR=%~dp0data"
 set "RUNTIME_FILE=%DATA_DIR%\runtime_python.txt"
+set "VENV_DIR=%~dp0.desktop_pet_venv"
+set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
+set "PIP_TEMP_DIR=%~dp0.pip_tmp"
+set "PIP_CACHE_DIR=%~dp0.pip_cache"
 set "BASE_PYTHON="
+
+set "PIP_NO_INDEX="
+set "PIP_FIND_LINKS="
+set "PIP_INDEX_URL="
+set "PIP_EXTRA_INDEX_URL="
+set "PIP_CONFIG_FILE="
+set "PIP_PROXY="
+set "HTTP_PROXY="
+set "HTTPS_PROXY="
+set "ALL_PROXY="
+set "NO_PROXY="
+
+if not exist "%PIP_TEMP_DIR%" mkdir "%PIP_TEMP_DIR%"
+if not exist "%PIP_CACHE_DIR%" mkdir "%PIP_CACHE_DIR%"
+set "TEMP=%PIP_TEMP_DIR%"
+set "TMP=%PIP_TEMP_DIR%"
 
 if not exist "requirements.txt" (
     echo requirements.txt was not found.
@@ -52,25 +72,71 @@ echo Using Python:
 echo !BASE_PYTHON!
 echo.
 
-"!BASE_PYTHON!" -c "import PySide6, requests" >nul 2>nul
-if errorlevel 1 (
-    echo Installing project dependencies...
-    "!BASE_PYTHON!" -m pip install -r requirements.txt
+if exist "%VENV_PYTHON%" (
+    "%VENV_PYTHON%" -c "import PySide6, requests" >nul 2>nul
     if errorlevel 1 (
-        echo Failed to install dependencies from requirements.txt.
+        echo Existing virtual environment is missing project dependencies. Recreating it...
+        rmdir /s /q "%VENV_DIR%" >nul 2>nul
+        if exist "%VENV_DIR%" (
+            echo Failed to remove existing virtual environment:
+            echo %VENV_DIR%
+            echo Please close programs that may be using it, delete this folder manually, then run setup_env.bat again.
+            pause
+            exit /b 1
+        )
+    )
+)
+
+if not exist "%VENV_PYTHON%" (
+    if exist "%VENV_DIR%" (
+        echo Existing virtual environment is incomplete. Recreating it...
+        rmdir /s /q "%VENV_DIR%" >nul 2>nul
+        if exist "%VENV_DIR%" (
+            echo Failed to remove incomplete virtual environment:
+            echo %VENV_DIR%
+            echo Please close programs that may be using it, delete this folder manually, then run setup_env.bat again.
+            pause
+            exit /b 1
+        )
+    )
+
+    echo Creating project virtual environment...
+    "!BASE_PYTHON!" -m venv --system-site-packages --without-pip "%VENV_DIR%"
+    if errorlevel 1 (
+        echo Failed to create the project virtual environment.
+        echo No global Python packages were changed.
         pause
         exit /b 1
     )
 )
 
-"!BASE_PYTHON!" -c "import PySide6, requests" >nul 2>nul
+if not exist "%VENV_PYTHON%" (
+    echo Project virtual environment was not created correctly:
+    echo %VENV_PYTHON%
+    pause
+    exit /b 1
+)
+
+"%VENV_PYTHON%" -c "import PySide6, requests" >nul 2>nul
+if errorlevel 1 (
+    echo Installing project dependencies into local virtual environment...
+    "!BASE_PYTHON!" -m pip --python "%VENV_PYTHON%" install -r requirements.txt
+    if errorlevel 1 (
+        echo Failed to install dependencies into the project virtual environment.
+        echo No global Python packages were changed.
+        pause
+        exit /b 1
+    )
+)
+
+"%VENV_PYTHON%" -c "import PySide6, requests" >nul 2>nul
 if errorlevel 1 (
     echo Dependency verification failed.
     pause
     exit /b 1
 )
 
-> "%RUNTIME_FILE%" <nul set /p "=!BASE_PYTHON!"
+> "%RUNTIME_FILE%" <nul set /p "=%VENV_PYTHON%"
 
 echo.
 echo Environment is ready.
@@ -117,6 +183,12 @@ if not exist "%~1" exit /b 1
 if errorlevel 1 exit /b 1
 
 "%~1" -m pip --version >nul 2>nul
+if errorlevel 1 exit /b 1
+
+"%~1" -c "import venv" >nul 2>nul
+if errorlevel 1 exit /b 1
+
+"%~1" -m pip --help | findstr /C:"--python" >nul 2>nul
 if errorlevel 1 exit /b 1
 
 set "BASE_PYTHON=%~1"

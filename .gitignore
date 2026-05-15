@@ -20,6 +20,8 @@ desktop_pet/.pet_venv/
 desktop_pet/.desktop_pet_venv/
 desktop_pet/.tmp/
 desktop_pet/tmp_work/
+desktop_pet/.pip_tmp/
+desktop_pet/.pip_cache/
 desktop_pet/venv/
 desktop_pet/env/
 .venv/

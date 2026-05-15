@@ -3,6 +3,7 @@ Option Explicit
 Dim shell
 Dim fso
 Dim baseDir
+Dim repoDir
 Dim dataDir
 Dim logPath
 Dim showErrorBat
@@ -14,6 +15,7 @@ Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
 
 baseDir = fso.GetParentFolderName(WScript.ScriptFullName)
+repoDir = fso.GetParentFolderName(baseDir)
 dataDir = fso.BuildPath(baseDir, "data")
 logPath = fso.BuildPath(dataDir, "start_main_error.log")
 showErrorBat = fso.BuildPath(dataDir, "show_start_main_error.bat")
@@ -26,6 +28,14 @@ End If
 
 shell.CurrentDirectory = baseDir
 WriteText logPath, "Desktop Pet startup check" & vbCrLf & "Time: " & Now & vbCrLf & vbCrLf
+
+AppendText logPath, "Updating current git branch..." & vbCrLf
+shell.CurrentDirectory = repoDir
+exitCode = RunHidden("cmd.exe /c " & Q("git pull --ff-only >> " & Q(logPath) & " 2>&1"))
+If exitCode <> 0 Then
+    AppendText logPath, "Warning: git pull --ff-only failed with code " & CStr(exitCode) & ". Continuing startup." & vbCrLf
+End If
+shell.CurrentDirectory = baseDir
 
 If fso.FileExists(runtimeFile) Then
     pythonExe = NormalizePath(ReadText(runtimeFile))
