@@ -11,8 +11,8 @@
     "api_key": "",
     "enable_chat_api": true,
     "timeout_seconds": 30,
-    "max_recent_messages": 37,
-    "summary_trigger_rounds": 74
+    "max_recent_messages": 27,
+    "summary_trigger_rounds": 37
   },
   "ui": {
     "always_on_top": true,
@@ -22,7 +22,8 @@
     "start_position": "bottom_right",
     "remember_last_position": true,
     "show_test_menu": false,
-    "show_clear_menu": false
+    "show_clear_menu": false,
+    "show_reload_config": false
   },
   "behavior": {
     "do_not_disturb": false,

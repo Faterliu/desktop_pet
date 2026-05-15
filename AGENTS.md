@@ -68,7 +68,7 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/app/context_menu.py`
 
-- 构建右键菜单，包括测试菜单（由 `ui.show_test_menu` 控制，默认关闭）、清理菜单（由 `ui.show_clear_menu` 控制，默认关闭，可分别清除非正式和正式聊天记录）、人物缩放、免打扰、窗口置顶、自主移动、聊天 API 开关、正式问答模式、重新加载配置和退出。
+- 构建右键菜单，包括测试菜单（由 `ui.show_test_menu` 控制，默认关闭）、清理菜单（由 `ui.show_clear_menu` 控制，默认关闭，可分别清除非正式和正式聊天记录）、重新加载配置（由 `ui.show_reload_config` 控制，默认开启）、人物缩放、免打扰、窗口置顶、自主移动、聊天 API 开关、正式问答模式和退出。
 - 修改场景：新增菜单项或调整菜单可见入口。
 - 注意：菜单回调由 `DesktopPetWindow._show_context_menu()` 注入，新增菜单通常要同步改两处。
 
@@ -143,7 +143,7 @@ wscript.exe .\start_main.vbs
 `desktop_pet/character/behavior_controller.py`
 
 - 管理启动问候、空闲主动话术和时段变化检测。用 `QTimer` 每 60 秒检查空闲和时段，受免打扰、每日上限、空闲时间和等待用户回复状态约束。
-- `_startup_greeting()` 优先使用时段问候（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），对应分组为空时回退到 `startup`。每 5 天周期的第一天额外优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`）。启动问候仍受每日本地话术上限拦截，但成功展示后不再递增 `local_proactive_lines_used`。
+- `_startup_greeting()` 优先使用时段问候（`greeting_morning`/`greeting_noon`/`greeting_afternoon`/`greeting_evening`/`sleepy`），对应分组为空时回退到 `startup`。每 5 天周期的第一天额外优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`）。启动问候仍受每日本地话术上限拦截，但成功展示后不再递增 `local_proactive_lines_used`。
 - `_maybe_idle_prompt()` 和 `trigger_test_speak()` 的话术池会混入当前时段分组。`trigger_test_idle_prompt()` 绕过时间限制测试完整空闲逻辑，返回触发类型和比例字符串。
 - `_check_period_change()` 由 `period_check_timer` 每 60 秒驱动，检测时段或季节是否变化，变化时立即弹出新时段问候。
 - `pick_farewell_line()` 从 `farewell` 分组随机抽取道别语，供退出流程使用。
@@ -160,7 +160,7 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/config/app_config.example.json`
 
-- 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`chat.force_summarize_before_clear`（默认 `true`）控制手动清空前是否强制摘要。
+- 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`ui.show_reload_config` 控制“重新加载配置”菜单项显隐（默认 `true`）、`chat.force_summarize_before_clear`（默认 `true`）控制手动清空前是否强制摘要。
 - 修改场景：新增可配置项时必须同步更新此文件，并确认读取路径。
 
 `desktop_pet/config/app_config.json`
@@ -173,7 +173,7 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/config/local_lines.json`
 
-- 本地主动话术和提示文案。`BehaviorController` 当前主要使用 `startup`、`idle`、`quiet`、`encourage`，以及时段分组 `greeting_morning`、`greeting_noon`、`greeting_evening`、`sleepy`，季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter`。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。知识问候确认使用 `reply`。
+- 本地主动话术和提示文案。`BehaviorController` 当前主要使用 `startup`、`idle`、`quiet`、`encourage`，以及时段分组 `greeting_morning`、`greeting_noon`、`greeting_afternoon`、`greeting_evening`、`sleepy`，季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter`。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。知识问候确认使用 `reply`。
 
 `desktop_pet/config/safety_rules.json`
 
@@ -230,7 +230,7 @@ wscript.exe .\start_main.vbs
 主动行为流：
 
 1. `BehaviorController` 启动后设置空闲检查计时器，每 60 秒检查一次。
-2. 启动问候受 `do_not_disturb`、`startup_greeting`、每日本地话术上限约束，优先使用当前时段对应的问候分组（`greeting_morning`/`greeting_noon`/`greeting_evening`/`sleepy`），该分组为空时回退到 `startup`；成功展示后不计入本地主动话术次数。
+2. 启动问候受 `do_not_disturb`、`startup_greeting`、每日本地话术上限约束，优先使用当前时段对应的问候分组（`greeting_morning`/`greeting_noon`/`greeting_afternoon`/`greeting_evening`/`sleepy`），该分组为空时回退到 `startup`；成功展示后不计入本地主动话术次数。
 3. 空闲主动话术受 `proactive_chat`、`min_proactive_interval_minutes`、`awaiting_user_reply`、`last_proactive_at` 和每日上限约束，话术池从 `idle`/`quiet`/`encourage` 加当前时段分组中随机选取。
 4. 触发后发出 `speak_requested(text, duration_ms, action_name)`。
 5. `DesktopPetWindow._handle_behavior_speak()` 在未聊天且输入框不可见时显示气泡并切动作。
@@ -523,3 +523,5 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-13：增强快速启动脚本的新环境兼容性。`start_main.bat --console` 读取 `runtime_python.txt` 时也通过 PowerShell 清理 BOM、回车、换行、制表符和空格；`setup_env.bat` 在 `winget` 安装 Python 后若当前终端还找不到可用解释器，会提示重新运行脚本，仍失败再重开终端或重启系统。
 - 2026-05-15：启动脚本增加代码更新步骤。`desktop_pet/start_main.vbs` 在启动 `main.py` 前切到仓库根目录执行 `git pull --ff-only`，将输出写入 `data/start_main_error.log`；若 Git 不可用、当前分支无上游、拉取冲突或网络失败，仅写入 warning 并继续启动，避免开机自启时因网络尚未连接而阻止桌宠运行。
 - 2026-05-15：环境配置脚本改为项目本地虚拟环境策略。`setup_env.bat` 不再对全局/Miniforge base 环境执行项目依赖安装，而是创建 `desktop_pet/.desktop_pet_venv`，将依赖安装到本地虚拟环境，并把 `.desktop_pet_venv/Scripts/python.exe` 写入 `data/runtime_python.txt` 供 `start_main.vbs` 使用；为兼容当前机器的临时目录/代理问题，脚本会清理 pip 相关环境变量并使用项目内 `.pip_tmp`、`.pip_cache`。
+- 2026-05-15：`重新加载配置` 菜单项增加配置开关。`context_menu.py` 的 `build_context_menu()` 新增 `show_reload_config` 参数，`DesktopPetWindow._show_context_menu()` 从 `ui.show_reload_config` 读取并传入；`app_config.example.json` 新增同名配置项，默认 `true`，用于控制右键菜单中的“重新加载配置”按钮是否显示。
+- 2026-05-15：时段问候新增“下午”分组。`BehaviorController._time_greeting_key()` 改为按 24 小时划分为 `7-11` 早晨、`11-14` 中午、`14-18` 下午、`18-22` 晚上、其余时间 `sleepy`；`local_lines.json` 新增 `greeting_afternoon` 本地问候话术，并同步更新 `AGENTS.md` 中 behavior_controller、local_lines 和主动行为流说明。

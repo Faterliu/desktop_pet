@@ -27,6 +27,7 @@ def build_context_menu(
     always_on_top: bool,
     show_test_menu: bool,
     show_clear_menu: bool,
+    show_reload_config: bool,
     on_set_scale: Callable[[float], None],
     on_custom_scale: Callable[[], None],
     on_toggle_dnd: Callable[[bool], None],
@@ -173,9 +174,10 @@ def build_context_menu(
         clear_formal_action.triggered.connect(on_clear_formal_chat)
         menu.addAction(clear_formal_action)
 
-    reload_action = QAction("重新加载配置", menu)
-    reload_action.triggered.connect(on_reload_config)
-    menu.addAction(reload_action)
+    if show_reload_config:
+        reload_action = QAction("重新加载配置", menu)
+        reload_action.triggered.connect(on_reload_config)
+        menu.addAction(reload_action)
 
     menu.addSeparator()
     exit_action = QAction("退出", menu)

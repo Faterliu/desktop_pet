@@ -420,6 +420,7 @@ class DesktopPetWindow(QWidget):
             always_on_top=bool(self._ui_config().get("always_on_top", True)),
             show_test_menu=bool(self._ui_config().get("show_test_menu", False)),
             show_clear_menu=bool(self._ui_config().get("show_clear_menu", False)),
+            show_reload_config=bool(self._ui_config().get("show_reload_config", True)),
             on_clear_informal_chat=self._clear_informal_chat_history,
             on_clear_formal_chat=self._clear_formal_chat_history,
         )

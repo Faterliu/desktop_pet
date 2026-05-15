@@ -286,11 +286,13 @@ class BehaviorController(QObject):
     def _time_greeting_key(self) -> str | None:
         """根据当前本地时间返回对应的时段问候分组 key。"""
         hour = now_local().hour
-        if 5 <= hour < 11:
+        if 7 <= hour < 11:
             return "greeting_morning"
-        if 11 <= hour < 17:
+        if 11 <= hour < 14:
             return "greeting_noon"
-        if 17 <= hour < 22:
+        if 14 <= hour < 18:
+            return "greeting_afternoon"
+        if 18 <= hour < 22:
             return "greeting_evening"
         return "sleepy"
 
