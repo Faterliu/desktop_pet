@@ -60,10 +60,10 @@ class Summarizer:
             logger.error("Summary generation failed: %s", exc)
             return
 
+        extracted_memory = payload.pop("memory_updates", {})
         payload["covered_message_count"] = len(history)
         payload["last_updated"] = now_iso()
         save_json(self.summary_path, payload)
-        extracted_memory = payload.pop("memory_updates", {})
         if extracted_memory:
             self.memory_store.merge(extracted_memory)
 
@@ -75,24 +75,49 @@ class Summarizer:
         )
 
     def _summarize_history(self, history: list[dict[str, Any]]) -> dict[str, Any]:
-        """优先调用模型生成结构化摘要，失败时退回本地摘要。"""
-        if self.deepseek_client.is_configured():
-            try:
-                content = self.deepseek_client.chat(self._summary_messages(history))
-                parsed = json.loads(content)
-                if isinstance(parsed, dict):
-                    return {
-                        "summary": str(parsed.get("summary", "")).strip(),
-                        "highlights": parsed.get("highlights", []),
-                        "memory_updates": parsed.get("memory_updates", {}),
-                    }
-            except (DeepSeekError, json.JSONDecodeError) as exc:
-                logger.warning("Falling back to local summary after model failure: %s", exc)
+        """Prefer model summary; fall back to local summary on failure."""
+        if not self.deepseek_client.is_configured():
+            return self._local_summary(history)
 
-        return self._local_summary(history)
+        summary_payload = self._model_summary(history)
+        if summary_payload is None:
+            return self._local_summary(history)
+
+        summary_payload["memory_updates"] = self._model_memory_updates(history)
+        return summary_payload
+
+    def _model_summary(self, history: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Build summary and highlights from the full conversation."""
+        try:
+            content = self.deepseek_client.chat(self._summary_messages(history))
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return {
+                    "summary": str(parsed.get("summary", "")).strip(),
+                    "highlights": self._string_list(parsed.get("highlights", [])),
+                }
+        except (DeepSeekError, json.JSONDecodeError) as exc:
+            logger.warning("Falling back to local summary after model failure: %s", exc)
+        return None
+
+    def _model_memory_updates(self, history: list[dict[str, Any]]) -> dict[str, Any]:
+        """仅从用户消息中提取记忆信息。避免把助手说过的话当成用户事实。"""
+        user_history = self._user_history(history)
+        if not user_history:
+            return {}
+
+        try:
+            content = self.deepseek_client.chat(self._memory_messages(user_history))
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return self._normalize_memory_updates(parsed)
+        except (DeepSeekError, json.JSONDecodeError) as exc:
+            logger.warning("Falling back to local memory extraction after model failure: %s", exc)
+
+        return self._extract_memory(user_history[-12:])
 
     def _summary_messages(self, history: list[dict[str, Any]]) -> list[dict[str, str]]:
-        """把历史对话包装成用于摘要任务的提示词消息。"""
+        """从近期对话构建模型摘要输入，保留角色信息以便模型区分用户和助手发言。"""
         transcript = "\n".join(
             f"{item.get('role', 'user')}: {item.get('content', '')}" for item in history[-24:]
         )
@@ -101,11 +126,29 @@ class Summarizer:
                 "role": "system",
                 "content": (
                     "请把以下对话总结成 JSON，不要输出 JSON 之外的任何内容。"
-                    "格式必须是："
-                    '{"summary":"",'
-                    '"highlights":[""],'
-                    '"memory_updates":{"user_profile":{"preferences":[],"communication_style":[],"important_personal_notes":[]},'
-                    '"work_study":{"current_learning_topics":[],"current_projects":[],"useful_context":[]}}}'
+                    "这一轮只负责生成对话摘要和高光，不要提取用户记忆。"
+                    '格式必须是：{"summary":"","highlights":[""]}'
+                ),
+            },
+            {"role": "user", "content": transcript},
+        ]
+
+    def _memory_messages(self, history: list[dict[str, Any]]) -> list[dict[str, str]]:
+        """仅从用户消息中构建记忆提取输入。"""
+        transcript = "\n".join(
+            f"user: {item.get('content', '')}" for item in history[-24:] if item.get("content")
+        )
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "你现在只能根据用户自己的发言提取可长期保存的记忆。"
+                    "不要使用助手回复，不要脑补，不要把助手说过的话当成用户事实。"
+                    "只提取用户明确表达过的偏好、沟通风格、个人备注、学习主题、当前项目等信息。"
+                    "如果不确定就留空，不要猜。"
+                    "请严格输出 JSON："
+                    '{"user_profile":{"preferences":[],"communication_style":[],"important_personal_notes":[]},'
+                    '"work_study":{"current_learning_topics":[],"current_projects":[],"useful_context":[]}}'
                 ),
             },
             {"role": "user", "content": transcript},
@@ -159,3 +202,46 @@ class Summarizer:
                 "useful_context": [],
             },
         }
+
+    def _user_history(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """仅返回非空的用户消息."""
+        return [
+            item
+            for item in history
+            if item.get("role") == "user" and str(item.get("content", "")).strip()
+        ]
+
+    def _normalize_memory_updates(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """标准化记忆更新数据."""
+        user_profile = payload.get("user_profile", {})
+        work_study = payload.get("work_study", {})
+        return {
+            "user_profile": {
+                "preferences": self._string_list(user_profile.get("preferences", [])),
+                "communication_style": self._string_list(
+                    user_profile.get("communication_style", [])
+                ),
+                "important_personal_notes": self._string_list(
+                    user_profile.get("important_personal_notes", [])
+                ),
+            },
+            "work_study": {
+                "current_learning_topics": self._string_list(
+                    work_study.get("current_learning_topics", [])
+                ),
+                "current_projects": self._string_list(work_study.get("current_projects", [])),
+                "useful_context": self._string_list(work_study.get("useful_context", [])),
+            },
+        }
+
+    def _string_list(self, value: Any) -> list[str]:
+        """将任意输入标准化为去重的非空字符串列表."""
+        if not isinstance(value, list):
+            return []
+
+        normalized: list[str] = []
+        for item in value:
+            text = str(item).strip()
+            if text and text not in normalized:
+                normalized.append(text)
+        return normalized

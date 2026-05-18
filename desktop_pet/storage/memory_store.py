@@ -8,7 +8,7 @@ from utils.time_utils import now_iso
 
 
 DEFAULT_MEMORY = {
-    "schema_version": "0.1",
+    "schema_version": "1.0",
     "user_profile": {
         "preferences": [],
         "communication_style": [],

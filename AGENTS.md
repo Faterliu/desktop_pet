@@ -123,6 +123,7 @@ wscript.exe .\start_main.vbs
 `desktop_pet/ai/summarizer.py`
 
 - 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。`maybe_summarize()` 支持 `force` 参数，为 True 时跳过轮数检查，供手动清空聊天记录前使用；但若历史中没有非空用户消息，会直接跳过，避免空聊天记录生成错误记忆。
+- 当前模型摘要与模型记忆提取已拆分：摘要仍基于最近完整对话生成，但 `memory_updates` 只基于用户发言单独提取，避免把人物/助手回答混入 `memory.json`；摘要文件本身不再落盘 `memory_updates`。
 - 修改场景：摘要结构、记忆提取、失败兜底。
 - 风险：摘要在线程中触发，异常不能影响正常聊天。
 
@@ -484,6 +485,7 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 
 ## 文档同步记录
 
+- 2026-05-18：修复模型记忆混入人物回答的问题。`Summarizer` 将“对话摘要”和“记忆提取”拆为两次独立流程：摘要继续基于最近完整对话生成，但模型 `memory_updates` 改为只喂用户发言单独提取，失败时退回仅看用户消息的本地规则提取；同时 `conversation_summary_*.json` 不再落盘 `memory_updates`。同步更新 `AGENTS.md` 中 `summarizer.py` 描述。
 - 2026-05-11：新建 `AGENTS.md`。基于当前项目入口、配置、依赖、需求文档、核心业务目录和现有代码梳理项目结构、运行流程、模块关系、常见修改路径、风险区域、常用命令、依赖服务和待确认问题；同时在 `.gitignore` 中放行根目录 `AGENTS.md`，确保该智能体文档可随程序本体提交。本次未改变程序代码。
 - 2026-05-11：`BehaviorController` 新增 `_time_greeting_key()` 根据本地时间返回时段问候分组（早/午/晚/深夜），启动问候优先时段话术、空闲和测试话术池混入时段分组；新增 `pick_farewell_line()` 退出时从 `farewell` 组抽取道别语。`DesktopPetWindow.request_exit()` 退出时播放 waving 并显示道别气泡。同步更新 `AGENTS.md` 中 behavior_controller、local_lines、主动行为流、DesktopPetWindow 描述。
 - 2026-05-11：新增双击识别功能。`DesktopPetWindow` 新增 `mouseDoubleClickEvent`，双击人物触发 `pick_reply_line()` 从 `break_reminder`/`comfort`/`encourage` 随机抽取话术并播放 waving；`mouseReleaseEvent` 改用 `_click_timer` 延迟区分单击与双击，避免双击时误开聊天输入框。`BehaviorController` 新增 `pick_reply_line()`。
