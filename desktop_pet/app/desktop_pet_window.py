@@ -934,7 +934,7 @@ class DesktopPetWindow(QWidget):
         if source == "assistant" and self._formal_qa_enabled():
             self._show_formal_answer_panel(question, text)
             return
-        duration_ms = 15000 if source == "assistant" else 9000
+        duration_ms = self._assistant_reply_bubble_duration_ms() if source == "assistant" else 9000
         self._display_message(text, duration_ms, source)
 
     def _show_formal_answer_panel(self, question: str, answer: str) -> None:
@@ -1196,6 +1196,15 @@ class DesktopPetWindow(QWidget):
     def _chat_config(self) -> dict[str, Any]:
         """返回聊天配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("chat", {})
+
+    def _assistant_reply_bubble_duration_ms(self) -> int:
+        """Read the regular assistant reply bubble duration from config."""
+        durations = self._ui_config().setdefault("bubble_durations_ms", {})
+        try:
+            value = int(durations.get("assistant_reply", 15000))
+        except (TypeError, ValueError):
+            return 15000
+        return value if value > 0 else 15000
 
     def _active_chat_store(self) -> ChatStore:
         """返回当前模式对应的聊天存储实例。"""

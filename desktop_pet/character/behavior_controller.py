@@ -23,7 +23,7 @@ class BehaviorController(QObject):
         usage_store: UsageStore,
         config_loader: Callable[[], dict[str, Any]],
     ) -> None:
-        """初始化主动行为控制器，并启动空闲检测计时器。"""
+        """Coordinate proactive greetings and time-based local behavior."""
         super().__init__()
         self.app_config_path = Path(app_config_path)
         self.local_lines_path = Path(local_lines_path)
@@ -47,12 +47,12 @@ class BehaviorController(QObject):
         self.period_check_timer.timeout.connect(self._check_period_change)
 
     def start(self) -> None:
-        """在应用启动后延迟触发一次启动问候，并启动时段变化检测。"""
+        """Trigger the startup greeting and begin period checks."""
         QTimer.singleShot(1200, self._startup_greeting)
         self.period_check_timer.start(60_000)
 
     def reload(self) -> None:
-        """重置行为状态，供重新加载配置后继续使用。"""
+        """Reset controller state after app config reload."""
         self.last_user_interaction = now_local()
         self.awaiting_user_reply = False
         self._consecutive_unanswered = 0
@@ -61,30 +61,30 @@ class BehaviorController(QObject):
         self._last_season_key = self._season_key()
 
     def notify_user_interaction(self) -> None:
-        """记录用户刚刚发生过交互，取消等待回复状态，重置连续未回应计数。"""
+        """Mark that the user interacted and clear unanswered counters."""
         self.last_user_interaction = now_local()
         self.awaiting_user_reply = False
         self._consecutive_unanswered = 0
 
     def notify_proactive_shown(self, proactive_type: str = "regular_greeting") -> None:
-        """记录刚展示过主动消息、类型，并标记等待用户回应。"""
+        """Mark that a proactive message was shown and await a reply."""
         self.last_proactive_at = now_local()
         self.awaiting_user_reply = True
         self._last_proactive_type = proactive_type
 
     def notify_proactive_response(self) -> None:
-        """用户回应主动问候后，调整对应问候类型的比例。"""
+        """Adjust proactive-content ratio after the user responds."""
         if self._last_proactive_type:
             self._adjust_ratio(self._last_proactive_type)
 
     def _proactive_ratio(self) -> dict[str, float]:
-        """读取当前主动问候内容比例配置。"""
+        """Read the proactive-content ratio configuration."""
         config = self.config_loader()
         default = {"extra_knowledge": 0.5, "regular_greeting": 0.5}
         return config.setdefault("proactive_content_ratio", default)
 
     def _adjust_ratio(self, responded_type: str) -> None:
-        """用户回应对应类型后微调问候类型比例。"""
+        """Slightly bias future proactive content toward what got a response."""
         config = self.config_loader()
         ratio = self._proactive_ratio()
         other_type = "extra_knowledge" if responded_type == "regular_greeting" else "regular_greeting"
@@ -93,12 +93,22 @@ class BehaviorController(QObject):
         config["proactive_content_ratio"] = ratio
 
     def set_do_not_disturb(self, enabled: bool) -> None:
-        """更新内存中的免打扰开关状态。"""
+        """Update the in-memory do-not-disturb flag."""
         config = self.config_loader()
         config.setdefault("behavior", {})["do_not_disturb"] = enabled
 
+    def _bubble_duration_ms(self, key: str, default: int) -> int:
+        """Read a positive bubble duration from ui.bubble_durations_ms."""
+        config = self.config_loader()
+        durations = config.setdefault("ui", {}).setdefault("bubble_durations_ms", {})
+        try:
+            value = int(durations.get(key, default))
+        except (TypeError, ValueError):
+            return default
+        return value if value > 0 else default
+
     def _startup_greeting(self) -> None:
-        """满足条件时发送启动问候，周期首日优先季节问候，其次时段问候。"""
+        """Show the startup greeting when constraints allow it."""
         config = self.config_loader()
         behavior = config.get("behavior", {})
         if behavior.get("do_not_disturb") or not behavior.get("startup_greeting", True):
@@ -106,6 +116,7 @@ class BehaviorController(QObject):
         max_daily = int(behavior.get("max_local_lines_per_day", 10))
         if not self.usage_store.can_use_local(max_daily):
             return
+
         line = ""
         if self._is_cycle_start():
             line = self._random_line(self._season_key())
@@ -114,12 +125,17 @@ class BehaviorController(QObject):
             line = self._random_line(time_key) if time_key else ""
         if not line:
             line = self._random_line("startup")
+
         if line:
             self.notify_proactive_shown()
-            self.speak_requested.emit(line, 7000, "waving")
+            self.speak_requested.emit(
+                line,
+                self._bubble_duration_ms("startup_greeting", 7000),
+                "waving",
+            )
 
     def _dynamic_proactive_interval_minutes(self) -> int:
-        """根据连续未回应次数返回动态主动问候间隔（分钟）。"""
+        """Increase the idle greeting interval after unanswered prompts."""
         if self._consecutive_unanswered <= 1:
             return 15
         if self._consecutive_unanswered == 2:
@@ -129,7 +145,7 @@ class BehaviorController(QObject):
         return 60
 
     def _has_memory_content(self) -> bool:
-        """检查 memory.json 中是否含有对用户有用的记忆信息。"""
+        """Check whether memory.json has any useful stored user context."""
         memory = load_json(self.memory_path, {})
         user_profile = memory.get("user_profile", {})
         work_study = memory.get("work_study", {})
@@ -140,7 +156,7 @@ class BehaviorController(QObject):
         return False
 
     def _maybe_idle_prompt(self) -> None:
-        """在用户空闲足够久时尝试发送一条主动陪伴消息。"""
+        """Try to show an idle-time proactive message."""
         config = self.config_loader()
         behavior = config.get("behavior", {})
         if behavior.get("do_not_disturb") or not behavior.get("proactive_chat", True):
@@ -160,7 +176,6 @@ class BehaviorController(QObject):
         if self.awaiting_user_reply:
             self._consecutive_unanswered += 1
 
-        # 根据比例选择问候类型
         ratio = self._proactive_ratio()
         extra_weight = ratio.get("extra_knowledge", 0.5)
         if self._has_memory_content() and random.random() < extra_weight:
@@ -169,7 +184,7 @@ class BehaviorController(QObject):
             self._consecutive_unanswered = 0
             return
 
-        line_types = ["idle", "quiet", "encourage","break_reminder"]
+        line_types = ["idle", "quiet", "encourage", "break_reminder"]
         time_key = self._time_greeting_key()
         if time_key:
             line_types.append(time_key)
@@ -177,13 +192,18 @@ class BehaviorController(QObject):
         line = self._random_line(line_type)
         if not line:
             return
+
         self.usage_store.increment_local_line()
         self.notify_proactive_shown("regular_greeting")
-        self.speak_requested.emit(line, 6000, "waving")
+        self.speak_requested.emit(
+            line,
+            self._bubble_duration_ms("proactive_greeting", 6000),
+            "waving",
+        )
         self._consecutive_unanswered = 0
 
     def _check_period_change(self) -> None:
-        """检测时段或季节是否变化，变化时立即弹出新时段问候。"""
+        """Show a time-of-day greeting when the period changes."""
         config = self.config_loader()
         behavior = config.get("behavior", {})
         if behavior.get("do_not_disturb"):
@@ -203,10 +223,14 @@ class BehaviorController(QObject):
             if line:
                 self.usage_store.increment_local_line()
                 self.notify_proactive_shown()
-                self.speak_requested.emit(line, 7000, "waving")
+                self.speak_requested.emit(
+                    line,
+                    self._bubble_duration_ms("period_greeting", 7000),
+                    "waving",
+                )
 
     def trigger_test_speak(self) -> bool:
-        """立即触发一次测试主动说话，不受冷却时间限制。"""
+        """Immediately show a test proactive line."""
         line_types = ["startup", "idle", "quiet", "encourage"]
         time_key = self._time_greeting_key()
         if time_key:
@@ -215,12 +239,17 @@ class BehaviorController(QObject):
         line = self._random_line(line_type)
         if not line:
             return False
+
         self.notify_proactive_shown()
-        self.speak_requested.emit(line, 6000, "waving")
+        self.speak_requested.emit(
+            line,
+            self._bubble_duration_ms("proactive_greeting", 6000),
+            "waving",
+        )
         return True
 
     def trigger_test_idle_prompt(self) -> str:
-        """立即触发一次空闲问候逻辑，绕过时间间隔限制，返回触发的问候类型。"""
+        """Run the idle-prompt logic once for testing and report the result."""
         saved_interaction = self.last_user_interaction
         saved_proactive = self.last_proactive_at
         saved_type = self._last_proactive_type
@@ -235,56 +264,60 @@ class BehaviorController(QObject):
             self._last_proactive_type = saved_type
             self.last_user_interaction = saved_interaction
             self.last_proactive_at = saved_proactive
+
         ratio = self._proactive_ratio()
         extra = ratio.get("extra_knowledge", 0.5)
         regular = ratio.get("regular_greeting", 0.5)
         if result_type == "extra_knowledge":
-            return f"知识问候 (比例 extra={extra:.2f} regular={regular:.2f})"
+            return f"知识问候(比例 extra={extra:.2f} regular={regular:.2f})"
         if result_type == "regular_greeting":
-            return f"普通问候 (比例 extra={extra:.2f} regular={regular:.2f})"
-        return f"未触发 (可能被免打扰/上限/无话术阻断, 比例 extra={extra:.2f} regular={regular:.2f})"
+            return f"普通问候(比例 extra={extra:.2f} regular={regular:.2f})"
+        return (
+            f"未触发(可能被免打扰/上限/无话术阻断; "
+            f"比例 extra={extra:.2f} regular={regular:.2f})"
+        )
 
     def pick_farewell_line(self) -> str:
-        """从 farewell 分组中随机抽取一句道别话术。"""
+        """Pick a farewell line for exit flow."""
         return self._random_line("farewell")
 
     def pick_reply_line(self) -> str:
-        """从回复系分组中随机抽取一句回应话术。"""
-        group = random.choice(["break_reminder", "comfort", "encourage","happy"])
+        """Pick a reply line for the avatar double-click interaction."""
+        group = random.choice(["break_reminder", "comfort", "encourage", "happy"])
         return self._random_line(group)
 
     def pick_feedback_line(self) -> str:
-        """从 feedback 分组中随机抽取一句反馈话术，用于用户回应主动问候时。"""
+        """Pick feedback line used after a proactive greeting reply window."""
         return self._random_line("feedback")
 
     def is_within_proactive_reply_window(self, window_seconds: int = 60) -> bool:
-        """判断当前是否在主动问候后的回复窗口内。"""
+        """Check whether we are still inside the proactive reply window."""
         if self.last_proactive_at is None:
             return False
         return now_local() - self.last_proactive_at < timedelta(seconds=window_seconds)
 
     def pick_ignored_line(self) -> str:
-        """从 ignored 分组中随机抽取一句话术，用于关闭置顶时回应。"""
+        """Pick a line used when turning off always-on-top."""
         return self._random_line("ignored")
 
     def pick_return_after_idle_line(self) -> str:
-        """从 return_after_idle 分组中随机抽取一句话术，用于开启置顶时回应。"""
+        """Pick a line used when turning on always-on-top."""
         return self._random_line("return_after_idle")
 
     def pick_waiting_line(self) -> str:
-        """从 waiting 分组中随机抽取一句等待提示话术。"""
+        """Pick a waiting prompt line."""
         return self._random_line("waiting")
 
     def pick_reply_ack_line(self) -> str:
-        """从 reply 分组中随机抽取一句简短应答话术。"""
+        """Pick a short acknowledgment line for knowledge greeting reply bubble."""
         return self._random_line("reply")
 
     def pick_poetry_line(self) -> str:
-        """从 poetry 分组中随机抽取一首诗。"""
+        """Pick one poetry line from local config."""
         return self._random_line("poetry")
 
     def _time_greeting_key(self) -> str | None:
-        """根据当前本地时间返回对应的时段问候分组 key。"""
+        """Return the current local time greeting bucket."""
         hour = now_local().hour
         if 7 <= hour < 11:
             return "greeting_morning"
@@ -297,7 +330,7 @@ class BehaviorController(QObject):
         return "sleepy"
 
     def _season_key(self) -> str:
-        """根据当前月份返回对应的季节分组 key。"""
+        """Return the current season greeting bucket."""
         month = now_local().month
         if 3 <= month <= 5:
             return "greeting_spring"
@@ -308,12 +341,12 @@ class BehaviorController(QObject):
         return "greeting_winter"
 
     def _is_cycle_start(self) -> bool:
-        """判断今天是否为 5 天周期的第一天。"""
+        """Return whether today is the first day of the 5-day cycle."""
         yday = now_local().timetuple().tm_yday
         return (yday - 1) % 5 == 0
 
     def _random_line(self, group_name: str) -> str:
-        """从指定话术分组中随机抽取一句文本。"""
+        """Pick a random line from the given local-lines group."""
         payload = load_json(self.local_lines_path, {})
         lines = payload.get(group_name, [])
         if not lines:

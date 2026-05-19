@@ -21,6 +21,12 @@
     "click_to_chat": true,
     "start_position": "bottom_right",
     "remember_last_position": true,
+    "bubble_durations_ms": {
+      "startup_greeting": 7000,
+      "period_greeting": 7000,
+      "proactive_greeting": 6000,
+      "assistant_reply": 15000
+    },
     "show_test_menu": false,
     "show_clear_menu": false,
     "show_reload_config": false
