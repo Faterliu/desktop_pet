@@ -1,2 +1,3 @@
 PySide6
 requests
+mem0ai==2.0.2

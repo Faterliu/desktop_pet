@@ -30,12 +30,16 @@ class Summarizer:
         chat_store: ChatStore,
         memory_store: MemoryStore,
         deepseek_client: DeepSeekClient,
+        mem0_memory_service: Any | None = None,
+        user_id: str = "default_user",
     ) -> None:
         """初始化摘要器，关联摘要文件、聊天记录、记忆存储和模型客户端。"""
         self.summary_path = Path(summary_path)
         self.chat_store = chat_store
         self.memory_store = memory_store
         self.deepseek_client = deepseek_client
+        self.mem0_memory_service = mem0_memory_service
+        self.user_id = user_id
 
     def load_summary(self) -> dict[str, Any]:
         """读取当前对话摘要数据。"""
@@ -66,6 +70,54 @@ class Summarizer:
         save_json(self.summary_path, payload)
         if extracted_memory:
             self.memory_store.merge(extracted_memory)
+            self._write_memory_updates_to_mem0(extracted_memory)
+
+    def _write_memory_updates_to_mem0(self, memory_updates: dict[str, Any]) -> None:
+        """Best-effort shadow write of extracted memory updates into Mem0."""
+        if self.mem0_memory_service is None:
+            return
+
+        mode = self._summary_mode()
+        for memory_text in self._iter_memory_texts(memory_updates):
+            try:
+                self.mem0_memory_service.add_memory_text(
+                    user_id=self.user_id,
+                    text=memory_text,
+                    metadata={
+                        "source": "summarizer",
+                        "mode": mode,
+                        "backend": "mem0",
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Failed to shadow-write memory update to Mem0: %s", exc)
+
+    def _iter_memory_texts(self, value: Any) -> list[str]:
+        """Flatten the structured memory update payload into unique text items."""
+        texts: list[str] = []
+
+        def visit(node: Any) -> None:
+            if isinstance(node, dict):
+                for item in node.values():
+                    visit(item)
+            elif isinstance(node, list):
+                for item in node:
+                    visit(item)
+            elif isinstance(node, str):
+                text = node.strip()
+                if text and text not in texts:
+                    texts.append(text)
+
+        visit(value)
+        return texts
+
+    def _summary_mode(self) -> str:
+        name = self.summary_path.name.lower()
+        if "formal" in name:
+            return "formal"
+        if "informal" in name:
+            return "informal"
+        return "unknown"
 
     def _has_summarizable_history(self, history: list[dict[str, Any]]) -> bool:
         """只有存在非空用户消息时才允许摘要和记忆更新。"""

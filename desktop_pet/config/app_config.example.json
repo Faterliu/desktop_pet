@@ -45,6 +45,25 @@
     "formal_answer_display": "new_panel",
     "force_summarize_before_clear": true
   },
+  "memory": {
+    "enable_mem0": false,
+    "mem0_write_mode": "shadow",
+    "inject_mem0_to_prompt": false,
+    "use_mem0_for_knowledge_speak": false,
+    "mem0_user_id": "default_user",
+    "mem0_search_top_k": 5,
+    "mem0_llm_provider": "deepseek",
+    "mem0_use_app_deepseek_config": true,
+    "mem0_deepseek_model": "",
+    "mem0_deepseek_base_url": "",
+    "mem0_temperature": 0.2,
+    "mem0_max_tokens": 2000,
+    "mem0_top_p": 1.0,
+    "mem0_embedder_provider": "default",
+    "write_sensitive_memory": false,
+    "mem0_init_timeout_seconds": 10,
+    "mem0_note": "Mem0 is optional. Keep disabled unless dependencies and API/embedder configuration are ready."
+  },
   "proactive_content_ratio": {
     "extra_knowledge": 0.5,
     "regular_greeting": 0.5

@@ -22,6 +22,7 @@ class BehaviorController(QObject):
         local_lines_path: str | Path,
         usage_store: UsageStore,
         config_loader: Callable[[], dict[str, Any]],
+        memory_checker: Callable[[], bool] | None = None,
     ) -> None:
         """Coordinate proactive greetings and time-based local behavior."""
         super().__init__()
@@ -29,6 +30,7 @@ class BehaviorController(QObject):
         self.local_lines_path = Path(local_lines_path)
         self.usage_store = usage_store
         self.config_loader = config_loader
+        self.memory_checker = memory_checker
         self.memory_path = self.app_config_path.parent.parent / "data" / "memory.json"
 
         self.last_user_interaction = now_local()
@@ -146,6 +148,14 @@ class BehaviorController(QObject):
 
     def _has_memory_content(self) -> bool:
         """Check whether memory.json has any useful stored user context."""
+        memory_config = self.config_loader().get("memory", {})
+        if memory_config.get("use_mem0_for_knowledge_speak", False) and self.memory_checker:
+            try:
+                if self.memory_checker():
+                    return True
+            except Exception:
+                pass
+
         memory = load_json(self.memory_path, {})
         user_profile = memory.get("user_profile", {})
         work_study = memory.get("work_study", {})

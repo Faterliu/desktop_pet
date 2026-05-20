@@ -66,6 +66,7 @@ class PromptBuilder:
         user_message: str,
         recent_messages: list[dict[str, Any]] | None = None,
         formal_qa_mode: bool = False,
+        relevant_memories: str | None = None,
     ) -> list[dict[str, str]]:
         """组装发送给模型的完整 messages 列表。"""
         character = load_json(self.character_path, DEFAULT_CHARACTER)
@@ -114,6 +115,22 @@ class PromptBuilder:
         if memory_text:
             system_messages.append(
                 {"role": "system", "content": f"以下是你记得的用户信息，请自然参考：\n{memory_text}"}
+            )
+
+        if relevant_memories:
+            system_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "以下是与当前用户输入相关的长期记忆，仅在有帮助时自然参考：\n"
+                        f"{relevant_memories}\n\n"
+                        "使用这些长期记忆时必须遵守：\n"
+                        "- 不要向用户暴露记忆系统、Mem0、JSON、数据库等实现细节。\n"
+                        "- 不要频繁说“我记得”。\n"
+                        "- 如果长期记忆与用户当前表达冲突，以用户当前表达为准。\n"
+                        "- 涉及敏感内容时，不要主动展开；只有用户当前主动提到时才谨慎参考。\n"
+                    ),
+                }
             )
 
         if formal_qa_mode:

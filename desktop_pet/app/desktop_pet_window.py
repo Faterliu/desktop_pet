@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QWidget
 
 from ai.context_manager import ContextManager
 from ai.deepseek_client import DeepSeekClient, DeepSeekError
+from ai.mem0_memory_service import Mem0MemoryService
 from ai.prompt_builder import PromptBuilder
 from ai.summarizer import Summarizer
 from animation.sprite_player import SpritePlayer
@@ -52,6 +53,9 @@ class ChatWorker(QObject):
         prompt_builder: PromptBuilder,
         context_manager: ContextManager,
         formal_qa_mode: bool,
+        mem0_memory_service: Mem0MemoryService | None = None,
+        user_id: str = "default_user",
+        app_config: dict[str, Any] | None = None,
     ) -> None:
         """初始化后台聊天任务，持有本次请求所需依赖。"""
         super().__init__()
@@ -60,6 +64,9 @@ class ChatWorker(QObject):
         self.prompt_builder = prompt_builder
         self.context_manager = context_manager
         self.formal_qa_mode = formal_qa_mode
+        self.mem0_memory_service = mem0_memory_service
+        self.user_id = user_id
+        self.app_config = app_config or {}
 
     def run(self) -> None:
         """在工作线程中构建消息并请求模型回复。"""
@@ -71,10 +78,12 @@ class ChatWorker(QObject):
                 and recent_messages[-1].get("content") == self.user_message
             ):
                 recent_messages = recent_messages[:-1]
+            relevant_memories = self._relevant_memories()
             messages = self.prompt_builder.build_messages(
                 self.user_message,
                 recent_messages,
                 formal_qa_mode=self.formal_qa_mode,
+                relevant_memories=relevant_memories,
             )
             reply = self.client.chat(messages)
             self.finished.emit(reply)
@@ -83,6 +92,25 @@ class ChatWorker(QObject):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected chat worker failure")
             self.failed.emit(f"我刚刚走神了一下：{exc}")
+
+    def _relevant_memories(self) -> str:
+        memory_config = self.app_config.get("memory", {})
+        if (
+            not memory_config.get("enable_mem0", False)
+            or not memory_config.get("inject_mem0_to_prompt", False)
+            or self.mem0_memory_service is None
+        ):
+            return ""
+
+        try:
+            top_k = int(memory_config.get("mem0_search_top_k", 5))
+        except (TypeError, ValueError):
+            top_k = 5
+        return self.mem0_memory_service.format_for_prompt(
+            user_id=self.user_id,
+            query=self.user_message,
+            top_k=top_k,
+        )
 
 
 class ProactiveSpeakWorker(QObject):
@@ -124,12 +152,18 @@ class KnowledgeSpeakWorker(QObject):
         client: DeepSeekClient,
         prompt_builder: PromptBuilder,
         memory: dict[str, Any],
+        mem0_memory_service: Mem0MemoryService | None = None,
+        user_id: str = "default_user",
+        use_mem0: bool = False,
     ) -> None:
         """初始化记忆增强的知识问候 API 任务。"""
         super().__init__()
         self.client = client
         self.prompt_builder = prompt_builder
         self.memory = memory
+        self.mem0_memory_service = mem0_memory_service
+        self.user_id = user_id
+        self.use_mem0 = use_mem0
 
     def run(self) -> None:
         """基于用户记忆随机选取一个偏好方向，生成 2-3 句针对性知识问候。"""
@@ -141,6 +175,9 @@ class KnowledgeSpeakWorker(QObject):
             projects = work_study.get("current_projects", [])
             all_context = "、".join(topics + projects) or "暂无"
             focus = random.choice(prefs) if prefs else "编程学习"
+            mem0_memory_context = self._mem0_memory_context()
+            if mem0_memory_context:
+                all_context = mem0_memory_context
 
             prompt = (
                 f"用户偏好中有一条是：{focus}。其他背景：{all_context}。"
@@ -149,7 +186,11 @@ class KnowledgeSpeakWorker(QObject):
                 "严格控制在 2-3 句话以内，温柔自然，不要像AI助手那样正式。"
                 "请以「你知道吗」「说起来」「对了」「我突然想到」这类口语化开头来开始。"
             )
-            messages = self.prompt_builder.build_messages(prompt, [])
+            messages = self.prompt_builder.build_messages(
+                prompt,
+                [],
+                relevant_memories=mem0_memory_context,
+            )
             reply = self.client.chat(messages)
             self.finished.emit(reply)
         except DeepSeekError as exc:
@@ -157,6 +198,23 @@ class KnowledgeSpeakWorker(QObject):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected knowledge worker failure")
             self.failed.emit(f"知识问候走神了：{exc}")
+
+    def _mem0_memory_context(self) -> str:
+        if not self.use_mem0 or self.mem0_memory_service is None:
+            return ""
+
+        queries = [
+            "用户最近正在做的项目",
+            "用户的学习目标和工作任务",
+            "用户喜欢的陪伴方式",
+            "用户希望被提醒或鼓励的事情",
+            "用户的长期偏好",
+        ]
+        return self.mem0_memory_service.format_for_prompt(
+            user_id=self.user_id,
+            query=random.choice(queries),
+            top_k=3,
+        )
 
 
 class DesktopPetWindow(QWidget):
@@ -183,6 +241,7 @@ class DesktopPetWindow(QWidget):
         self.window_state_path = self.data_dir / "window_state.json"
 
         self.app_config = self._load_app_config()
+        self.mem0_memory_service = Mem0MemoryService(self.app_config)
         self.drag_start_offset = QPoint()
         self.dragging = False
         self.mouse_press_position = QPoint()
@@ -227,12 +286,16 @@ class DesktopPetWindow(QWidget):
             self.chat_store_formal,
             self.memory_store,
             self.deepseek_client,
+            mem0_memory_service=self.mem0_memory_service,
+            user_id=self._memory_user_id(),
         )
         self.summarizer_informal = Summarizer(
             self.summary_informal_path,
             self.chat_store_informal,
             self.memory_store,
             self.deepseek_client,
+            mem0_memory_service=self.mem0_memory_service,
+            user_id=self._memory_user_id(),
         )
 
         self.sprite_player = SpritePlayer(self.sprite_config_path, self._ui_scale())
@@ -244,6 +307,7 @@ class DesktopPetWindow(QWidget):
             self.local_lines_path,
             self.usage_store,
             self._config_snapshot,
+            self._has_knowledge_memory,
         )
         self.auto_move_timer = QTimer(self)
         self.auto_move_timer.timeout.connect(self._trigger_auto_move)
@@ -657,6 +721,11 @@ class DesktopPetWindow(QWidget):
     def _reload_config(self) -> None:
         """重新读取配置文件，并刷新动画和行为控制状态。"""
         self.app_config = self._load_app_config()
+        self.mem0_memory_service = Mem0MemoryService(self.app_config)
+        self.summarizer_formal.mem0_memory_service = self.mem0_memory_service
+        self.summarizer_informal.mem0_memory_service = self.mem0_memory_service
+        self.summarizer_formal.user_id = self._memory_user_id()
+        self.summarizer_informal.user_id = self._memory_user_id()
         self.sprite_player.set_scale(self._ui_scale())
         self.sprite_player.load()
         self._setup_window()
@@ -769,6 +838,9 @@ class DesktopPetWindow(QWidget):
             self.prompt_builder,
             self.context_manager,
             self._formal_qa_enabled(),
+            mem0_memory_service=self.mem0_memory_service,
+            user_id=self._memory_user_id(),
+            app_config=self.app_config,
         )
         self.chat_worker.moveToThread(self.chat_thread)
         self.chat_thread.started.connect(self.chat_worker.run)
@@ -883,6 +955,9 @@ class DesktopPetWindow(QWidget):
             self.deepseek_client,
             self.prompt_builder,
             memory,
+            mem0_memory_service=self.mem0_memory_service,
+            user_id=self._memory_user_id(),
+            use_mem0=bool(self._memory_config().get("use_mem0_for_knowledge_speak", False)),
         )
         self.chat_worker.moveToThread(self.chat_thread)
         self.chat_thread.started.connect(self.chat_worker.run)
@@ -1196,6 +1271,20 @@ class DesktopPetWindow(QWidget):
     def _chat_config(self) -> dict[str, Any]:
         """返回聊天配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("chat", {})
+
+    def _memory_config(self) -> dict[str, Any]:
+        """Return memory-related configuration."""
+        return self.app_config.setdefault("memory", {})
+
+    def _memory_user_id(self) -> str:
+        """Return the single-user memory id used by Mem0."""
+        return str(self._memory_config().get("mem0_user_id", "default_user"))
+
+    def _has_knowledge_memory(self) -> bool:
+        """Return whether Mem0 has enough memory to try a knowledge greeting."""
+        if not self._memory_config().get("use_mem0_for_knowledge_speak", False):
+            return False
+        return self.mem0_memory_service.has_any_memory(self._memory_user_id())
 
     def _assistant_reply_bubble_duration_ms(self) -> int:
         """Read the regular assistant reply bubble duration from config."""

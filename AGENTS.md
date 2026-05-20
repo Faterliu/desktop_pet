@@ -109,9 +109,18 @@ wscript.exe .\start_main.vbs
 - 修改场景：模型服务参数、超时、错误提示、响应结构兼容。
 - 依赖配置：`api.base_url`、`api.model`、`api.api_key`、`api.timeout_seconds`。
 
+`desktop_pet/ai/mem0_memory_service.py`
+
+- 可选 Mem0 长期语义记忆封装层。负责初始化 Mem0、写入摘要提取出的长期记忆、根据当前用户输入检索相关记忆，并格式化为 Prompt 可注入文本。
+- 由 `config/app_config.json` / `app_config.example.json` 中的 `memory.enable_mem0`、`memory.inject_mem0_to_prompt`、`memory.use_mem0_for_knowledge_speak`、`memory.mem0_search_top_k`、`memory.write_sensitive_memory` 等配置控制；默认关闭。
+- 初始化使用 `Memory.from_config(config)`，LLM provider 固定走 Mem0 官方支持的 `deepseek` provider。默认复用项目现有 `api.api_key`、`api.base_url`、`api.model`；若 `memory.mem0_deepseek_model` 或 `memory.mem0_deepseek_base_url` 非空，则优先使用 memory 节点下的覆盖值。
+- 第一阶段不强制配置 embedder，`memory.mem0_embedder_provider` 默认 `"default"`。即使 LLM 使用 DeepSeek，embedding 仍可能需要后续配置 OpenAI、Ollama 或其他 embedder provider，因此不要自动启用 Mem0。
+- 修改场景：更换记忆后端、调整检索 top_k、配置 LLM/embedder/vector store、增加记忆删除或导出功能。
+- 风险：Mem0 可能依赖外部 LLM 或 embedding 服务，异常必须降级，不得阻断聊天、摘要、启动或退出主流程。
+
 `desktop_pet/ai/prompt_builder.py`
 
-- 组装系统提示、角色设定、安全规则、摘要（按正式/非正式模式选择对应文件）、记忆、正式问答模式提示和上下文消息。
+- 组装系统提示、角色设定、安全规则、摘要（按正式/非正式模式选择对应文件）、`memory.json` 记忆、可选 Mem0 检索记忆、正式问答模式提示和上下文消息。`build_messages()` 支持 `relevant_memories` 可选参数，用于在系统提示中注入与当前用户输入相关的长期语义记忆。
 - 修改场景：人格、回复风格、安全规则优先级、正式问答回答策略。
 - 风险：安全规则必须优先于角色 `custom_prompt`。
 
@@ -124,6 +133,7 @@ wscript.exe .\start_main.vbs
 
 - 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。`maybe_summarize()` 支持 `force` 参数，为 True 时跳过轮数检查，供手动清空聊天记录前使用；但若历史中没有非空用户消息，会直接跳过，避免空聊天记录生成错误记忆。
 - 当前模型摘要与模型记忆提取已拆分：摘要仍基于最近完整对话生成，但 `memory_updates` 只基于用户发言单独提取，避免把人物/助手回答混入 `memory.json`；摘要文件本身不再落盘 `memory_updates`。
+- 若启用 Mem0，`Summarizer` 在保留原 `memory.json` 合并逻辑的同时，会将提取出的 `memory_updates` 旁路写入 Mem0，作为长期语义检索数据源；Mem0 写入失败只记录 warning，不得影响摘要或聊天主流程。
 - 修改场景：摘要结构、记忆提取、失败兜底。
 - 风险：摘要在线程中触发，异常不能影响正常聊天。
 
@@ -157,6 +167,7 @@ wscript.exe .\start_main.vbs
 - `pick_reply_ack_line()` 从 `reply` 分组随机选取简短应答话术，供知识问候展示后确认。
 - `_consecutive_unanswered` 计数器驱动动态问候间隔：首次 15min → 第二次 15min → 第三次 30min → 第四次起 30-60min 随机（最高 60min）。`notify_user_interaction()` 和每次 `_maybe_idle_prompt()` 成功触发问候后均重置计数。
 - `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整：回应类型 +0.005，互斥类型 -0.001，并继续受 0.3-0.7 钳制。
+- 当 `memory.use_mem0_for_knowledge_speak` 为 true 时，`_has_memory_content()` 会优先通过主窗口传入的 Mem0 检查回调判断是否存在长期语义记忆；Mem0 不可用或无结果时回退到原 `memory.json` 检查。
 - 主动问候气泡停留时间改为读取 `ui.bubble_durations_ms`：启动问候取 `startup_greeting`，时段变化问候取 `period_greeting`，普通空闲/测试问候取 `proactive_greeting`。
 - 修改场景：主动行为频率、话术分组、免打扰逻辑、时段判断规则、知识问候与内容比例。
 
@@ -164,6 +175,7 @@ wscript.exe .\start_main.vbs
 
 - 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`ui.show_reload_config` 控制“重新加载配置”菜单项显隐（默认 `true`）、`chat.force_summarize_before_clear`（默认 `true`）控制手动清空前是否强制摘要。
 - `ui.bubble_durations_ms` 用于配置主要气泡停留时长：`startup_greeting`、`period_greeting`、`proactive_greeting`、`assistant_reply`。
+- `memory.enable_mem0` 控制是否启用 Mem0 长期语义记忆；`memory.inject_mem0_to_prompt` 控制是否将 Mem0 检索结果注入聊天 Prompt；`memory.use_mem0_for_knowledge_speak` 控制知识问候是否优先使用 Mem0；`memory.mem0_search_top_k` 控制每轮检索数量；`memory.mem0_llm_provider` 默认 `deepseek`，`memory.mem0_use_app_deepseek_config` 默认复用项目 DeepSeek 配置，`memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 可覆盖模型和 base URL；`memory.mem0_embedder_provider` 默认 `default`，embedding 后端仍需后续按 Mem0 要求配置；`memory.write_sensitive_memory` 默认 false，用于避免情绪陪伴场景下自动保存敏感长期记忆。
 - 修改场景：新增可配置项时必须同步更新此文件，并确认读取路径。
 
 `desktop_pet/config/app_config.json`
@@ -177,6 +189,11 @@ wscript.exe .\start_main.vbs
 `desktop_pet/config/local_lines.json`
 
 - 本地主动话术和提示文案。`BehaviorController` 当前主要使用 `startup`、`idle`、`quiet`、`encourage`，以及时段分组 `greeting_morning`、`greeting_noon`、`greeting_afternoon`、`greeting_evening`、`sleepy`，季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter`。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。知识问候确认使用 `reply`。
+
+`desktop_pet/tools/import_memory_json_to_mem0.py`
+
+- 可选一次性导入工具。读取当前 `data/memory.json` 中的旧结构化记忆，去重后通过 `Mem0MemoryService.add_memory_text()` 写入 Mem0。
+- 运行方式：`cd desktop_pet` 后执行 `py tools/import_memory_json_to_mem0.py`。Mem0 未启用、依赖未安装或初始化失败时只打印提示并退出，不影响主程序。
 
 `desktop_pet/config/safety_rules.json`
 
@@ -219,9 +236,10 @@ wscript.exe .\start_main.vbs
 4. 如果 `api.enable_chat_api` 为 false，走 `_generate_local_reply()`，直接显示和保存本地回复。
 5. 如果 API 开启但未配置 key，显示失败提示并切到 `failed`。
 6. 如果 API 可用，创建 `QThread` 和 `ChatWorker`。
-7. `ChatWorker.run()` 读取最近上下文，调用 `PromptBuilder.build_messages()`，再调用 `DeepSeekClient.chat()`。
-8. 成功时 `_on_chat_success()` 保存助手回复，切回 `idle`，按模式显示气泡或正式问答面板，并启动后台摘要线程。
-9. 失败时 `_on_chat_failure()` 切到 `failed` 并显示错误。
+7. `ChatWorker.run()` 读取最近上下文；若启用 Mem0 且 `memory.inject_mem0_to_prompt` 为 true，会在后台线程中按当前用户输入检索长期语义记忆，并传入 `PromptBuilder.build_messages()`；检索失败回退为空结果，不影响原 JSON 记忆流程。
+8. `ChatWorker.run()` 调用 `PromptBuilder.build_messages()`，再调用 `DeepSeekClient.chat()`。
+9. 成功时 `_on_chat_success()` 保存助手回复，切回 `idle`，按模式显示气泡或正式问答面板，并启动后台摘要线程。
+10. 失败时 `_on_chat_failure()` 切到 `failed` 并显示错误。
 
 正式问答显示流：
 
@@ -458,6 +476,7 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 
 - `PySide6`：桌面窗口、Qt 控件、定时器、信号、动画和图像显示。
 - `requests`：调用 DeepSeek API。
+- `mem0ai==2.0.2`：可选 Mem0 长期语义记忆层基础 SDK。代码必须使用可选导入和失败降级，不能假设一定安装或初始化成功；不要默认安装 `mem0ai[nlp]`、CLI、Server、OpenMemory、Docker、自托管服务或 spaCy 模型等额外扩展。
 
 外部服务：
 
@@ -487,6 +506,9 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 
 ## 文档同步记录
 
+- 2026-05-19：新增可选 Mem0 长期语义记忆层。新增 `ai/mem0_memory_service.py` 封装 Mem0 初始化、写入、检索和 Prompt 格式化；新增 `tools/import_memory_json_to_mem0.py` 可将旧 `memory.json` 一次性导入 Mem0；`Summarizer` 在保留 `memory.json` 合并逻辑的同时旁路写入 Mem0；`ChatWorker` 可在后台线程中按当前用户输入检索 Mem0 记忆并传入 `PromptBuilder`；知识问候可通过 `memory.use_mem0_for_knowledge_speak` 优先使用 Mem0；`app_config.example.json` 新增 `memory.*` 配置项；`requirements.txt` 新增 `mem0ai`。Mem0 默认关闭，异常降级，不阻断桌宠主流程。
+- 2026-05-19：将 Mem0 依赖固定为最小基础 SDK 版本 `mem0ai==2.0.2`，并在项目本地虚拟环境中安装该基础包；未安装 CLI、Server、OpenMemory、Docker、自托管服务、`mem0ai[nlp]`、spaCy 模型或其他 extras。同步更新 `AGENTS.md` 依赖说明。
+- 2026-05-19：调整 Mem0 初始化为 `Memory.from_config(config)`，LLM provider 使用 Mem0 官方 DeepSeek provider，默认复用项目 `api.api_key`、`api.base_url`、`api.model`，并允许 `memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 覆盖；`app_config.example.json` 和本地 `app_config.json` 新增 `mem0_llm_provider`、`mem0_use_app_deepseek_config`、`mem0_deepseek_model`、`mem0_deepseek_base_url`、`mem0_temperature`、`mem0_max_tokens`、`mem0_top_p`、`mem0_embedder_provider`。embedding 未默认改为 DeepSeek，后续仍需按 Mem0 要求配置 OpenAI、Ollama 或其他 embedder。
 - 2026-05-19：将普通问候与普通聊天回答的气泡停留时间改为配置项。`app_config.example.json` 和本地 `app_config.json` 新增 `ui.bubble_durations_ms`，包含 `startup_greeting`、`period_greeting`、`proactive_greeting`、`assistant_reply`；`BehaviorController` 改为按配置发出启动/时段/普通问候的气泡时长，`DesktopPetWindow._show_answer_output()` 改为按配置控制普通聊天回答气泡停留时间。同步更新 `AGENTS.md` 中 `behavior_controller.py` 与 `app_config.example.json` 描述。
 - 2026-05-18：修复模型记忆混入人物回答的问题。`Summarizer` 将“对话摘要”和“记忆提取”拆为两次独立流程：摘要继续基于最近完整对话生成，但模型 `memory_updates` 改为只喂用户发言单独提取，失败时退回仅看用户消息的本地规则提取；同时 `conversation_summary_*.json` 不再落盘 `memory_updates`。同步更新 `AGENTS.md` 中 `summarizer.py` 描述。
 - 2026-05-11：新建 `AGENTS.md`。基于当前项目入口、配置、依赖、需求文档、核心业务目录和现有代码梳理项目结构、运行流程、模块关系、常见修改路径、风险区域、常用命令、依赖服务和待确认问题；同时在 `.gitignore` 中放行根目录 `AGENTS.md`，确保该智能体文档可随程序本体提交。本次未改变程序代码。
