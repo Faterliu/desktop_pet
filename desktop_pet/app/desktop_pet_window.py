@@ -447,6 +447,7 @@ class DesktopPetWindow(QWidget):
         if self.chat_thread and self.chat_thread.isRunning():
             self.chat_thread.quit()
             self.chat_thread.wait(1000)
+        self.mem0_memory_service.close()
         super().closeEvent(event)
         app = QApplication.instance()
         if app is not None:
@@ -721,6 +722,7 @@ class DesktopPetWindow(QWidget):
     def _reload_config(self) -> None:
         """重新读取配置文件，并刷新动画和行为控制状态。"""
         self.app_config = self._load_app_config()
+        self.mem0_memory_service.close()
         self.mem0_memory_service = Mem0MemoryService(self.app_config)
         self.summarizer_formal.mem0_memory_service = self.mem0_memory_service
         self.summarizer_informal.mem0_memory_service = self.mem0_memory_service
@@ -1146,11 +1148,12 @@ class DesktopPetWindow(QWidget):
             return
         available = screen.availableGeometry()
         current = self.pos()
-        if random.random() < 0.35:
+        move_kind = random.choices(["left", "right", "jump"], weights=[4, 4, 2], k=1)[0]
+        if move_kind == "jump":
             self._start_jump_auto_move(current, available)
             return
 
-        delta = random.choice([-140, -100, 100, 140])
+        delta = random.choice([-140, -100]) if move_kind == "left" else random.choice([100, 140])
         self._start_horizontal_move_test(delta, available=available)
 
     def _start_horizontal_move_test(self, delta_x: int, available: QRect | None = None) -> None:

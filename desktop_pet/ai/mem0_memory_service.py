@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
 
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Mem0MemoryService:
@@ -35,7 +39,7 @@ class Mem0MemoryService:
             return
 
         try:
-            self._memory = Memory.from_config(self._mem0_config(memory_config))
+            self._memory = Memory.from_config(self._build_mem0_config(app_config))
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to initialize Mem0 memory: %s", exc)
             self.enabled = False
@@ -44,9 +48,25 @@ class Mem0MemoryService:
     def is_available(self) -> bool:
         return self.enabled and self._memory is not None
 
-    def _mem0_config(self, memory_config: dict[str, Any]) -> dict[str, Any]:
-        """Build the Mem0 config while reusing this app's DeepSeek settings."""
-        api_config = self.app_config.get("api", {})
+    def close(self) -> None:
+        """Best-effort release for Mem0 local resources."""
+        if self._memory is None:
+            return
+
+        try:
+            close = getattr(self._memory, "close", None)
+            if callable(close):
+                close()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to close Mem0 memory: %s", exc)
+        finally:
+            self._memory = None
+            self.enabled = False
+
+    def _build_mem0_config(self, app_config: dict[str, Any]) -> dict[str, Any]:
+        """Build Mem0 config with DeepSeek LLM and DashScope embeddings."""
+        api_config = app_config.get("api", {})
+        memory_config = app_config.get("memory", {})
         use_app_deepseek = bool(memory_config.get("mem0_use_app_deepseek_config", True))
 
         app_model = str(api_config.get("model", "")).strip()
@@ -59,7 +79,27 @@ class Mem0MemoryService:
             deepseek_model = deepseek_model or app_model
             deepseek_base_url = deepseek_base_url or app_base_url
 
+        deepseek_model = deepseek_model or "deepseek-chat"
+        deepseek_base_url = deepseek_base_url or "https://api.deepseek.com"
+
+        dashscope_api_key = self._dashscope_api_key(memory_config)
+        if not dashscope_api_key:
+            raise ValueError(
+                "DashScope API key is missing. Set memory.dashscope_api_key "
+                "or the DASHSCOPE_API_KEY environment variable."
+            )
+
+        embedding_dims = self._positive_int(
+            memory_config.get("dashscope_embedding_dimensions", 1024),
+            1024,
+        )
+        data_dir = PROJECT_ROOT / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        qdrant_path = PROJECT_ROOT / "data" / "mem0_qdrant"
+        qdrant_path.mkdir(parents=True, exist_ok=True)
+
         config: dict[str, Any] = {
+            "history_db_path": str(data_dir / "mem0_history.db"),
             "llm": {
                 "provider": "deepseek",
                 "config": {
@@ -73,14 +113,46 @@ class Mem0MemoryService:
                     ),
                     "top_p": self._float_value(memory_config.get("mem0_top_p", 1.0), 1.0),
                 },
-            }
+            },
+            "embedder": {
+                "provider": "openai",
+                "config": {
+                    "model": str(
+                        memory_config.get("dashscope_embedding_model", "text-embedding-v4")
+                    ).strip()
+                    or "text-embedding-v4",
+                    "api_key": dashscope_api_key,
+                    "openai_base_url": str(
+                        memory_config.get(
+                            "dashscope_embedding_base_url",
+                            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        )
+                    ).strip()
+                    or "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "embedding_dims": embedding_dims,
+                },
+            },
+            "vector_store": {
+                "provider": "qdrant",
+                "config": {
+                    "collection_name": str(
+                        memory_config.get("mem0_qdrant_collection", "desktop_pet_mem0")
+                    ).strip()
+                    or "desktop_pet_mem0",
+                    "embedding_model_dims": embedding_dims,
+                    "path": str(qdrant_path),
+                    "on_disk": True,
+                },
+            },
         }
 
-        embedder_provider = str(memory_config.get("mem0_embedder_provider", "default") or "default")
-        if embedder_provider != "default":
-            config["embedder"] = {"provider": embedder_provider}
-
         return config
+
+    def _mem0_config(self, memory_config: dict[str, Any]) -> dict[str, Any]:
+        """Backward-compatible wrapper for older internal checks."""
+        app_config = dict(self.app_config)
+        app_config["memory"] = memory_config
+        return self._build_mem0_config(app_config)
 
     def add_dialogue(
         self,
@@ -159,14 +231,14 @@ class Mem0MemoryService:
         limit = self._positive_int(top_k, self.top_k)
         actual_user_id = user_id or self.default_user_id
         try:
-            results = self._memory.search(query=query, user_id=actual_user_id, limit=limit)
+            results = self._memory.search(
+                query=query,
+                filters={"user_id": actual_user_id},
+                top_k=limit,
+            )
         except TypeError:
             try:
-                results = self._memory.search(
-                    query,
-                    filters={"user_id": actual_user_id},
-                    top_k=limit,
-                )
+                results = self._memory.search(query=query, user_id=actual_user_id, limit=limit)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to search Mem0 memory: %s", exc)
                 return []
@@ -238,6 +310,15 @@ class Mem0MemoryService:
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    def _dashscope_api_key(self, memory_config: dict[str, Any]) -> str:
+        configured_key = str(memory_config.get("dashscope_api_key", "") or "").strip()
+        if configured_key:
+            return configured_key
+
+        env_name = str(memory_config.get("dashscope_api_key_env", "DASHSCOPE_API_KEY") or "").strip()
+        env_name = env_name or "DASHSCOPE_API_KEY"
+        return str(os.getenv(env_name, "") or "").strip()
 
     def _is_sensitive_text(self, text: str) -> bool:
         """Simple local sensitive-memory guard."""

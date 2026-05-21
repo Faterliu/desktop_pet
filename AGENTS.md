@@ -114,7 +114,9 @@ wscript.exe .\start_main.vbs
 - 可选 Mem0 长期语义记忆封装层。负责初始化 Mem0、写入摘要提取出的长期记忆、根据当前用户输入检索相关记忆，并格式化为 Prompt 可注入文本。
 - 由 `config/app_config.json` / `app_config.example.json` 中的 `memory.enable_mem0`、`memory.inject_mem0_to_prompt`、`memory.use_mem0_for_knowledge_speak`、`memory.mem0_search_top_k`、`memory.write_sensitive_memory` 等配置控制；默认关闭。
 - 初始化使用 `Memory.from_config(config)`，LLM provider 固定走 Mem0 官方支持的 `deepseek` provider。默认复用项目现有 `api.api_key`、`api.base_url`、`api.model`；若 `memory.mem0_deepseek_model` 或 `memory.mem0_deepseek_base_url` 非空，则优先使用 memory 节点下的覆盖值。
-- 第一阶段不强制配置 embedder，`memory.mem0_embedder_provider` 默认 `"default"`。即使 LLM 使用 DeepSeek，embedding 仍可能需要后续配置 OpenAI、Ollama 或其他 embedder provider，因此不要自动启用 Mem0。
+- Mem0 embedder 使用 DashScope / 阿里云百炼 OpenAI-compatible embeddings 接口，内部通过 Mem0 的 OpenAI embedder 传入 `openai_base_url` 和 `embedding_dims`。默认 base URL 为 `https://dashscope.aliyuncs.com/compatible-mode/v1`，模型为 `text-embedding-v4`，维度为 1024。
+- DashScope API Key 优先从 `memory.dashscope_api_key` 读取，若为空则读取 `memory.dashscope_api_key_env` 指定的环境变量，默认 `DASHSCOPE_API_KEY`。示例配置和文档不得写入真实 key。
+- 默认 Qdrant 向量库路径为 `desktop_pet/data/mem0_qdrant`，history sqlite 路径为 `desktop_pet/data/mem0_history.db`，并显式使用 1024 维，避免与 Mem0 默认 1536 维不匹配。
 - 修改场景：更换记忆后端、调整检索 top_k、配置 LLM/embedder/vector store、增加记忆删除或导出功能。
 - 风险：Mem0 可能依赖外部 LLM 或 embedding 服务，异常必须降级，不得阻断聊天、摘要、启动或退出主流程。
 
@@ -175,7 +177,7 @@ wscript.exe .\start_main.vbs
 
 - 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`ui.show_reload_config` 控制“重新加载配置”菜单项显隐（默认 `true`）、`chat.force_summarize_before_clear`（默认 `true`）控制手动清空前是否强制摘要。
 - `ui.bubble_durations_ms` 用于配置主要气泡停留时长：`startup_greeting`、`period_greeting`、`proactive_greeting`、`assistant_reply`。
-- `memory.enable_mem0` 控制是否启用 Mem0 长期语义记忆；`memory.inject_mem0_to_prompt` 控制是否将 Mem0 检索结果注入聊天 Prompt；`memory.use_mem0_for_knowledge_speak` 控制知识问候是否优先使用 Mem0；`memory.mem0_search_top_k` 控制每轮检索数量；`memory.mem0_llm_provider` 默认 `deepseek`，`memory.mem0_use_app_deepseek_config` 默认复用项目 DeepSeek 配置，`memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 可覆盖模型和 base URL；`memory.mem0_embedder_provider` 默认 `default`，embedding 后端仍需后续按 Mem0 要求配置；`memory.write_sensitive_memory` 默认 false，用于避免情绪陪伴场景下自动保存敏感长期记忆。
+- `memory.enable_mem0` 控制是否启用 Mem0 长期语义记忆；`memory.inject_mem0_to_prompt` 控制是否将 Mem0 检索结果注入聊天 Prompt；`memory.use_mem0_for_knowledge_speak` 控制知识问候是否优先使用 Mem0；`memory.mem0_search_top_k` 控制每轮检索数量；`memory.mem0_llm_provider` 默认 `deepseek`，`memory.mem0_use_app_deepseek_config` 默认复用项目 DeepSeek 配置，`memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 可覆盖模型和 base URL；`memory.mem0_embedder_provider` 默认 `dashscope_openai_compatible`，通过 DashScope / 阿里云百炼 OpenAI-compatible embeddings 接口使用 `text-embedding-v4` 和 1024 维向量；`memory.dashscope_api_key` / `memory.dashscope_api_key_env` 控制 DashScope key 来源；`memory.write_sensitive_memory` 默认 false，用于避免情绪陪伴场景下自动保存敏感长期记忆。
 - 修改场景：新增可配置项时必须同步更新此文件，并确认读取路径。
 
 `desktop_pet/config/app_config.json`
@@ -194,6 +196,11 @@ wscript.exe .\start_main.vbs
 
 - 可选一次性导入工具。读取当前 `data/memory.json` 中的旧结构化记忆，去重后通过 `Mem0MemoryService.add_memory_text()` 写入 Mem0。
 - 运行方式：`cd desktop_pet` 后执行 `py tools/import_memory_json_to_mem0.py`。Mem0 未启用、依赖未安装或初始化失败时只打印提示并退出，不影响主程序。
+
+`desktop_pet/tools/test_dashscope_embedding.py`
+
+- 可选 DashScope embedding 连通性测试脚本。优先从 `memory.dashscope_api_key` 读取 key，若为空再读取 `DASHSCOPE_API_KEY`，成功时只打印模型名和向量维度，不打印完整向量。
+- 运行方式：`cd desktop_pet` 后执行 `.\.desktop_pet_venv\Scripts\python.exe tools\test_dashscope_embedding.py`。
 
 `desktop_pet/config/safety_rules.json`
 
@@ -259,7 +266,7 @@ wscript.exe .\start_main.vbs
 自动移动和测试动作流：
 
 - `ui.enable_free_move` 为 true 时，`auto_move_timer` 每 15 到 28 秒随机触发一次。
-- 自动移动可能执行左右移动，也可能以约 35% 概率执行 `jumping` 跳跃。
+- 自动移动按左跑、右跑、跳跃约 4:4:2 的比例随机触发。
 - 测试菜单可触发动作播放、左移、右移、跳跃、本地主动说话和 API 主动说话。
 - 当前代码中自动移动仍会在 `_chat_in_progress()` 或拖拽时跳过。测试左移、右移、跳跃使用 `_movement_locked()` 判断，避免退出或拖拽时移动。
 
@@ -475,7 +482,7 @@ git status --short
 Python 依赖见 `desktop_pet/requirements.txt`：
 
 - `PySide6`：桌面窗口、Qt 控件、定时器、信号、动画和图像显示。
-- `requests`：调用 DeepSeek API。
+- `requests`：调用 DeepSeek API，以及独立 DashScope embedding 测试脚本。
 - `mem0ai==2.0.2`：可选 Mem0 长期语义记忆层基础 SDK。代码必须使用可选导入和失败降级，不能假设一定安装或初始化成功；不要默认安装 `mem0ai[nlp]`、CLI、Server、OpenMemory、Docker、自托管服务或 spaCy 模型等额外扩展。
 
 外部服务：
@@ -483,6 +490,7 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - DeepSeek API，默认 `base_url` 为 `https://api.deepseek.com`。
 - 请求路径为 `/chat/completions`，请求体包含 `model`、`messages`、`temperature`。
 - API key 从 `config/app_config.json` 或示例配置的 `api.api_key` 读取。示例配置默认空 key。
+- DashScope / 阿里云百炼 OpenAI-compatible embeddings API，默认 base URL 为 `https://dashscope.aliyuncs.com/compatible-mode/v1`，Mem0 embedder 会调用 `/embeddings`，默认模型 `text-embedding-v4`、维度 1024。DashScope API key 从 `memory.dashscope_api_key` 或 `DASHSCOPE_API_KEY` 读取。
 
 ## 11. 待确认问题
 
@@ -506,6 +514,8 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 
 ## 文档同步记录
 
+- 2026-05-21：调整自主移动随机比例。`DesktopPetWindow._trigger_auto_move()` 改为按左跑、右跑、跳跃 4:4:2 抽取动作，并同步更新主动移动流程说明。
+- 2026-05-20：Mem0 embedder 接入 DashScope / 阿里云百炼 OpenAI-compatible embeddings。`mem0_memory_service.py` 构造 `Memory.from_config()` 时同时配置 DeepSeek LLM、DashScope embedding、1024 维本地 Qdrant 和项目内 `data/mem0_history.db`；`app_config.example.json` 和本地 `app_config.json` 新增 `dashscope_embedding_*` 与 key 来源配置；新增 `tools/test_dashscope_embedding.py`，并修正 `test.py` 不再使用字面量 `Bearer API_KEY` 或打印完整向量。Mem0 仍默认关闭，缺少 API key 或初始化失败时仅记录 warning 并降级。
 - 2026-05-19：新增可选 Mem0 长期语义记忆层。新增 `ai/mem0_memory_service.py` 封装 Mem0 初始化、写入、检索和 Prompt 格式化；新增 `tools/import_memory_json_to_mem0.py` 可将旧 `memory.json` 一次性导入 Mem0；`Summarizer` 在保留 `memory.json` 合并逻辑的同时旁路写入 Mem0；`ChatWorker` 可在后台线程中按当前用户输入检索 Mem0 记忆并传入 `PromptBuilder`；知识问候可通过 `memory.use_mem0_for_knowledge_speak` 优先使用 Mem0；`app_config.example.json` 新增 `memory.*` 配置项；`requirements.txt` 新增 `mem0ai`。Mem0 默认关闭，异常降级，不阻断桌宠主流程。
 - 2026-05-19：将 Mem0 依赖固定为最小基础 SDK 版本 `mem0ai==2.0.2`，并在项目本地虚拟环境中安装该基础包；未安装 CLI、Server、OpenMemory、Docker、自托管服务、`mem0ai[nlp]`、spaCy 模型或其他 extras。同步更新 `AGENTS.md` 依赖说明。
 - 2026-05-19：调整 Mem0 初始化为 `Memory.from_config(config)`，LLM provider 使用 Mem0 官方 DeepSeek provider，默认复用项目 `api.api_key`、`api.base_url`、`api.model`，并允许 `memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 覆盖；`app_config.example.json` 和本地 `app_config.json` 新增 `mem0_llm_provider`、`mem0_use_app_deepseek_config`、`mem0_deepseek_model`、`mem0_deepseek_base_url`、`mem0_temperature`、`mem0_max_tokens`、`mem0_top_p`、`mem0_embedder_provider`。embedding 未默认改为 DeepSeek，后续仍需按 Mem0 要求配置 OpenAI、Ollama 或其他 embedder。
