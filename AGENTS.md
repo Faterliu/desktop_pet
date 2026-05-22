@@ -156,7 +156,7 @@ wscript.exe .\start_main.vbs
 `desktop_pet/character/behavior_controller.py`
 
 - 管理启动问候、空闲主动话术和时段变化检测。用 `QTimer` 每 60 秒检查空闲和时段，受免打扰、每日上限、空闲时间和等待用户回复状态约束。
-- `_startup_greeting()` 优先使用时段问候（`greeting_morning`/`greeting_noon`/`greeting_afternoon`/`greeting_evening`/`sleepy`），对应分组为空时回退到 `startup`。每 5 天周期的第一天额外优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`）。启动问候仍受每日本地话术上限拦截，但成功展示后不再递增 `local_proactive_lines_used`。
+- `_startup_greeting()` 会先读取 `local_lines.json` 的 `first_start.enable`；为 true 时从 `first_start.data` 随机取一句启动问候，并在成功取到后立刻写回 `enable=false`，使其只触发一次。若未命中，则保留原优先级：每 5 天周期首日优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`），其次当前时段问候（`greeting_morning`/`greeting_noon`/`greeting_afternoon`/`greeting_evening`/`sleepy`），最后回退到 `startup`。启动问候受免打扰和 `startup_greeting` 开关控制，但不受每日主动话术上限拦截，也不递增 `local_proactive_lines_used`。
 - `_maybe_idle_prompt()` 和 `trigger_test_speak()` 的话术池会混入当前时段分组。`trigger_test_idle_prompt()` 绕过时间限制测试完整空闲逻辑，返回触发类型和比例字符串。
 - `_check_period_change()` 由 `period_check_timer` 每 60 秒驱动，检测时段或季节是否变化，变化时立即弹出新时段问候。
 - `pick_farewell_line()` 从 `farewell` 分组随机抽取道别语，供退出流程使用。
@@ -190,7 +190,7 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/config/local_lines.json`
 
-- 本地主动话术和提示文案。`BehaviorController` 当前主要使用 `startup`、`idle`、`quiet`、`encourage`，以及时段分组 `greeting_morning`、`greeting_noon`、`greeting_afternoon`、`greeting_evening`、`sleepy`，季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter`。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。知识问候确认使用 `reply`。
+- 本地主动话术和提示文案。`BehaviorController` 启动问候先看 `first_start.enable`，开启时优先使用 `first_start.data`，成功取用后自动写回 `enable=false`，未命中时继续回退到季节/时段问候和 `startup`；空闲/测试问候主要使用 `idle`、`quiet`、`encourage`，并混入时段分组 `greeting_morning`、`greeting_noon`、`greeting_afternoon`、`greeting_evening`、`sleepy`；季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter` 用于启动周期问候和时段/季节变化检测。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。知识问候确认使用 `reply`。
 
 `desktop_pet/tools/import_memory_json_to_mem0.py`
 
@@ -258,7 +258,7 @@ wscript.exe .\start_main.vbs
 主动行为流：
 
 1. `BehaviorController` 启动后设置空闲检查计时器，每 60 秒检查一次。
-2. 启动问候受 `do_not_disturb`、`startup_greeting`、每日本地话术上限约束，优先使用当前时段对应的问候分组（`greeting_morning`/`greeting_noon`/`greeting_afternoon`/`greeting_evening`/`sleepy`），该分组为空时回退到 `startup`；成功展示后不计入本地主动话术次数。
+2. 启动问候受 `do_not_disturb` 和 `startup_greeting` 约束，不受每日主动话术上限约束；优先级为 `first_start.data`（仅当 `first_start.enable` 为 true）→ 每 5 天周期首日季节问候 → 当前时段问候 → `startup`；成功展示后不计入本地主动话术次数。
 3. 空闲主动话术受 `proactive_chat`、`min_proactive_interval_minutes`、`awaiting_user_reply`、`last_proactive_at` 和每日上限约束，话术池从 `idle`/`quiet`/`encourage` 加当前时段分组中随机选取。
 4. 触发后发出 `speak_requested(text, duration_ms, action_name)`。
 5. `DesktopPetWindow._handle_behavior_speak()` 在未聊天且输入框不可见时显示气泡并切动作。
@@ -514,6 +514,7 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 
 ## 文档同步记录
 
+- 2026-05-22：新增 `local_lines.first_start` 启动问候配置。`local_lines.json` 新增 `{ "enable": false, "data": [...] }` 结构；`BehaviorController._startup_greeting()` 启动问候优先级调整为 `first_start.data`（仅当开启）→ 季节问候 → 时段问候 → `startup`；`first_start` 成功取用后会立即写回 `enable=false`，实现一次性首启问候；启动问候不再受每日主动话术上限拦截，只受免打扰和 `startup_greeting` 开关控制；同步更新启动问候流程说明。
 - 2026-05-21：调整自主移动随机比例。`DesktopPetWindow._trigger_auto_move()` 改为按左跑、右跑、跳跃 4:4:2 抽取动作，并同步更新主动移动流程说明。
 - 2026-05-20：Mem0 embedder 接入 DashScope / 阿里云百炼 OpenAI-compatible embeddings。`mem0_memory_service.py` 构造 `Memory.from_config()` 时同时配置 DeepSeek LLM、DashScope embedding、1024 维本地 Qdrant 和项目内 `data/mem0_history.db`；`app_config.example.json` 和本地 `app_config.json` 新增 `dashscope_embedding_*` 与 key 来源配置；新增 `tools/test_dashscope_embedding.py`，并修正 `test.py` 不再使用字面量 `Bearer API_KEY` 或打印完整向量。Mem0 仍默认关闭，缺少 API key 或初始化失败时仅记录 warning 并降级。
 - 2026-05-19：新增可选 Mem0 长期语义记忆层。新增 `ai/mem0_memory_service.py` 封装 Mem0 初始化、写入、检索和 Prompt 格式化；新增 `tools/import_memory_json_to_mem0.py` 可将旧 `memory.json` 一次性导入 Mem0；`Summarizer` 在保留 `memory.json` 合并逻辑的同时旁路写入 Mem0；`ChatWorker` 可在后台线程中按当前用户输入检索 Mem0 记忆并传入 `PromptBuilder`；知识问候可通过 `memory.use_mem0_for_knowledge_speak` 优先使用 Mem0；`app_config.example.json` 新增 `memory.*` 配置项；`requirements.txt` 新增 `mem0ai`。Mem0 默认关闭，异常降级，不阻断桌宠主流程。

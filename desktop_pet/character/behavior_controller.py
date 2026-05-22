@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from storage.json_store import load_json
+from storage.json_store import load_json, save_json
 from storage.usage_store import UsageStore
 from utils.time_utils import now_local
 
@@ -115,12 +115,9 @@ class BehaviorController(QObject):
         behavior = config.get("behavior", {})
         if behavior.get("do_not_disturb") or not behavior.get("startup_greeting", True):
             return
-        max_daily = int(behavior.get("max_local_lines_per_day", 10))
-        if not self.usage_store.can_use_local(max_daily):
-            return
 
-        line = ""
-        if self._is_cycle_start():
+        line = self._first_start_line()
+        if not line and self._is_cycle_start():
             line = self._random_line(self._season_key())
         if not line:
             time_key = self._time_greeting_key()
@@ -354,6 +351,22 @@ class BehaviorController(QObject):
         """Return whether today is the first day of the 5-day cycle."""
         yday = now_local().timetuple().tm_yday
         return (yday - 1) % 5 == 0
+
+    def _first_start_line(self) -> str:
+        """Pick a first-start greeting when local_lines.first_start.enable is true."""
+        payload = load_json(self.local_lines_path, {})
+        first_start = payload.get("first_start", {})
+        if not isinstance(first_start, dict) or not first_start.get("enable", False):
+            return ""
+
+        lines = first_start.get("data", [])
+        if not lines:
+            return ""
+        line = random.choice(lines)
+        first_start["enable"] = False
+        payload["first_start"] = first_start
+        save_json(self.local_lines_path, payload)
+        return line
 
     def _random_line(self, group_name: str) -> str:
         """Pick a random line from the given local-lines group."""
