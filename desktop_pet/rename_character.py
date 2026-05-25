@@ -2,7 +2,7 @@
 
 用法:
     py rename_character.py 新名字
-    py rename_character.py 小虎
+    py rename_character.py 芙芙
 
 会递归扫描 desktop_pet/desktop_pet/ 下所有文本文件，预览并确认后执行替换。
 """

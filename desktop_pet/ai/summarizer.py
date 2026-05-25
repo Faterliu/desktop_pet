@@ -52,10 +52,9 @@ class Summarizer:
             logger.info("Skip summary because chat history has no user content")
             return
 
-        user_rounds = len([item for item in history if item.get("role") == "user"])
         current_summary = self.load_summary()
         covered_count = int(current_summary.get("covered_message_count", 0))
-        if not force and (user_rounds < trigger_rounds or len(history) <= covered_count):
+        if not force and not self._should_summarize(history, trigger_rounds, covered_count):
             return
 
         try:
@@ -68,7 +67,7 @@ class Summarizer:
         payload["covered_message_count"] = len(history)
         payload["last_updated"] = now_iso()
         save_json(self.summary_path, payload)
-        if extracted_memory:
+        if self._has_memory_update_text(extracted_memory):
             self.memory_store.merge(extracted_memory)
             self._write_memory_updates_to_mem0(extracted_memory)
 
@@ -111,6 +110,10 @@ class Summarizer:
         visit(value)
         return texts
 
+    def _has_memory_update_text(self, value: Any) -> bool:
+        """Return whether a memory update payload contains actual text."""
+        return bool(self._iter_memory_texts(value))
+
     def _summary_mode(self) -> str:
         name = self.summary_path.name.lower()
         if "formal" in name:
@@ -118,6 +121,27 @@ class Summarizer:
         if "informal" in name:
             return "informal"
         return "unknown"
+
+    def _should_summarize(
+        self,
+        history: list[dict[str, Any]],
+        trigger_rounds: int,
+        covered_count: int,
+    ) -> bool:
+        """Only summarize after another full batch of user messages is uncovered."""
+        trigger_rounds = max(1, int(trigger_rounds))
+        total_user_rounds = self._count_user_messages(history)
+        if total_user_rounds < trigger_rounds:
+            return False
+        if len(history) <= covered_count:
+            return False
+
+        covered_count = min(max(covered_count, 0), len(history))
+        uncovered_user_rounds = self._count_user_messages(history[covered_count:])
+        return uncovered_user_rounds >= trigger_rounds
+
+    def _count_user_messages(self, history: list[dict[str, Any]]) -> int:
+        return len([item for item in history if item.get("role") == "user"])
 
     def _has_summarizable_history(self, history: list[dict[str, Any]]) -> bool:
         """只有存在非空用户消息时才允许摘要和记忆更新。"""
@@ -162,7 +186,9 @@ class Summarizer:
             content = self.deepseek_client.chat(self._memory_messages(user_history))
             parsed = json.loads(content)
             if isinstance(parsed, dict):
-                return self._normalize_memory_updates(parsed)
+                normalized = self._normalize_memory_updates(parsed)
+                if self._has_memory_update_text(normalized):
+                    return normalized
         except (DeepSeekError, json.JSONDecodeError) as exc:
             logger.warning("Falling back to local memory extraction after model failure: %s", exc)
 

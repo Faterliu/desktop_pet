@@ -82,7 +82,7 @@ class BehaviorController(QObject):
     def _proactive_ratio(self) -> dict[str, float]:
         """Read the proactive-content ratio configuration."""
         config = self.config_loader()
-        default = {"extra_knowledge": 0.5, "regular_greeting": 0.5}
+        default = {"extra_knowledge": 0.35, "regular_greeting": 0.65}
         return config.setdefault("proactive_content_ratio", default)
 
     def _adjust_ratio(self, responded_type: str) -> None:
@@ -143,6 +143,21 @@ class BehaviorController(QObject):
             return random.randint(30, 60)
         return 60
 
+    def _minimum_proactive_interval_minutes(self, behavior: dict[str, Any]) -> int:
+        """Read the configured minimum idle prompt interval."""
+        try:
+            value = int(behavior.get("min_proactive_interval_minutes", 15))
+        except (TypeError, ValueError):
+            return 15
+        return value if value > 0 else 15
+
+    def _effective_proactive_interval_minutes(self, behavior: dict[str, Any]) -> int:
+        """Use the dynamic idle interval, bounded by the configured minimum."""
+        return max(
+            self._minimum_proactive_interval_minutes(behavior),
+            self._dynamic_proactive_interval_minutes(),
+        )
+
     def _has_memory_content(self) -> bool:
         """Check whether memory.json has any useful stored user context."""
         memory_config = self.config_loader().get("memory", {})
@@ -173,7 +188,7 @@ class BehaviorController(QObject):
         if not self.usage_store.can_use_local(max_daily):
             return
 
-        interval_minutes = self._dynamic_proactive_interval_minutes()
+        interval_minutes = self._effective_proactive_interval_minutes(behavior)
         now = now_local()
         if now - self.last_user_interaction < timedelta(minutes=interval_minutes):
             return
@@ -185,7 +200,7 @@ class BehaviorController(QObject):
 
         ratio = self._proactive_ratio()
         extra_weight = ratio.get("extra_knowledge", 0.5)
-        if self._has_memory_content() and random.random() < extra_weight:
+        if random.random() < extra_weight and self._has_memory_content():
             self.notify_proactive_shown("extra_knowledge")
             self.knowledge_speak_requested.emit()
             self._consecutive_unanswered = 0

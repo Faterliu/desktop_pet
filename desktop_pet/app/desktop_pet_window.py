@@ -155,6 +155,7 @@ class KnowledgeSpeakWorker(QObject):
         mem0_memory_service: Mem0MemoryService | None = None,
         user_id: str = "default_user",
         use_mem0: bool = False,
+        mem0_memory_context: str = "",
     ) -> None:
         """初始化记忆增强的知识问候 API 任务。"""
         super().__init__()
@@ -164,6 +165,7 @@ class KnowledgeSpeakWorker(QObject):
         self.mem0_memory_service = mem0_memory_service
         self.user_id = user_id
         self.use_mem0 = use_mem0
+        self.mem0_memory_context = mem0_memory_context
 
     def run(self) -> None:
         """基于用户记忆随机选取一个偏好方向，生成 2-3 句针对性知识问候。"""
@@ -200,6 +202,8 @@ class KnowledgeSpeakWorker(QObject):
             self.failed.emit(f"知识问候走神了：{exc}")
 
     def _mem0_memory_context(self) -> str:
+        if self.mem0_memory_context:
+            return self.mem0_memory_context
         if not self.use_mem0 or self.mem0_memory_service is None:
             return ""
 
@@ -262,6 +266,7 @@ class DesktopPetWindow(QWidget):
         self.active_formal_answer_panel: FormalAnswerPanel | None = None
         self.pending_formal_question = ""
         self._pending_was_formal = False
+        self._pending_knowledge_mem0_context = ""
 
         self.chat_store_formal = ChatStore(self.chat_history_formal_path)
         self.chat_store_informal = ChatStore(self.chat_history_informal_path)
@@ -960,7 +965,9 @@ class DesktopPetWindow(QWidget):
             mem0_memory_service=self.mem0_memory_service,
             user_id=self._memory_user_id(),
             use_mem0=bool(self._memory_config().get("use_mem0_for_knowledge_speak", False)),
+            mem0_memory_context=self._pending_knowledge_mem0_context,
         )
+        self._pending_knowledge_mem0_context = ""
         self.chat_worker.moveToThread(self.chat_thread)
         self.chat_thread.started.connect(self.chat_worker.run)
         self.chat_worker.finished.connect(self._on_knowledge_speak_success)
@@ -1287,7 +1294,12 @@ class DesktopPetWindow(QWidget):
         """Return whether Mem0 has enough memory to try a knowledge greeting."""
         if not self._memory_config().get("use_mem0_for_knowledge_speak", False):
             return False
-        return self.mem0_memory_service.has_any_memory(self._memory_user_id())
+        self._pending_knowledge_mem0_context = self.mem0_memory_service.format_for_prompt(
+            user_id=self._memory_user_id(),
+            query="用户最近正在做的项目、学习目标、长期偏好和希望被提醒的事情",
+            top_k=3,
+        )
+        return bool(self._pending_knowledge_mem0_context)
 
     def _assistant_reply_bubble_duration_ms(self) -> int:
         """Read the regular assistant reply bubble duration from config."""

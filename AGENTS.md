@@ -134,8 +134,8 @@ wscript.exe .\start_main.vbs
 `desktop_pet/ai/summarizer.py`
 
 - 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。`maybe_summarize()` 支持 `force` 参数，为 True 时跳过轮数检查，供手动清空聊天记录前使用；但若历史中没有非空用户消息，会直接跳过，避免空聊天记录生成错误记忆。
-- 当前模型摘要与模型记忆提取已拆分：摘要仍基于最近完整对话生成，但 `memory_updates` 只基于用户发言单独提取，避免把人物/助手回答混入 `memory.json`；摘要文件本身不再落盘 `memory_updates`。
-- 若启用 Mem0，`Summarizer` 在保留原 `memory.json` 合并逻辑的同时，会将提取出的 `memory_updates` 旁路写入 Mem0，作为长期语义检索数据源；Mem0 写入失败只记录 warning，不得影响摘要或聊天主流程。
+- 当前模型摘要与模型记忆提取已拆分：摘要仍基于最近完整对话生成，但 `memory_updates` 只基于用户发言单独提取，避免把人物/助手回答混入 `memory.json`；摘要文件本身不再落盘 `memory_updates`。若模型记忆提取返回合法但没有任何实际文本的空结构，`Summarizer` 会继续回退到本地规则提取；只有包含非空记忆文本时才合并 `memory.json` 并旁路写入 Mem0，避免清理聊天时只刷新空记忆时间戳。
+- 若启用 Mem0，`Summarizer` 在保留原 `memory.json` 合并逻辑的同时，会将提取出的 `memory_updates` 旁路写入 Mem0，作为长期语义检索数据源；Mem0 写入失败只记录 warning，不得影响摘要或聊天主流程。摘要触发以新增用户消息批次为准：首次达到 `api.summary_trigger_rounds` 后触发，之后需自上次 `covered_message_count` 以来再新增同等数量的用户消息才会再次摘要，避免达到阈值后每轮聊天都重摘要。
 - 修改场景：摘要结构、记忆提取、失败兜底。
 - 风险：摘要在线程中触发，异常不能影响正常聊天。
 
@@ -167,9 +167,9 @@ wscript.exe .\start_main.vbs
 - `pick_return_after_idle_line()` 从 `return_after_idle` 分组随机选取话术，供开启置顶时使用。
 - `pick_waiting_line()` 从 `waiting` 分组随机选取等待提示话术，供聊天输入框长时间无输入时使用。
 - `pick_reply_ack_line()` 从 `reply` 分组随机选取简短应答话术，供知识问候展示后确认。
-- `_consecutive_unanswered` 计数器驱动动态问候间隔：首次 15min → 第二次 15min → 第三次 30min → 第四次起 30-60min 随机（最高 60min）。`notify_user_interaction()` 和每次 `_maybe_idle_prompt()` 成功触发问候后均重置计数。
+- `_consecutive_unanswered` 计数器驱动动态问候间隔：首次 15min → 第二次 15min → 第三次 30min → 第四次起 30-60min 随机（最高 60min），并受 `behavior.min_proactive_interval_minutes` 作为下限约束。`notify_user_interaction()` 和每次 `_maybe_idle_prompt()` 成功触发问候后均重置计数。
 - `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整：回应类型 +0.005，互斥类型 -0.001，并继续受 0.3-0.7 钳制。
-- 当 `memory.use_mem0_for_knowledge_speak` 为 true 时，`_has_memory_content()` 会优先通过主窗口传入的 Mem0 检查回调判断是否存在长期语义记忆；Mem0 不可用或无结果时回退到原 `memory.json` 检查。
+- 当 `memory.use_mem0_for_knowledge_speak` 为 true 时，`_has_memory_content()` 会在知识问候概率命中后，优先通过主窗口传入的 Mem0 检索回调判断是否存在长期语义记忆；主窗口会一次性取回 `top_k=3` 的 Mem0 上下文并暂存给 `KnowledgeSpeakWorker` 复用，避免判断和生成阶段重复检索。Mem0 不可用或无结果时回退到原 `memory.json` 检查。
 - 主动问候气泡停留时间改为读取 `ui.bubble_durations_ms`：启动问候取 `startup_greeting`，时段变化问候取 `period_greeting`，普通空闲/测试问候取 `proactive_greeting`。
 - 修改场景：主动行为频率、话术分组、免打扰逻辑、时段判断规则、知识问候与内容比例。
 
@@ -178,6 +178,7 @@ wscript.exe .\start_main.vbs
 - 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`ui.show_reload_config` 控制“重新加载配置”菜单项显隐（默认 `true`）、`chat.force_summarize_before_clear`（默认 `true`）控制手动清空前是否强制摘要。
 - `ui.bubble_durations_ms` 用于配置主要气泡停留时长：`startup_greeting`、`period_greeting`、`proactive_greeting`、`assistant_reply`。
 - `memory.enable_mem0` 控制是否启用 Mem0 长期语义记忆；`memory.inject_mem0_to_prompt` 控制是否将 Mem0 检索结果注入聊天 Prompt；`memory.use_mem0_for_knowledge_speak` 控制知识问候是否优先使用 Mem0；`memory.mem0_search_top_k` 控制每轮检索数量；`memory.mem0_llm_provider` 默认 `deepseek`，`memory.mem0_use_app_deepseek_config` 默认复用项目 DeepSeek 配置，`memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 可覆盖模型和 base URL；`memory.mem0_embedder_provider` 默认 `dashscope_openai_compatible`，通过 DashScope / 阿里云百炼 OpenAI-compatible embeddings 接口使用 `text-embedding-v4` 和 1024 维向量；`memory.dashscope_api_key` / `memory.dashscope_api_key_env` 控制 DashScope key 来源；`memory.write_sensitive_memory` 默认 false，用于避免情绪陪伴场景下自动保存敏感长期记忆。
+- `proactive_content_ratio.extra_knowledge` / `regular_greeting` 控制空闲主动问候中知识问候与普通问候的初始比例，当前默认 0.35 / 0.65；运行中用户回应会按 `_adjust_ratio()` 轻微调整，并持续钳制在 0.3-0.7 范围内。
 - 修改场景：新增可配置项时必须同步更新此文件，并确认读取路径。
 
 `desktop_pet/config/app_config.json`
@@ -514,6 +515,8 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 
 ## 文档同步记录
 
+- 2026-05-25：修复清理聊天记录前强制摘要时空记忆不落地的问题。`Summarizer._model_memory_updates()` 在模型返回合法但无任何非空记忆文本时，改为继续回退到本地规则提取；`maybe_summarize()` 只有在 `memory_updates` 含实际文本时才合并 `memory.json` 并旁路写入 Mem0，避免空结构导致 `memory.json.last_updated` 刷新但没有记忆内容、且 Mem0 无文本可写。新增 `desktop_pet/tests/test_summarizer_memory_updates.py` 覆盖空模型记忆回退本地提取并触发 Mem0 写入路径；同步更新 `AGENTS.md` 中 `summarizer.py` 描述。
+- 2026-05-25：优化 Mem0 触发频率。`Summarizer` 改为首次达到 `summary_trigger_rounds` 后，需自上次摘要覆盖点以来再新增同等数量用户消息才再次摘要，避免 37 轮后每轮聊天都触发摘要和 Mem0 写入；`BehaviorController._maybe_idle_prompt()` 改为先按 `proactive_content_ratio.extra_knowledge` 抽签，命中后才检查 Mem0/本地记忆，并让 `behavior.min_proactive_interval_minutes` 成为动态问候间隔下限；`DesktopPetWindow._has_knowledge_memory()` 改为一次性检索并暂存知识问候所需 Mem0 上下文，`KnowledgeSpeakWorker` 复用该上下文，减少重复检索；`proactive_content_ratio` 默认/当前配置改为 `extra_knowledge=0.35`、`regular_greeting=0.65`；新增 `desktop_pet/tests/test_mem0_trigger_rules.py` 验证摘要节流和概率未命中时不查 Mem0。同步更新 `AGENTS.md` 中 summarizer、behavior_controller、app_config 配置说明。
 - 2026-05-22：新增 `local_lines.first_start` 启动问候配置。`local_lines.json` 新增 `{ "enable": false, "data": [...] }` 结构；`BehaviorController._startup_greeting()` 启动问候优先级调整为 `first_start.data`（仅当开启）→ 季节问候 → 时段问候 → `startup`；`first_start` 成功取用后会立即写回 `enable=false`，实现一次性首启问候；启动问候不再受每日主动话术上限拦截，只受免打扰和 `startup_greeting` 开关控制；同步更新启动问候流程说明。
 - 2026-05-21：调整自主移动随机比例。`DesktopPetWindow._trigger_auto_move()` 改为按左跑、右跑、跳跃 4:4:2 抽取动作，并同步更新主动移动流程说明。
 - 2026-05-20：Mem0 embedder 接入 DashScope / 阿里云百炼 OpenAI-compatible embeddings。`mem0_memory_service.py` 构造 `Memory.from_config()` 时同时配置 DeepSeek LLM、DashScope embedding、1024 维本地 Qdrant 和项目内 `data/mem0_history.db`；`app_config.example.json` 和本地 `app_config.json` 新增 `dashscope_embedding_*` 与 key 来源配置；新增 `tools/test_dashscope_embedding.py`，并修正 `test.py` 不再使用字面量 `Bearer API_KEY` 或打印完整向量。Mem0 仍默认关闭，缺少 API key 或初始化失败时仅记录 warning 并降级。
