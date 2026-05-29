@@ -28,6 +28,7 @@ from animation.sprite_player import SpritePlayer
 from app.chat_input import ChatInput
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
+from app.history_clear_worker import ChatHistoryClearWorker
 from app.speech_bubble import ReplyBubble, SpeechBubble
 from character.behavior_controller import BehaviorController
 from storage.chat_store import ChatStore
@@ -36,7 +37,6 @@ from storage.memory_store import MemoryStore
 from storage.usage_store import UsageStore
 from utils.dwm_border import apply_transparent_window_fixes, force_window_topmost, suppress_dwm_border
 from utils.logger import get_logger
-from utils.time_utils import now_iso
 
 
 logger = get_logger(__name__)
@@ -251,10 +251,13 @@ class DesktopPetWindow(QWidget):
         self.mouse_press_position = QPoint()
         self.chat_thread: QThread | None = None
         self.chat_worker: QObject | None = None
+        self.clear_history_thread: QThread | None = None
+        self.clear_history_worker: QObject | None = None
         self.move_animation: QPropertyAnimation | None = None
         self.behavior_started = False
         self.exit_animation_in_progress = False
         self.allow_immediate_close = False
+        self._close_after_workers_finished = False
         self._suppress_click = False
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
@@ -313,6 +316,7 @@ class DesktopPetWindow(QWidget):
             self.usage_store,
             self._config_snapshot,
             self._has_knowledge_memory,
+            config_saver=self._save_app_config,
         )
         self.auto_move_timer = QTimer(self)
         self.auto_move_timer.timeout.connect(self._trigger_auto_move)
@@ -444,14 +448,16 @@ class DesktopPetWindow(QWidget):
             event.ignore()
             self.request_exit()
             return
+        if self._background_workers_running():
+            event.ignore()
+            self._close_after_workers_finished = True
+            self._request_background_workers_quit()
+            return
         self._destroy_formal_answer_panels()
         self._save_window_position()
         self.bubble.hide()
         self.reply_bubble.hide()
         self.chat_input.hide()
-        if self.chat_thread and self.chat_thread.isRunning():
-            self.chat_thread.quit()
-            self.chat_thread.wait(1000)
         self.mem0_memory_service.close()
         super().closeEvent(event)
         app = QApplication.instance()
@@ -710,19 +716,57 @@ class DesktopPetWindow(QWidget):
 
     def _clear_informal_chat_history(self) -> None:
         """清空非正式聊天历史；若配置开启则在清空前强制总结。"""
-        if self._chat_config().get("force_summarize_before_clear", True):
-            self.summarizer_informal.maybe_summarize(0, force=True)
-        self.chat_store_informal.clear_history()
-        self.chat_store_informal.update_last_cleaned_at(now_iso())
-        self._display_message("非正式聊天记录已经清空啦。", 3500, "system")
+        self._start_clear_history_worker(
+            "informal",
+            self.summarizer_informal,
+            self.chat_store_informal,
+        )
 
     def _clear_formal_chat_history(self) -> None:
         """清空正式问答聊天历史；若配置开启则在清空前强制总结。"""
-        if self._chat_config().get("force_summarize_before_clear", True):
-            self.summarizer_formal.maybe_summarize(0, force=True)
-        self.chat_store_formal.clear_history()
-        self.chat_store_formal.update_last_cleaned_at(now_iso())
-        self._display_message("正式问答记录已经清空啦。", 3500, "system")
+        self._start_clear_history_worker(
+            "formal",
+            self.summarizer_formal,
+            self.chat_store_formal,
+        )
+
+    def _start_clear_history_worker(
+        self,
+        mode: str,
+        summarizer: Summarizer,
+        chat_store: ChatStore,
+    ) -> None:
+        """Start backend-only chat-history cleanup in a worker thread."""
+        if self.clear_history_thread and self.clear_history_thread.isRunning():
+            return
+
+        self.clear_history_thread = QThread(self)
+        self.clear_history_worker = ChatHistoryClearWorker(
+            mode=mode,
+            summarizer=summarizer,
+            chat_store=chat_store,
+            force_summarize=bool(self._chat_config().get("force_summarize_before_clear", True)),
+        )
+        self.clear_history_worker.moveToThread(self.clear_history_thread)
+        self.clear_history_thread.started.connect(self.clear_history_worker.run)
+        self.clear_history_worker.finished.connect(self._on_clear_history_success)
+        self.clear_history_worker.failed.connect(self._on_clear_history_failure)
+        self.clear_history_worker.finished.connect(self.clear_history_thread.quit)
+        self.clear_history_worker.failed.connect(self.clear_history_thread.quit)
+        self.clear_history_thread.finished.connect(self._cleanup_clear_history_thread)
+        self.clear_history_thread.start()
+
+    def _on_clear_history_success(self, mode: str) -> None:
+        if self._close_after_workers_finished:
+            return
+        label = "正式问答记录" if mode == "formal" else "非正式聊天记录"
+        self._display_message(f"{label}已经清空啦。", 3500, "system")
+
+    def _on_clear_history_failure(self, mode: str, error_message: str) -> None:
+        if self._close_after_workers_finished:
+            return
+        label = "正式问答记录" if mode == "formal" else "非正式聊天记录"
+        self._display_message(f"{label}清理失败：{error_message}", 5000, "assistant")
 
     def _reload_config(self) -> None:
         """重新读取配置文件，并刷新动画和行为控制状态。"""
@@ -885,6 +929,17 @@ class DesktopPetWindow(QWidget):
         if self.chat_thread:
             self.chat_thread.deleteLater()
             self.chat_thread = None
+        self._maybe_close_after_workers_finished()
+
+    def _cleanup_clear_history_thread(self) -> None:
+        """清理聊天记录后台线程。"""
+        if self.clear_history_worker:
+            self.clear_history_worker.deleteLater()
+            self.clear_history_worker = None
+        if self.clear_history_thread:
+            self.clear_history_thread.deleteLater()
+            self.clear_history_thread = None
+        self._maybe_close_after_workers_finished()
 
     def _on_chat_success(self, reply: str) -> None:
         """处理模型成功返回后的界面更新与消息落盘。"""
@@ -1248,6 +1303,27 @@ class DesktopPetWindow(QWidget):
     def _chat_in_progress(self) -> bool:
         """判断当前是否仍有聊天请求在后台执行。"""
         return bool(self.chat_thread and self.chat_thread.isRunning())
+
+    def _clear_history_in_progress(self) -> bool:
+        """判断是否正在后台整理并清空聊天记录。"""
+        return bool(self.clear_history_thread and self.clear_history_thread.isRunning())
+
+    def _background_workers_running(self) -> bool:
+        return self._chat_in_progress() or self._clear_history_in_progress()
+
+    def _request_background_workers_quit(self) -> None:
+        if self.chat_thread and self.chat_thread.isRunning():
+            self.chat_thread.quit()
+        if self.clear_history_thread and self.clear_history_thread.isRunning():
+            self.clear_history_thread.quit()
+
+    def _maybe_close_after_workers_finished(self) -> None:
+        if not self._close_after_workers_finished:
+            return
+        if self._background_workers_running():
+            return
+        self._close_after_workers_finished = False
+        QTimer.singleShot(0, self.close)
 
     def _api_chat_enabled(self) -> bool:
         """判断当前用户聊天是否允许接入外部 API。"""

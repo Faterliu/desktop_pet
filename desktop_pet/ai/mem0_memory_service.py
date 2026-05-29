@@ -31,6 +31,10 @@ class Mem0MemoryService:
         if not self.enabled:
             return
 
+        if not self._has_required_embedding_config(memory_config):
+            self.enabled = False
+            return
+
         try:
             from mem0 import Memory
         except Exception as exc:  # noqa: BLE001
@@ -319,6 +323,16 @@ class Mem0MemoryService:
         env_name = str(memory_config.get("dashscope_api_key_env", "DASHSCOPE_API_KEY") or "").strip()
         env_name = env_name or "DASHSCOPE_API_KEY"
         return str(os.getenv(env_name, "") or "").strip()
+
+    def _has_required_embedding_config(self, memory_config: dict[str, Any]) -> bool:
+        if self._dashscope_api_key(memory_config):
+            return True
+
+        logger.info(
+            "Mem0 is enabled but no DashScope embedding key is configured; "
+            "skipping Mem0 initialization."
+        )
+        return False
 
     def _is_sensitive_text(self, text: str) -> bool:
         """Simple local sensitive-memory guard."""

@@ -23,6 +23,7 @@ class BehaviorController(QObject):
         usage_store: UsageStore,
         config_loader: Callable[[], dict[str, Any]],
         memory_checker: Callable[[], bool] | None = None,
+        config_saver: Callable[[], None] | None = None,
     ) -> None:
         """Coordinate proactive greetings and time-based local behavior."""
         super().__init__()
@@ -31,6 +32,7 @@ class BehaviorController(QObject):
         self.usage_store = usage_store
         self.config_loader = config_loader
         self.memory_checker = memory_checker
+        self.config_saver = config_saver
         self.memory_path = self.app_config_path.parent.parent / "data" / "memory.json"
 
         self.last_user_interaction = now_local()
@@ -93,6 +95,15 @@ class BehaviorController(QObject):
         ratio[responded_type] = min(0.7, round(ratio.get(responded_type, 0.5) + 0.005, 4))
         ratio[other_type] = max(0.3, round(ratio.get(other_type, 0.5) - 0.001, 4))
         config["proactive_content_ratio"] = ratio
+        self._save_config_snapshot()
+
+    def _save_config_snapshot(self) -> None:
+        if self.config_saver is None:
+            return
+        try:
+            self.config_saver()
+        except Exception:
+            pass
 
     def set_do_not_disturb(self, enabled: bool) -> None:
         """Update the in-memory do-not-disturb flag."""
@@ -151,6 +162,14 @@ class BehaviorController(QObject):
             return 15
         return value if value > 0 else 15
 
+    def _max_local_lines_per_day(self, behavior: dict[str, Any]) -> int:
+        """Read the local proactive daily limit with a safe default."""
+        try:
+            value = int(behavior.get("max_local_lines_per_day", 10))
+        except (TypeError, ValueError):
+            return 10
+        return value if value > 0 else 10
+
     def _effective_proactive_interval_minutes(self, behavior: dict[str, Any]) -> int:
         """Use the dynamic idle interval, bounded by the configured minimum."""
         return max(
@@ -184,7 +203,7 @@ class BehaviorController(QObject):
         if behavior.get("do_not_disturb") or not behavior.get("proactive_chat", True):
             return
 
-        max_daily = int(behavior.get("max_local_lines_per_day", 10))
+        max_daily = self._max_local_lines_per_day(behavior)
         if not self.usage_store.can_use_local(max_daily):
             return
 
@@ -230,7 +249,7 @@ class BehaviorController(QObject):
         behavior = config.get("behavior", {})
         if behavior.get("do_not_disturb"):
             return
-        max_daily = int(behavior.get("max_local_lines_per_day", 10))
+        max_daily = self._max_local_lines_per_day(behavior)
         if not self.usage_store.can_use_local(max_daily):
             return
 

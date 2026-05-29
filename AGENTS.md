@@ -9,7 +9,7 @@
 - 启动建议第一次先运行 `desktop_pet/setup_env.bat` 创建项目本地虚拟环境并安装依赖，之后日常双击 `desktop_pet/start_main.vbs` 无终端启动。手动启动仍可 `cd desktop_pet` 后执行 `py -m pip install -r requirements.txt` 和 `py main.py`。不要默认信任 `python` 或 `pip`，它们在 Windows 上可能指向应用商店别名或旧解释器。
 - 主协调器是 `desktop_pet/app/desktop_pet_window.py`。多数 UI、聊天、配置、动作、自动移动、正式问答、退出流程都从这里串起来。
 - 运行时个性化数据不应提交：`desktop_pet/config/app_config.json`、`desktop_pet/data/`、日志和缓存都由 `.gitignore` 忽略。默认配置模板是 `desktop_pet/config/app_config.example.json`。
-- 当前没有专门的测试框架、构建脚本或打包流程。常用校验是 JSON 合法性、Python AST/语法检查、手动运行桌宠。
+- 当前没有独立测试框架、构建脚本或打包流程，但 `desktop_pet/tests/` 已有 `unittest` 回归测试。常用校验是项目本地虚拟环境执行 `python -m unittest discover -s desktop_pet/tests`、JSON 合法性、Python AST/语法检查、手动运行桌宠。
 - 每次智能体修改代码后，必须检查本文件是否需要同步更新。涉及目录结构、核心流程、API、数据结构、配置项、依赖、测试方式、构建方式或项目约定时，必须更新本文件底部的“文档同步记录”。
 
 ## 1. 项目一句话概览
@@ -63,8 +63,16 @@ wscript.exe .\start_main.vbs
 - 核心协调器。负责窗口属性、鼠标事件（单击聊天、双击回复/打招呼、拖拽移动、右键菜单，含置顶开关）、聊天流程、后台线程、正式问答面板、自动移动、位置恢复和退出动画（退出时播放 waving 并显示 `farewell` 道别气泡）。
 - `_enforce_topmost()` 由 `_topmost_enforcement_timer` 每 30 秒驱动，通过 `force_window_topmost()` 在 Windows API 级别强制 `WS_EX_TOPMOST`，防止频繁 `setMask()` 导致置顶样式被系统清除。
 - `_sync_floating_widgets()` 在气泡/输入框跟随角色位置时，将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入 `reposition()`，使两个气泡互相避让不重叠。
+- 清理正式/非正式聊天记录时不再在 UI 线程中强制摘要，而是创建 `ChatHistoryClearWorker` 放到独立 `QThread` 执行摘要、清空和 `last_cleaned_at` 更新；主窗口只接收完成/失败信号并在后台操作结束后决定是否显示结果。
+- 退出时若聊天请求或清理线程仍在运行，`closeEvent()` 会延迟真正关闭，等待后台线程 `finished` 后再重新调用 `close()`，避免销毁仍在运行的 `QThread`。
 - 修改场景：几乎所有用户可见行为的入口都在这里接线。
-- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`、`_topmost_enforcement_timer`。
+- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`clear_history_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_close_after_workers_finished`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`、`_topmost_enforcement_timer`。
+
+`desktop_pet/app/history_clear_worker.py`
+
+- 后台清理 worker。`ChatHistoryClearWorker.run()` 在非 UI 线程中按配置强制摘要、清空对应 `ChatStore`，并更新 `last_cleaned_at`。
+- 修改场景：清理聊天历史、清空前摘要、清理失败降级。
+- 风险：worker 不应直接操作任何 QWidget 或气泡；UI 展示必须留在 `DesktopPetWindow` 的信号回调中。
 
 `desktop_pet/app/context_menu.py`
 
@@ -113,6 +121,7 @@ wscript.exe .\start_main.vbs
 
 - 可选 Mem0 长期语义记忆封装层。负责初始化 Mem0、写入摘要提取出的长期记忆、根据当前用户输入检索相关记忆，并格式化为 Prompt 可注入文本。
 - 由 `config/app_config.json` / `app_config.example.json` 中的 `memory.enable_mem0`、`memory.inject_mem0_to_prompt`、`memory.use_mem0_for_knowledge_speak`、`memory.mem0_search_top_k`、`memory.write_sensitive_memory` 等配置控制；默认关闭。
+- 若 `memory.enable_mem0` 为 true 但 DashScope embedding key 为空，服务会记录 info 后直接降级为不可用，不导入 `mem0`，也不创建 Qdrant/history 目录，避免启动 warning、额外目录创建和初始化延迟。只有存在 `memory.dashscope_api_key` 或 `memory.dashscope_api_key_env` 指向的环境变量时，才继续 `Memory.from_config()` 初始化。
 - 初始化使用 `Memory.from_config(config)`，LLM provider 固定走 Mem0 官方支持的 `deepseek` provider。默认复用项目现有 `api.api_key`、`api.base_url`、`api.model`；若 `memory.mem0_deepseek_model` 或 `memory.mem0_deepseek_base_url` 非空，则优先使用 memory 节点下的覆盖值。
 - Mem0 embedder 使用 DashScope / 阿里云百炼 OpenAI-compatible embeddings 接口，内部通过 Mem0 的 OpenAI embedder 传入 `openai_base_url` 和 `embedding_dims`。默认 base URL 为 `https://dashscope.aliyuncs.com/compatible-mode/v1`，模型为 `text-embedding-v4`，维度为 1024。
 - DashScope API Key 优先从 `memory.dashscope_api_key` 读取，若为空则读取 `memory.dashscope_api_key_env` 指定的环境变量，默认 `DASHSCOPE_API_KEY`。示例配置和文档不得写入真实 key。
@@ -168,7 +177,8 @@ wscript.exe .\start_main.vbs
 - `pick_waiting_line()` 从 `waiting` 分组随机选取等待提示话术，供聊天输入框长时间无输入时使用。
 - `pick_reply_ack_line()` 从 `reply` 分组随机选取简短应答话术，供知识问候展示后确认。
 - `_consecutive_unanswered` 计数器驱动动态问候间隔：首次 15min → 第二次 15min → 第三次 30min → 第四次起 30-60min 随机（最高 60min），并受 `behavior.min_proactive_interval_minutes` 作为下限约束。`notify_user_interaction()` 和每次 `_maybe_idle_prompt()` 成功触发问候后均重置计数。
-- `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整：回应类型 +0.005，互斥类型 -0.001，并继续受 0.3-0.7 钳制。
+- `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整：回应类型 +0.005，互斥类型 -0.001，并继续受 0.3-0.7 钳制；主窗口传入 `config_saver` 时会把调整后的 `proactive_content_ratio` 持久化回 `app_config.json`。
+- `behavior.max_local_lines_per_day` 通过安全整数解析读取，非法、空值或非正数会回退到 10，避免本地配置错误导致 QTimer 回调异常。
 - 当 `memory.use_mem0_for_knowledge_speak` 为 true 时，`_has_memory_content()` 会在知识问候概率命中后，优先通过主窗口传入的 Mem0 检索回调判断是否存在长期语义记忆；主窗口会一次性取回 `top_k=3` 的 Mem0 上下文并暂存给 `KnowledgeSpeakWorker` 复用，避免判断和生成阶段重复检索。Mem0 不可用或无结果时回退到原 `memory.json` 检查。
 - 主动问候气泡停留时间改为读取 `ui.bubble_durations_ms`：启动问候取 `startup_greeting`，时段变化问候取 `period_greeting`，普通空闲/测试问候取 `proactive_greeting`。
 - 修改场景：主动行为频率、话术分组、免打扰逻辑、时段判断规则、知识问候与内容比例。
@@ -284,8 +294,9 @@ wscript.exe .\start_main.vbs
 
 测试流程：
 
-- 当前没有 `tests/` 目录，也没有 pytest、unittest、CI、格式化器配置。
-- 已使用过的轻量校验方式是 AST 解析和手动启动。
+- 当前使用 `desktop_pet/tests/` 下的 `unittest` 回归测试，没有 pytest、CI、格式化器配置。
+- 推荐使用项目本地虚拟环境运行：`desktop_pet\.desktop_pet_venv\Scripts\python.exe -m unittest discover -s desktop_pet\tests`。
+- 常用轻量校验方式还包括 Python AST 解析、JSON 合法性检查和手动启动。
 - `py_compile` 在本环境可能因为 `__pycache__` 写入权限失败，不适合作为唯一验证方式。
 
 ## 5. 重要模块之间的关系
@@ -515,6 +526,7 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 
 ## 文档同步记录
 
+- 2026-05-28：修复 Mem0、清理线程、退出等待和主动比例持久化相关流程。`Mem0MemoryService` 在启用但缺少 DashScope embedding key 时直接 info 降级，跳过 `mem0` 导入和 Qdrant/history 初始化；新增 `app/history_clear_worker.py`，将清理聊天记录前的强制摘要、清空和 `last_cleaned_at` 更新放到独立后台线程；`DesktopPetWindow.closeEvent()` 在聊天或清理线程仍运行时延迟真正关闭，等待后台线程收口后再退出；`BehaviorController` 新增 `config_saver` 回调以持久化 `proactive_content_ratio`，并对 `max_local_lines_per_day` 做安全整数解析。新增 `test_mem0_memory_service.py`、`test_behavior_controller.py`、`test_history_clear_worker.py` 回归测试，并同步更新相关模块、测试流程和风险说明。
 - 2026-05-25：修复清理聊天记录前强制摘要时空记忆不落地的问题。`Summarizer._model_memory_updates()` 在模型返回合法但无任何非空记忆文本时，改为继续回退到本地规则提取；`maybe_summarize()` 只有在 `memory_updates` 含实际文本时才合并 `memory.json` 并旁路写入 Mem0，避免空结构导致 `memory.json.last_updated` 刷新但没有记忆内容、且 Mem0 无文本可写。新增 `desktop_pet/tests/test_summarizer_memory_updates.py` 覆盖空模型记忆回退本地提取并触发 Mem0 写入路径；同步更新 `AGENTS.md` 中 `summarizer.py` 描述。
 - 2026-05-25：优化 Mem0 触发频率。`Summarizer` 改为首次达到 `summary_trigger_rounds` 后，需自上次摘要覆盖点以来再新增同等数量用户消息才再次摘要，避免 37 轮后每轮聊天都触发摘要和 Mem0 写入；`BehaviorController._maybe_idle_prompt()` 改为先按 `proactive_content_ratio.extra_knowledge` 抽签，命中后才检查 Mem0/本地记忆，并让 `behavior.min_proactive_interval_minutes` 成为动态问候间隔下限；`DesktopPetWindow._has_knowledge_memory()` 改为一次性检索并暂存知识问候所需 Mem0 上下文，`KnowledgeSpeakWorker` 复用该上下文，减少重复检索；`proactive_content_ratio` 默认/当前配置改为 `extra_knowledge=0.35`、`regular_greeting=0.65`；新增 `desktop_pet/tests/test_mem0_trigger_rules.py` 验证摘要节流和概率未命中时不查 Mem0。同步更新 `AGENTS.md` 中 summarizer、behavior_controller、app_config 配置说明。
 - 2026-05-22：新增 `local_lines.first_start` 启动问候配置。`local_lines.json` 新增 `{ "enable": false, "data": [...] }` 结构；`BehaviorController._startup_greeting()` 启动问候优先级调整为 `first_start.data`（仅当开启）→ 季节问候 → 时段问候 → `startup`；`first_start` 成功取用后会立即写回 `enable=false`，实现一次性首启问候；启动问候不再受每日主动话术上限拦截，只受免打扰和 `startup_greeting` 开关控制；同步更新启动问候流程说明。
