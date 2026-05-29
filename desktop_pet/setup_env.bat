@@ -8,7 +8,7 @@ set "RUNTIME_FILE=%DATA_DIR%\runtime_python.txt"
 set "VENV_DIR=%~dp0.desktop_pet_venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 set "PIP_TEMP_DIR=%~dp0.pip_tmp"
-set "PIP_CACHE_DIR=%~dp0.pip_cache"
+set "LEGACY_PIP_CACHE_DIR=%~dp0.pip_cache"
 set "BASE_PYTHON="
 
 set "PIP_NO_INDEX="
@@ -16,6 +16,7 @@ set "PIP_FIND_LINKS="
 set "PIP_INDEX_URL="
 set "PIP_EXTRA_INDEX_URL="
 set "PIP_CONFIG_FILE="
+set "PIP_NO_CACHE_DIR=1"
 set "PIP_PROXY="
 set "HTTP_PROXY="
 set "HTTPS_PROXY="
@@ -23,7 +24,6 @@ set "ALL_PROXY="
 set "NO_PROXY="
 
 if not exist "%PIP_TEMP_DIR%" mkdir "%PIP_TEMP_DIR%"
-if not exist "%PIP_CACHE_DIR%" mkdir "%PIP_CACHE_DIR%"
 set "TEMP=%PIP_TEMP_DIR%"
 set "TMP=%PIP_TEMP_DIR%"
 
@@ -134,6 +134,11 @@ if errorlevel 1 (
     echo Dependency verification failed.
     pause
     exit /b 1
+)
+
+if exist "%LEGACY_PIP_CACHE_DIR%" (
+    echo Removing old local pip cache...
+    rmdir /s /q "%LEGACY_PIP_CACHE_DIR%" >nul 2>nul
 )
 
 > "%RUNTIME_FILE%" <nul set /p "=%VENV_PYTHON%"

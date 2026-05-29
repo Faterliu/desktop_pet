@@ -493,7 +493,7 @@ git status --short
 
 Python 依赖见 `desktop_pet/requirements.txt`：
 
-- `PySide6`：桌面窗口、Qt 控件、定时器、信号、动画和图像显示。
+- `PySide6-Essentials`：提供运行所需的 `PySide6.QtCore`、`PySide6.QtGui`、`PySide6.QtWidgets`，用于桌面窗口、Qt 控件、定时器、信号、动画和图像显示；不要默认安装完整 `PySide6` / `PySide6_Addons`，避免引入未使用的 WebEngine、QML、Quick、Charts、3D 等大型 Qt 组件。
 - `requests`：调用 DeepSeek API，以及独立 DashScope embedding 测试脚本。
 - `mem0ai==2.0.2`：可选 Mem0 长期语义记忆层基础 SDK。代码必须使用可选导入和失败降级，不能假设一定安装或初始化成功；不要默认安装 `mem0ai[nlp]`、CLI、Server、OpenMemory、Docker、自托管服务或 spaCy 模型等额外扩展。
 
@@ -526,6 +526,7 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 
 ## 文档同步记录
 
+- 2026-05-29：精简运行环境占用。`requirements.txt` 将 `PySide6` 替换为 `PySide6-Essentials`，当前项目虚拟环境卸载完整 `PySide6` / `PySide6_Addons` 后重装 Essentials，仅保留 `QtCore`、`QtGui`、`QtWidgets` 等实际使用模块；`setup_env.bat` 不再创建项目内 `.pip_cache`，安装依赖时设置 `PIP_NO_CACHE_DIR=1`，并在环境校验成功后清理旧版 `.pip_cache`。同步更新依赖说明和环境脚本缓存策略说明。
 - 2026-05-28：修复 Mem0、清理线程、退出等待和主动比例持久化相关流程。`Mem0MemoryService` 在启用但缺少 DashScope embedding key 时直接 info 降级，跳过 `mem0` 导入和 Qdrant/history 初始化；新增 `app/history_clear_worker.py`，将清理聊天记录前的强制摘要、清空和 `last_cleaned_at` 更新放到独立后台线程；`DesktopPetWindow.closeEvent()` 在聊天或清理线程仍运行时延迟真正关闭，等待后台线程收口后再退出；`BehaviorController` 新增 `config_saver` 回调以持久化 `proactive_content_ratio`，并对 `max_local_lines_per_day` 做安全整数解析。新增 `test_mem0_memory_service.py`、`test_behavior_controller.py`、`test_history_clear_worker.py` 回归测试，并同步更新相关模块、测试流程和风险说明。
 - 2026-05-25：修复清理聊天记录前强制摘要时空记忆不落地的问题。`Summarizer._model_memory_updates()` 在模型返回合法但无任何非空记忆文本时，改为继续回退到本地规则提取；`maybe_summarize()` 只有在 `memory_updates` 含实际文本时才合并 `memory.json` 并旁路写入 Mem0，避免空结构导致 `memory.json.last_updated` 刷新但没有记忆内容、且 Mem0 无文本可写。新增 `desktop_pet/tests/test_summarizer_memory_updates.py` 覆盖空模型记忆回退本地提取并触发 Mem0 写入路径；同步更新 `AGENTS.md` 中 `summarizer.py` 描述。
 - 2026-05-25：优化 Mem0 触发频率。`Summarizer` 改为首次达到 `summary_trigger_rounds` 后，需自上次摘要覆盖点以来再新增同等数量用户消息才再次摘要，避免 37 轮后每轮聊天都触发摘要和 Mem0 写入；`BehaviorController._maybe_idle_prompt()` 改为先按 `proactive_content_ratio.extra_knowledge` 抽签，命中后才检查 Mem0/本地记忆，并让 `behavior.min_proactive_interval_minutes` 成为动态问候间隔下限；`DesktopPetWindow._has_knowledge_memory()` 改为一次性检索并暂存知识问候所需 Mem0 上下文，`KnowledgeSpeakWorker` 复用该上下文，减少重复检索；`proactive_content_ratio` 默认/当前配置改为 `extra_knowledge=0.35`、`regular_greeting=0.65`；新增 `desktop_pet/tests/test_mem0_trigger_rules.py` 验证摘要节流和概率未命中时不查 Mem0。同步更新 `AGENTS.md` 中 summarizer、behavior_controller、app_config 配置说明。
@@ -569,12 +570,12 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-13：启动问候不再计入本地主动话术次数。`BehaviorController._startup_greeting()` 移除成功展示前的 `usage_store.increment_local_line()`，保留免打扰、`startup_greeting` 开关和每日上限检查；空闲主动话术和时段变化问候仍按原逻辑计入 `local_proactive_lines_used`。
 - 2026-05-13：主动问候回应后的内容比例微调幅度降低。`BehaviorController._adjust_ratio()` 改为回应类型 +0.005、互斥类型 -0.001，仍保持知识问候与普通问候比例在 0.3-0.7 范围内。
 - 2026-05-13：摘要和记忆更新增加空聊天保护。`Summarizer.maybe_summarize()` 新增 `_has_summarizable_history()` 检查，只有存在非空用户消息时才继续生成摘要和合并 `memory_updates`；即使 `force=True`，空历史或仅有空内容/助手消息也会跳过，避免模型基于空 transcript 写入“用户不希望被总结或记录”等错误记忆。
-- 2026-05-13：拆分快速启动与环境准备脚本。`desktop_pet/setup_env.bat` 负责查找或安装带 `pip` 的 Python（优先 Miniforge，避免无 pip 的 MSYS Python 被误选）、安装并校验 `PySide6`/`requests`，再把最终解释器路径写入 `data/runtime_python.txt`；`desktop_pet/start_main.vbs` 作为默认无终端启动入口，读取该路径隐藏运行 `main.py`，错误时打开终端显示 `data/start_main_error.log`，避免日常启动阶段隐式改动依赖环境。
+- 2026-05-13：拆分快速启动与环境准备脚本。`desktop_pet/setup_env.bat` 负责查找或安装带 `pip` 的 Python（优先 Miniforge，避免无 pip 的 MSYS Python 被误选）、安装并校验 `PySide6-Essentials` 提供的 `PySide6` 模块和 `requests`，再把最终解释器路径写入 `data/runtime_python.txt`；`desktop_pet/start_main.vbs` 作为默认无终端启动入口，读取该路径隐藏运行 `main.py`，错误时打开终端显示 `data/start_main_error.log`，避免日常启动阶段隐式改动依赖环境。
 - 2026-05-13：修复无终端启动读取 Python 路径失败。`setup_env.bat` 改为将 `runtime_python.txt` 写成无换行的纯路径；`start_main.vbs` 新增路径规范化，读取后移除回车、换行、制表符和 BOM，避免 `FileExists()` 因路径尾部换行误判 Python 不存在。
 - 2026-05-14：窗口置顶持久化修复。`utils/dwm_border.py` 新增 `force_window_topmost(hwnd, enabled)`，通过 `SetWindowPos(HWND_TOPMOST)` 在 Windows API 级别直接设置置顶样式。`DesktopPetWindow` 新增 `_topmost_enforcement_timer`（每 30 秒）和 `_enforce_topmost()` 方法，在 `showEvent` 中启动并在 `_toggle_always_on_top` 中管理启停，防止频繁 `setMask()` 导致 `WS_EX_TOPMOST` 被系统清除。同步更新 `AGENTS.md` 中 `desktop_pet_window.py` 描述和新增 `dwm_border.py` 章节。
 - 2026-05-14：气泡智能定位与互斥避让。`speech_bubble.py` 新增模块级 `_find_bubble_position(bubble_width, bubble_height, anchor_rect, candidates, exclusion_rects)` 屏幕感知定位函数，支持额外避让区域。`SpeechBubble.reposition()` 和 `ReplyBubble._reposition()` 改用此函数，候选方位覆盖上/下/左/右。`DesktopPetWindow._sync_floating_widgets()` 在重定位时将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入，使两个气泡互相避让不重叠。`_on_knowledge_speak_success()` 在两个气泡均显示后调用 `_sync_floating_widgets()` 触发互相避让。同步更新 `AGENTS.md` 中 `speech_bubble.py` 和 `desktop_pet_window.py` 描述。
 - 2026-05-13：增强快速启动脚本的新环境兼容性。`start_main.bat --console` 读取 `runtime_python.txt` 时也通过 PowerShell 清理 BOM、回车、换行、制表符和空格；`setup_env.bat` 在 `winget` 安装 Python 后若当前终端还找不到可用解释器，会提示重新运行脚本，仍失败再重开终端或重启系统。
 - 2026-05-15：启动脚本增加代码更新步骤。`desktop_pet/start_main.vbs` 在启动 `main.py` 前切到仓库根目录执行 `git pull --ff-only`，将输出写入 `data/start_main_error.log`；若 Git 不可用、当前分支无上游、拉取冲突或网络失败，仅写入 warning 并继续启动，避免开机自启时因网络尚未连接而阻止桌宠运行。
-- 2026-05-15：环境配置脚本改为项目本地虚拟环境策略。`setup_env.bat` 不再对全局/Miniforge base 环境执行项目依赖安装，而是创建 `desktop_pet/.desktop_pet_venv`，将依赖安装到本地虚拟环境，并把 `.desktop_pet_venv/Scripts/python.exe` 写入 `data/runtime_python.txt` 供 `start_main.vbs` 使用；为兼容当前机器的临时目录/代理问题，脚本会清理 pip 相关环境变量并使用项目内 `.pip_tmp`、`.pip_cache`。
+- 2026-05-15：环境配置脚本改为项目本地虚拟环境策略。`setup_env.bat` 不再对全局/Miniforge base 环境执行项目依赖安装，而是创建 `desktop_pet/.desktop_pet_venv`，将依赖安装到本地虚拟环境，并把 `.desktop_pet_venv/Scripts/python.exe` 写入 `data/runtime_python.txt` 供 `start_main.vbs` 使用；为兼容当前机器的临时目录/代理问题，脚本会清理 pip 相关环境变量并使用项目内 `.pip_tmp`，但安装依赖时禁用 pip 缓存，并会清理旧版脚本遗留的 `.pip_cache`。
 - 2026-05-15：`重新加载配置` 菜单项增加配置开关。`context_menu.py` 的 `build_context_menu()` 新增 `show_reload_config` 参数，`DesktopPetWindow._show_context_menu()` 从 `ui.show_reload_config` 读取并传入；`app_config.example.json` 新增同名配置项，默认 `true`，用于控制右键菜单中的“重新加载配置”按钮是否显示。
 - 2026-05-15：时段问候新增“下午”分组。`BehaviorController._time_greeting_key()` 改为按 24 小时划分为 `7-11` 早晨、`11-14` 中午、`14-18` 下午、`18-22` 晚上、其余时间 `sleepy`；`local_lines.json` 新增 `greeting_afternoon` 本地问候话术，并同步更新 `AGENTS.md` 中 behavior_controller、local_lines 和主动行为流说明。
