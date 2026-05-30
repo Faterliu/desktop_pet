@@ -66,6 +66,12 @@
     "dashscope_embedding_model": "text-embedding-v4",
     "dashscope_embedding_dimensions": 1024,
     "dashscope_embedding_encoding_format": "float",
+    "enable_memory_vectors": true,
+    "memory_embedding_batch_size": 8,
+    "memory_embedding_timeout_seconds": 30,
+    "enable_semantic_memory_merge": true,
+    "semantic_merge_interval_days": 60,
+    "semantic_duplicate_similarity_threshold": 0.96,
     "write_sensitive_memory": false,
     "mem0_init_timeout_seconds": 10,
     "mem0_note": "Mem0 is optional. Keep disabled unless dependencies and API/embedder configuration are ready."

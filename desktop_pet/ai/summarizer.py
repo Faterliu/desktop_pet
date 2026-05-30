@@ -116,10 +116,10 @@ class Summarizer:
 
     def _summary_mode(self) -> str:
         name = self.summary_path.name.lower()
-        if "formal" in name:
-            return "formal"
         if "informal" in name:
             return "informal"
+        if "formal" in name:
+            return "formal"
         return "unknown"
 
     def _should_summarize(
@@ -257,11 +257,13 @@ class Summarizer:
             if item.get("role") != "user":
                 continue
             text = str(item.get("content", ""))
+            if self._summary_mode() == "formal" and text.strip():
+                study_topics.append(text[:60])
             if "喜欢" in text:
                 preferences.append(text[:50])
             if re.search(r"(项目|需求|实现|代码)", text):
                 projects.append(text[:60])
-            if re.search(r"(学习|复习|知识|课程|算法)", text):
+            if re.search(r"(学习|复习|知识|课程|算法|请问|怎么做|如何实现|如何|怎么|是什么|为什么|区别)", text):
                 study_topics.append(text[:60])
             if re.search(r"(简短|直接|详细|慢一点)", text):
                 styles.append(text[:40])

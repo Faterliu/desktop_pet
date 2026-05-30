@@ -108,6 +108,116 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         self.assertIn("我喜欢Python项目", merged_text)
         self.assertTrue(mem0_service.added_texts)
 
+    def test_formal_question_with_empty_model_memory_updates_falls_back_to_learning_topic(
+        self,
+    ) -> None:
+        temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_formal_summarizer_memory_updates"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = temp_dir / "conversation_summary_formal.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "summary": "",
+                    "covered_message_count": 0,
+                    "highlights": [],
+                    "last_updated": "",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        memory_store = FakeMemoryStore()
+        summarizer = Summarizer(
+            summary_path,
+            FakeChatStore(
+                [
+                    {"role": "user", "content": "conda环境和Python虚拟环境的区别是什么？"},
+                    {"role": "assistant", "content": "两者的管理范围和包来源不同。"},
+                ]
+            ),  # type: ignore[arg-type]
+            memory_store,  # type: ignore[arg-type]
+            EmptyMemoryDeepSeekClient(),  # type: ignore[arg-type]
+        )
+
+        summarizer.maybe_summarize(trigger_rounds=1, force=True)
+
+        self.assertTrue(memory_store.merged)
+        merged_text = json.dumps(memory_store.merged[-1], ensure_ascii=False)
+        self.assertIn("conda环境和Python虚拟环境", merged_text)
+
+    def test_question_keywords_fall_back_to_learning_topics(self) -> None:
+        temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_question_keyword_memory_updates"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = temp_dir / "conversation_summary_informal.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "summary": "",
+                    "covered_message_count": 0,
+                    "highlights": [],
+                    "last_updated": "",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        memory_store = FakeMemoryStore()
+        summarizer = Summarizer(
+            summary_path,
+            FakeChatStore(
+                [
+                    {"role": "user", "content": "请问PySide6透明窗口怎么做？"},
+                    {"role": "assistant", "content": "可以使用透明背景和无边框窗口。"},
+                    {"role": "user", "content": "如何实现桌宠启动时自动问候？"},
+                    {"role": "assistant", "content": "可以用 QTimer 延迟触发。"},
+                ]
+            ),  # type: ignore[arg-type]
+            memory_store,  # type: ignore[arg-type]
+            EmptyMemoryDeepSeekClient(),  # type: ignore[arg-type]
+        )
+
+        summarizer.maybe_summarize(trigger_rounds=1, force=True)
+
+        self.assertTrue(memory_store.merged)
+        topics = memory_store.merged[-1]["work_study"]["current_learning_topics"]  # type: ignore[index]
+        self.assertIn("请问PySide6透明窗口怎么做？", topics)
+        self.assertIn("如何实现桌宠启动时自动问候？", topics)
+
+    def test_informal_summary_mode_does_not_use_formal_question_fallback(self) -> None:
+        temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_informal_summary_mode"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = temp_dir / "conversation_summary_informal.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "summary": "",
+                    "covered_message_count": 0,
+                    "highlights": [],
+                    "last_updated": "",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        memory_store = FakeMemoryStore()
+        summarizer = Summarizer(
+            summary_path,
+            FakeChatStore(
+                [
+                    {"role": "user", "content": "我今天有点累。"},
+                    {"role": "assistant", "content": "辛苦了。"},
+                ]
+            ),  # type: ignore[arg-type]
+            memory_store,  # type: ignore[arg-type]
+            EmptyMemoryDeepSeekClient(),  # type: ignore[arg-type]
+        )
+
+        summarizer.maybe_summarize(trigger_rounds=1, force=True)
+
+        self.assertTrue(memory_store.merged)
+        topics = memory_store.merged[-1]["work_study"]["current_learning_topics"]  # type: ignore[index]
+        self.assertEqual([], topics)
+
 
 if __name__ == "__main__":
     unittest.main()

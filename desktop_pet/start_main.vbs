@@ -51,12 +51,6 @@ If Not fso.FileExists(pythonExe) Then
     WScript.Quit 1
 End If
 
-exitCode = RunHidden("cmd.exe /c " & Q(Q(pythonExe) & " -c " & Q("import PySide6, requests") & " >> " & Q(logPath) & " 2>&1"))
-If exitCode <> 0 Then
-    ShowError "Project dependencies are missing or incomplete. Please run setup_env.bat first."
-    WScript.Quit exitCode
-End If
-
 AppendText logPath, "Starting main.py..." & vbCrLf
 exitCode = RunHidden("cmd.exe /c " & Q(Q(pythonExe) & " main.py >> " & Q(logPath) & " 2>&1"))
 If exitCode <> 0 Then

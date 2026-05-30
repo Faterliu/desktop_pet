@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from storage.json_store import load_json, save_json
+from storage.memory_lock import MEMORY_IO_LOCK
 from utils.time_utils import now_iso
 
 
@@ -24,29 +25,38 @@ DEFAULT_MEMORY = {
 
 
 class MemoryStore:
-    def __init__(self, path: str | Path) -> None:
-        """初始化记忆存储，并绑定目标 JSON 文件路径。"""
+    def __init__(self, path: str | Path, vector_store: Any | None = None) -> None:
         self.path = Path(path)
+        self.vector_store = vector_store
 
     def load(self) -> dict[str, Any]:
-        """读取当前记忆数据。"""
-        return load_json(self.path, DEFAULT_MEMORY)
+        with MEMORY_IO_LOCK:
+            return load_json(self.path, DEFAULT_MEMORY)
 
     def save(self, data: dict[str, Any]) -> None:
-        """保存完整记忆数据，并更新时间戳。"""
-        data["last_updated"] = now_iso()
-        save_json(self.path, data)
+        with MEMORY_IO_LOCK:
+            data["last_updated"] = now_iso()
+            save_json(self.path, data)
+        self._sync_vectors(data)
 
     def merge(self, updates: dict[str, Any]) -> dict[str, Any]:
-        """把新增记忆合并到现有记忆中，并返回合并结果。"""
-        current = self.load()
-        self._merge_lists(current, updates)
-        current["last_updated"] = now_iso()
-        save_json(self.path, current)
+        with MEMORY_IO_LOCK:
+            current = load_json(self.path, DEFAULT_MEMORY)
+            self._merge_lists(current, updates)
+            current["last_updated"] = now_iso()
+            save_json(self.path, current)
+        self._sync_vectors(current)
         return current
 
+    def _sync_vectors(self, data: dict[str, Any]) -> None:
+        if self.vector_store is None:
+            return
+        try:
+            self.vector_store.sync_memory(data)
+        except Exception:
+            return
+
     def _merge_lists(self, current: dict[str, Any], updates: dict[str, Any]) -> None:
-        """递归合并字典和列表，避免重复写入相同记忆项。"""
         for key, value in updates.items():
             if isinstance(value, dict):
                 node = current.setdefault(key, {})

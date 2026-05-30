@@ -34,6 +34,7 @@ from character.behavior_controller import BehaviorController
 from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.memory_store import MemoryStore
+from storage.memory_vector_store import MemoryVectorStore
 from storage.usage_store import UsageStore
 from utils.dwm_border import apply_transparent_window_fixes, force_window_topmost, suppress_dwm_border
 from utils.logger import get_logger
@@ -221,6 +222,83 @@ class KnowledgeSpeakWorker(QObject):
         )
 
 
+class Mem0InitializationWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        app_config: dict[str, Any],
+        existing_service: Mem0MemoryService | None = None,
+    ) -> None:
+        super().__init__()
+        self.app_config = app_config
+        self.existing_service = existing_service
+
+    def run(self) -> None:
+        """Initialize or rebuild Mem0 away from the UI thread."""
+        try:
+            if self.existing_service is not None:
+                self.existing_service.close()
+            self.finished.emit(Mem0MemoryService(self.app_config))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Mem0 initialization worker failed")
+            self.failed.emit(str(exc))
+
+
+class Mem0SearchWorker(QObject):
+    finished = Signal(str)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        mem0_memory_service: Mem0MemoryService,
+        user_id: str,
+        query: str,
+        top_k: int,
+    ) -> None:
+        super().__init__()
+        self.mem0_memory_service = mem0_memory_service
+        self.user_id = user_id
+        self.query = query
+        self.top_k = top_k
+
+    def run(self) -> None:
+        """Search Mem0 memory away from the UI thread."""
+        try:
+            context = self.mem0_memory_service.format_for_prompt(
+                user_id=self.user_id,
+                query=self.query,
+                top_k=self.top_k,
+            )
+            self.finished.emit(context)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Mem0 search worker failed")
+            self.failed.emit(str(exc))
+
+
+class MemorySemanticMergeWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        vector_store: MemoryVectorStore,
+        memory_path: Path,
+    ) -> None:
+        super().__init__()
+        self.vector_store = vector_store
+        self.memory_path = memory_path
+
+    def run(self) -> None:
+        """Run due semantic memory maintenance away from the UI thread."""
+        try:
+            self.finished.emit(self.vector_store.run_due_semantic_merge(self.memory_path))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Semantic memory merge worker failed")
+            self.failed.emit(str(exc))
+
+
 class DesktopPetWindow(QWidget):
     def __init__(self, project_root: Path) -> None:
         """初始化桌宠主窗口、依赖模块与 UI 组件。"""
@@ -245,7 +323,7 @@ class DesktopPetWindow(QWidget):
         self.window_state_path = self.data_dir / "window_state.json"
 
         self.app_config = self._load_app_config()
-        self.mem0_memory_service = Mem0MemoryService(self.app_config)
+        self.mem0_memory_service: Mem0MemoryService | None = None
         self.drag_start_offset = QPoint()
         self.dragging = False
         self.mouse_press_position = QPoint()
@@ -253,8 +331,15 @@ class DesktopPetWindow(QWidget):
         self.chat_worker: QObject | None = None
         self.clear_history_thread: QThread | None = None
         self.clear_history_worker: QObject | None = None
+        self.mem0_init_thread: QThread | None = None
+        self.mem0_init_worker: QObject | None = None
+        self.mem0_search_thread: QThread | None = None
+        self.mem0_search_worker: QObject | None = None
+        self.memory_maintenance_thread: QThread | None = None
+        self.memory_maintenance_worker: QObject | None = None
         self.move_animation: QPropertyAnimation | None = None
         self.behavior_started = False
+        self.memory_maintenance_started = False
         self.exit_animation_in_progress = False
         self.allow_immediate_close = False
         self._close_after_workers_finished = False
@@ -274,7 +359,11 @@ class DesktopPetWindow(QWidget):
         self.chat_store_formal = ChatStore(self.chat_history_formal_path)
         self.chat_store_informal = ChatStore(self.chat_history_informal_path)
         self.usage_store = UsageStore(self.daily_usage_path)
-        self.memory_store = MemoryStore(self.memory_path)
+        self.memory_vector_store = MemoryVectorStore(
+            self.data_dir / "memory_vectors.json",
+            self.app_config,
+        )
+        self.memory_store = MemoryStore(self.memory_path, self.memory_vector_store)
         self.deepseek_client = DeepSeekClient(self.config_path, self.example_config_path)
         self.prompt_builder = PromptBuilder(
             self.character_path,
@@ -330,6 +419,7 @@ class DesktopPetWindow(QWidget):
         self._refresh_auto_move_timer()
         self._update_sprite(self.sprite_player.current_pixmap())
         self.sprite_player.set_action("idle")
+        self._start_mem0_initialization(close_existing=False)
 
     def _setup_window(self) -> None:
         """设置主窗口的透明、无边框和置顶属性。"""
@@ -373,6 +463,9 @@ class DesktopPetWindow(QWidget):
         if not self.behavior_started:
             self.behavior_started = True
             self.behavior_controller.start()
+        if not self.memory_maintenance_started:
+            self.memory_maintenance_started = True
+            QTimer.singleShot(0, self._start_memory_maintenance_worker)
         apply_transparent_window_fixes(self)
         self._enforce_topmost()
         self._topmost_enforcement_timer.start(30_000)
@@ -458,7 +551,8 @@ class DesktopPetWindow(QWidget):
         self.bubble.hide()
         self.reply_bubble.hide()
         self.chat_input.hide()
-        self.mem0_memory_service.close()
+        if self.mem0_memory_service is not None:
+            self.mem0_memory_service.close()
         super().closeEvent(event)
         app = QApplication.instance()
         if app is not None:
@@ -712,7 +806,7 @@ class DesktopPetWindow(QWidget):
         ]:
             store.clear_history()
             save_json(summary_path, default_summary)
-        self._display_message("聊天记录已经清空啦。", 3500, "system")
+        self._display_message("我会用心记住你说过的话哦", 3500, "system")
 
     def _clear_informal_chat_history(self) -> None:
         """清空非正式聊天历史；若配置开启则在清空前强制总结。"""
@@ -759,8 +853,8 @@ class DesktopPetWindow(QWidget):
     def _on_clear_history_success(self, mode: str) -> None:
         if self._close_after_workers_finished:
             return
-        label = "正式问答记录" if mode == "formal" else "非正式聊天记录"
-        self._display_message(f"{label}已经清空啦。", 3500, "system")
+        label = "这些知识真有趣呢" if mode == "formal" else "我会好好保存我们聊天的回忆哦"
+        self._display_message(f"{label}", 3500, "system")
 
     def _on_clear_history_failure(self, mode: str, error_message: str) -> None:
         if self._close_after_workers_finished:
@@ -771,10 +865,8 @@ class DesktopPetWindow(QWidget):
     def _reload_config(self) -> None:
         """重新读取配置文件，并刷新动画和行为控制状态。"""
         self.app_config = self._load_app_config()
-        self.mem0_memory_service.close()
-        self.mem0_memory_service = Mem0MemoryService(self.app_config)
-        self.summarizer_formal.mem0_memory_service = self.mem0_memory_service
-        self.summarizer_informal.mem0_memory_service = self.mem0_memory_service
+        self.memory_vector_store.update_config(self.app_config)
+        self._start_mem0_initialization(close_existing=True)
         self.summarizer_formal.user_id = self._memory_user_id()
         self.summarizer_informal.user_id = self._memory_user_id()
         self.sprite_player.set_scale(self._ui_scale())
@@ -939,6 +1031,134 @@ class DesktopPetWindow(QWidget):
         if self.clear_history_thread:
             self.clear_history_thread.deleteLater()
             self.clear_history_thread = None
+        self._maybe_close_after_workers_finished()
+
+    def _set_mem0_memory_service(self, service: Mem0MemoryService | None) -> None:
+        """Replace the active Mem0 service and update background users."""
+        self.mem0_memory_service = service
+        self.summarizer_formal.mem0_memory_service = service
+        self.summarizer_informal.mem0_memory_service = service
+
+    def _start_mem0_initialization(self, close_existing: bool) -> None:
+        """Build or rebuild Mem0 on a worker thread."""
+        if self.mem0_init_thread and self.mem0_init_thread.isRunning():
+            return
+
+        existing_service = self.mem0_memory_service if close_existing else None
+        if close_existing:
+            self._set_mem0_memory_service(None)
+            self._pending_knowledge_mem0_context = ""
+
+        self.mem0_init_thread = QThread(self)
+        self.mem0_init_worker = Mem0InitializationWorker(
+            self.app_config,
+            existing_service=existing_service,
+        )
+        self.mem0_init_worker.moveToThread(self.mem0_init_thread)
+        self.mem0_init_thread.started.connect(self.mem0_init_worker.run)
+        self.mem0_init_worker.finished.connect(self._on_mem0_initialization_success)
+        self.mem0_init_worker.failed.connect(self._on_mem0_initialization_failure)
+        self.mem0_init_worker.finished.connect(self.mem0_init_thread.quit)
+        self.mem0_init_worker.failed.connect(self.mem0_init_thread.quit)
+        self.mem0_init_thread.finished.connect(self._cleanup_mem0_init_thread)
+        self.mem0_init_thread.start()
+
+    def _on_mem0_initialization_success(self, service: object) -> None:
+        if isinstance(service, Mem0MemoryService):
+            self._set_mem0_memory_service(service)
+
+    def _on_mem0_initialization_failure(self, error_message: str) -> None:
+        logger.warning("Mem0 initialization failed: %s", error_message)
+        self._set_mem0_memory_service(None)
+
+    def _cleanup_mem0_init_thread(self) -> None:
+        if self.mem0_init_worker:
+            self.mem0_init_worker.deleteLater()
+            self.mem0_init_worker = None
+        if self.mem0_init_thread:
+            self.mem0_init_thread.deleteLater()
+            self.mem0_init_thread = None
+        self._maybe_close_after_workers_finished()
+
+    def _start_mem0_search_worker(self) -> None:
+        """Search Mem0 for knowledge-greeting context on a worker thread."""
+        if self.mem0_search_thread and self.mem0_search_thread.isRunning():
+            return
+        if self.mem0_memory_service is None or not self.mem0_memory_service.is_available():
+            return
+
+        self.mem0_search_thread = QThread(self)
+        self.mem0_search_worker = Mem0SearchWorker(
+            self.mem0_memory_service,
+            user_id=self._memory_user_id(),
+            query="用户最近正在做的项目、学习目标、长期偏好和希望被提醒的事情",
+            top_k=3,
+        )
+        self.mem0_search_worker.moveToThread(self.mem0_search_thread)
+        self.mem0_search_thread.started.connect(self.mem0_search_worker.run)
+        self.mem0_search_worker.finished.connect(self._on_mem0_search_success)
+        self.mem0_search_worker.failed.connect(self._on_mem0_search_failure)
+        self.mem0_search_worker.finished.connect(self.mem0_search_thread.quit)
+        self.mem0_search_worker.failed.connect(self.mem0_search_thread.quit)
+        self.mem0_search_thread.finished.connect(self._cleanup_mem0_search_thread)
+        self.mem0_search_thread.start()
+
+    def _on_mem0_search_success(self, context: str) -> None:
+        self._pending_knowledge_mem0_context = context
+        if not context or self._chat_in_progress() or self.chat_input.isVisible():
+            return
+        self.behavior_controller.notify_proactive_shown("extra_knowledge")
+        self._handle_knowledge_speak()
+
+    def _on_mem0_search_failure(self, error_message: str) -> None:
+        logger.warning("Mem0 knowledge search failed: %s", error_message)
+        self._pending_knowledge_mem0_context = ""
+
+    def _cleanup_mem0_search_thread(self) -> None:
+        if self.mem0_search_worker:
+            self.mem0_search_worker.deleteLater()
+            self.mem0_search_worker = None
+        if self.mem0_search_thread:
+            self.mem0_search_thread.deleteLater()
+            self.mem0_search_thread = None
+        self._maybe_close_after_workers_finished()
+
+    def _start_memory_maintenance_worker(self) -> None:
+        """Start the due semantic memory merge after the window is visible."""
+        if self.memory_maintenance_thread and self.memory_maintenance_thread.isRunning():
+            return
+        self.memory_vector_store.update_config(self.app_config)
+        if not self._memory_config().get("enable_semantic_memory_merge", True):
+            return
+
+        self.memory_maintenance_thread = QThread(self)
+        self.memory_maintenance_worker = MemorySemanticMergeWorker(
+            self.memory_vector_store,
+            self.memory_path,
+        )
+        self.memory_maintenance_worker.moveToThread(self.memory_maintenance_thread)
+        self.memory_maintenance_thread.started.connect(self.memory_maintenance_worker.run)
+        self.memory_maintenance_worker.finished.connect(self._on_memory_maintenance_success)
+        self.memory_maintenance_worker.failed.connect(self._on_memory_maintenance_failure)
+        self.memory_maintenance_worker.finished.connect(self.memory_maintenance_thread.quit)
+        self.memory_maintenance_worker.failed.connect(self.memory_maintenance_thread.quit)
+        self.memory_maintenance_thread.finished.connect(self._cleanup_memory_maintenance_thread)
+        self.memory_maintenance_thread.start()
+
+    def _on_memory_maintenance_success(self, result: object) -> None:
+        if isinstance(result, dict) and int(result.get("merged_count", 0) or 0) > 0:
+            logger.info("Semantic memory merge completed: %s", result)
+
+    def _on_memory_maintenance_failure(self, error_message: str) -> None:
+        logger.warning("Semantic memory maintenance failed: %s", error_message)
+
+    def _cleanup_memory_maintenance_thread(self) -> None:
+        if self.memory_maintenance_worker:
+            self.memory_maintenance_worker.deleteLater()
+            self.memory_maintenance_worker = None
+        if self.memory_maintenance_thread:
+            self.memory_maintenance_thread.deleteLater()
+            self.memory_maintenance_thread = None
         self._maybe_close_after_workers_finished()
 
     def _on_chat_success(self, reply: str) -> None:
@@ -1309,13 +1529,27 @@ class DesktopPetWindow(QWidget):
         return bool(self.clear_history_thread and self.clear_history_thread.isRunning())
 
     def _background_workers_running(self) -> bool:
-        return self._chat_in_progress() or self._clear_history_in_progress()
+        return (
+            self._chat_in_progress()
+            or self._clear_history_in_progress()
+            or bool(self.mem0_init_thread and self.mem0_init_thread.isRunning())
+            or bool(self.mem0_search_thread and self.mem0_search_thread.isRunning())
+            or bool(
+                self.memory_maintenance_thread and self.memory_maintenance_thread.isRunning()
+            )
+        )
 
     def _request_background_workers_quit(self) -> None:
         if self.chat_thread and self.chat_thread.isRunning():
             self.chat_thread.quit()
         if self.clear_history_thread and self.clear_history_thread.isRunning():
             self.clear_history_thread.quit()
+        if self.mem0_init_thread and self.mem0_init_thread.isRunning():
+            self.mem0_init_thread.quit()
+        if self.mem0_search_thread and self.mem0_search_thread.isRunning():
+            self.mem0_search_thread.quit()
+        if self.memory_maintenance_thread and self.memory_maintenance_thread.isRunning():
+            self.memory_maintenance_thread.quit()
 
     def _maybe_close_after_workers_finished(self) -> None:
         if not self._close_after_workers_finished:
@@ -1366,16 +1600,20 @@ class DesktopPetWindow(QWidget):
         """Return the single-user memory id used by Mem0."""
         return str(self._memory_config().get("mem0_user_id", "default_user"))
 
-    def _has_knowledge_memory(self) -> bool:
+    def _has_knowledge_memory(self) -> bool | None:
         """Return whether Mem0 has enough memory to try a knowledge greeting."""
         if not self._memory_config().get("use_mem0_for_knowledge_speak", False):
             return False
-        self._pending_knowledge_mem0_context = self.mem0_memory_service.format_for_prompt(
-            user_id=self._memory_user_id(),
-            query="用户最近正在做的项目、学习目标、长期偏好和希望被提醒的事情",
-            top_k=3,
-        )
-        return bool(self._pending_knowledge_mem0_context)
+        if self._pending_knowledge_mem0_context:
+            return True
+        if self.mem0_init_thread and self.mem0_init_thread.isRunning():
+            return None
+        if self.mem0_search_thread and self.mem0_search_thread.isRunning():
+            return None
+        if self.mem0_memory_service is None or not self.mem0_memory_service.is_available():
+            return False
+        self._start_mem0_search_worker()
+        return None
 
     def _assistant_reply_bubble_duration_ms(self) -> int:
         """Read the regular assistant reply bubble duration from config."""

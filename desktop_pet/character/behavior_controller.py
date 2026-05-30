@@ -22,7 +22,7 @@ class BehaviorController(QObject):
         local_lines_path: str | Path,
         usage_store: UsageStore,
         config_loader: Callable[[], dict[str, Any]],
-        memory_checker: Callable[[], bool] | None = None,
+        memory_checker: Callable[[], bool | None] | None = None,
         config_saver: Callable[[], None] | None = None,
     ) -> None:
         """Coordinate proactive greetings and time-based local behavior."""
@@ -177,12 +177,15 @@ class BehaviorController(QObject):
             self._dynamic_proactive_interval_minutes(),
         )
 
-    def _has_memory_content(self) -> bool:
+    def _has_memory_content(self) -> bool | None:
         """Check whether memory.json has any useful stored user context."""
         memory_config = self.config_loader().get("memory", {})
         if memory_config.get("use_mem0_for_knowledge_speak", False) and self.memory_checker:
             try:
-                if self.memory_checker():
+                memory_check_result = self.memory_checker()
+                if memory_check_result is None:
+                    return None
+                if memory_check_result:
                     return True
             except Exception:
                 pass
@@ -219,11 +222,15 @@ class BehaviorController(QObject):
 
         ratio = self._proactive_ratio()
         extra_weight = ratio.get("extra_knowledge", 0.5)
-        if random.random() < extra_weight and self._has_memory_content():
-            self.notify_proactive_shown("extra_knowledge")
-            self.knowledge_speak_requested.emit()
-            self._consecutive_unanswered = 0
-            return
+        if random.random() < extra_weight:
+            memory_available = self._has_memory_content()
+            if memory_available is None:
+                return
+            if memory_available:
+                self.notify_proactive_shown("extra_knowledge")
+                self.knowledge_speak_requested.emit()
+                self._consecutive_unanswered = 0
+                return
 
         line_types = ["idle", "quiet", "encourage", "break_reminder"]
         time_key = self._time_greeting_key()
