@@ -61,10 +61,10 @@ class DeepSeekClient:
             data = response.json()
         except requests.Timeout as exc:
             logger.error("DeepSeek request timed out: %s", exc)
-            raise DeepSeekError("请求超时了，我刚刚没来得及想好。") from exc
+            raise DeepSeekError("我刚刚没来得及想好。") from exc
         except requests.RequestException as exc:
             logger.error("DeepSeek request failed: %s", exc)
-            raise DeepSeekError("我刚刚连不上服务，稍后再试试好不好。") from exc
+            raise DeepSeekError("稍后再试试好不好。") from exc
         except ValueError as exc:
             logger.error("DeepSeek returned invalid JSON: %s", exc)
             raise DeepSeekError("我收到了一段看不懂的回复。") from exc
@@ -73,7 +73,7 @@ class DeepSeekClient:
             message = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             logger.error("DeepSeek response structure mismatch: %s", data)
-            raise DeepSeekError("回复格式有点奇怪，我再缓一缓。") from exc
+            raise DeepSeekError("回复有点奇怪，我再缓一缓。") from exc
 
         if isinstance(message, list):
             parts = [part.get("text", "") for part in message if isinstance(part, dict)]

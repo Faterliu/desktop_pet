@@ -38,7 +38,13 @@
     "min_proactive_interval_minutes": 20,
     "max_consecutive_active_replies": 5,
     "max_local_lines_per_day": 50,
-    "max_api_proactive_per_day": 30
+    "max_api_proactive_per_day": 30,
+    "enable_scenario_greeting": true,
+    "scenario_greeting_api_enabled": true,
+    "scenario_greeting_max_chars": 80,
+    "scenario_greeting_min_memory_items": 1,
+    "scenario_greeting_cooldown_minutes": 60,
+    "scenario_greeting_low_interrupt_after_ignored": 2
   },
   "chat": {
     "formal_qa_mode": false,

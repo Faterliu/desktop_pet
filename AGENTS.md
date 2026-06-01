@@ -63,6 +63,7 @@ wscript.exe .\start_main.vbs
 - 核心协调器。负责窗口属性、鼠标事件（单击聊天、双击回复/打招呼、拖拽移动、右键菜单，含置顶开关）、聊天流程、后台线程、正式问答面板、自动移动、位置恢复和退出动画（退出时播放 waving 并显示 `farewell` 道别气泡）。
 - `_enforce_topmost()` 由 `_topmost_enforcement_timer` 每 30 秒驱动，通过 `force_window_topmost()` 在 Windows API 级别强制 `WS_EX_TOPMOST`，防止频繁 `setMask()` 导致置顶样式被系统清除。
 - `_sync_floating_widgets()` 在气泡/输入框跟随角色位置时，将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入 `reposition()`，使两个气泡互相避让不重叠。
+- 空闲主动问候命中场景化生成时，`BehaviorController` 发出 `scenario_greeting_requested`，主窗口创建 `ScenarioGreetingWorker` 放入独立 `QThread` 调用 DeepSeek 生成一句短问候；API 不可用、线程忙或生成失败时静默回退到本地模板，不向用户显示错误。
 - 清理正式/非正式聊天记录时不再在 UI 线程中强制摘要，而是创建 `ChatHistoryClearWorker` 放到独立 `QThread` 执行摘要、清空和 `last_cleaned_at` 更新；主窗口只接收完成/失败信号并在后台操作结束后决定是否显示结果。
 - 退出时若聊天请求或清理线程仍在运行，`closeEvent()` 会延迟真正关闭，等待后台线程 `finished` 后再重新调用 `close()`，避免销毁仍在运行的 `QThread`。
 - 修改场景：几乎所有用户可见行为的入口都在这里接线。
@@ -131,7 +132,9 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/ai/prompt_builder.py`
 
-- 组装系统提示、角色设定、安全规则、摘要（按正式/非正式模式选择对应文件）、`memory.json` 记忆、可选 Mem0 检索记忆、正式问答模式提示和上下文消息。`build_messages()` 支持 `relevant_memories` 可选参数，用于在系统提示中注入与当前用户输入相关的长期语义记忆。
+- 组装系统提示、角色设定、安全规则、正式/非正式模式说明、`memory.json` 记忆、可选 Mem0 检索记忆、摘要（按正式/非正式模式选择对应文件）和上下文消息。`build_messages()` 支持 `relevant_memories` 可选参数，用于在系统提示中注入与当前用户输入相关的长期语义记忆。
+- 本地 `memory.json` 注入已拆成三个明确区块：`【用户事实记忆】` 用于项目、偏好、背景和当前任务；`【相处方式记忆】` 用于语气、详细程度、确认频率、陪伴边界等关系/风格记忆，并明确要求不要直接复述给用户；`【当前问题相关的长期语义记忆】` 用于 Mem0 检索结果，只在与当前问题直接相关时参考。随后追加 `【表达约束】`，要求不要频繁使用“你之前说过”、不要暴露 memory.json/Mem0/数据库等实现细节、旧记忆与当前表达冲突时以当前表达为准。
+- 正式问答模式下，事实记忆可用于理解项目背景，关系记忆只用于回答结构、详细程度和确认频率，减少闲聊和陪伴式铺垫；普通陪伴聊天模式下，关系记忆可以自然影响语气和建议，但不应表现为读取档案。
 - 修改场景：人格、回复风格、安全规则优先级、正式问答回答策略。
 - 风险：安全规则必须优先于角色 `custom_prompt`。
 
@@ -143,7 +146,8 @@ wscript.exe .\start_main.vbs
 `desktop_pet/ai/summarizer.py`
 
 - 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。`maybe_summarize()` 支持 `force` 参数，为 True 时跳过轮数检查，供手动清空聊天记录前使用；但若历史中没有非空用户消息，会直接跳过，避免空聊天记录生成错误记忆。
-- 当前模型摘要与模型记忆提取已拆分：摘要仍基于最近完整对话生成，但 `memory_updates` 只基于用户发言单独提取，避免把人物/助手回答混入 `memory.json`；摘要文件本身不再落盘 `memory_updates`。若模型记忆提取返回合法但没有任何实际文本的空结构，`Summarizer` 会继续回退到本地规则提取；正式问答模式下，本地规则会把用户的非空问题作为 `work_study.current_learning_topics` 兜底保存。非正式/正式模式判断需先判 `informal` 再判 `formal`，避免 `conversation_summary_informal.json` 因文件名包含 `formal` 子串被误判。当前本地 `current_learning_topics` 关键词包括：`学习`、`复习`、`知识`、`课程`、`算法`、`请问`、`怎么做`、`如何实现`、`如何`、`怎么`、`是什么`、`为什么`、`区别`。只有包含非空记忆文本时才合并 `memory.json` 并旁路写入 Mem0，避免清理聊天时只刷新空记忆时间戳。
+- 当前模型摘要与模型记忆提取已拆分：摘要仍基于最近完整对话生成，但 `memory_updates` 只基于用户发言单独提取，避免把人物/助手回答混入 `memory.json`；摘要文件本身不再落盘 `memory_updates`。模型记忆提取 schema 兼容旧的 `user_profile`/`work_study` 输出，也支持新增 `relationship_memory` 输出，用于记录沟通偏好、相处方式和近期互动模式。关系记忆规则强调只记录互动偏好和相处方式，不输出心理诊断、医学判断或人格标签。
+- 若模型记忆提取返回合法但没有任何实际文本的空结构，`Summarizer` 会继续回退到本地规则提取；正式问答模式下，本地规则会把用户的非空问题作为 `work_study.current_learning_topics` 兜底保存。非正式/正式模式判断需先判 `informal` 再判 `formal`，避免 `conversation_summary_informal.json` 因文件名包含 `formal` 子串被误判。当前本地 `current_learning_topics` 关键词包括：`学习`、`复习`、`知识`、`课程`、`算法`、`请问`、`怎么做`、`如何实现`、`如何`、`怎么`、`是什么`、`为什么`、`区别`。关系记忆本地兜底只覆盖少量明确表达：不要/别/不用确认会写入 `confirmation_preference=avoid_unnecessary_confirmation`；“直接给”“可执行方案”会写入 `preferred_response_style=direct_actionable`；“详细一点”等会写入 `detail_level=high`；“数据库/数据存储器/机械化记忆/像工具”等会写入避免机械化记忆表达。只有包含非空记忆文本时才合并 `memory.json` 并旁路写入 Mem0，避免清理聊天时只刷新空记忆时间戳。
 - 若启用 Mem0，`Summarizer` 在保留原 `memory.json` 合并逻辑的同时，会将提取出的 `memory_updates` 旁路写入 Mem0，作为长期语义检索数据源；Mem0 写入失败只记录 warning，不得影响摘要或聊天主流程。摘要触发以新增用户消息批次为准：首次达到 `api.summary_trigger_rounds` 后触发，之后需自上次 `covered_message_count` 以来再新增同等数量的用户消息才会再次摘要，避免达到阈值后每轮聊天都重摘要。
 - 修改场景：摘要结构、记忆提取、失败兜底。
 - 风险：摘要在线程中触发，异常不能影响正常聊天。
@@ -154,11 +158,17 @@ wscript.exe .\start_main.vbs
 - 修改场景：接入本地安全预过滤。
 - 待确认：是否计划把它接到 `_handle_user_message()` 或 `PromptBuilder` 前置流程。
 
+`desktop_pet/character/proactive_context.py`
+
+- 场景化主动问候的纯逻辑模块。`build_proactive_context()` 从 `memory.json` 中挑选少量近期任务、沟通偏好、陪伴边界和互动模式，避免把完整记忆原样塞给模型；`build_local_scenario_greeting()` 使用 `scenario_greeting_templates` 或 `low_interrupt` 本地模板回退；`build_scenario_greeting_messages()` 构造 API prompt，要求只输出一句短中文，不说“根据记忆”“你之前说过”，不暴露 memory.json、Mem0、数据库或配置细节。
+- 修改场景：主动问候上下文选择、本地模板回退、场景化问候 Prompt 规则。
+- 风险：不要在这里引入 UI、QThread 或网络请求；它应保持可单元测试的纯逻辑。
+
 `desktop_pet/storage/*.py`
 
 - `json_store.py`：JSON 读写基础设施，缺文件时自动创建父目录和默认文件，解析失败时记录日志并尽量返回默认值。
 - `chat_store.py`：保存和读取正式/非正式聊天记录（`chat_history_formal.json` / `chat_history_informal.json`），记录 `last_cleaned_at` 时间戳供手动清空时标记。
-- `memory_store.py`：保存和合并 `data/memory.json`。
+- `memory_store.py`：保存和合并 `data/memory.json`。读取、保存和合并时会通过 `normalize_memory_schema()` 兼容旧结构并补齐 v2 默认字段：`relationship_memory.communication_style`、`relationship_memory.companionship_style`、`relationship_memory.interaction_patterns` 和 `memory_meta.schema_version=2`；补齐时保留未知旧字段，不会清空用户已有记忆。保存/合并仍写入 UTF-8 JSON，并同步更新顶层 `last_updated` 与 `memory_meta.last_updated`；合并关系记忆时会为被更新的关系子区块写入 `last_updated` 或 `last_observed_at`。
 - `memory_vector_store.py`: maintains `data/memory_vectors.json` for `memory.json` text leaves. It uses the existing DashScope OpenAI-compatible embedding config, skips cleanly when no key or `requests` is unavailable, and supports same-field semantic duplicate merging on a two-month cadence.
 - `usage_store.py`：每日主动话术和 API 主动次数计数。
 - 修改场景：数据结构、持久化策略、运行时数据兼容。
@@ -181,6 +191,7 @@ wscript.exe .\start_main.vbs
 - `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整：回应类型 +0.005，互斥类型 -0.001，并继续受 0.3-0.7 钳制；主窗口传入 `config_saver` 时会把调整后的 `proactive_content_ratio` 持久化回 `app_config.json`。
 - `behavior.max_local_lines_per_day` 通过安全整数解析读取，非法、空值或非正数会回退到 10，避免本地配置错误导致 QTimer 回调异常。
 - 当 `memory.use_mem0_for_knowledge_speak` 为 true 时，`_has_memory_content()` 会在知识问候概率命中后，优先通过主窗口传入的 Mem0 检索回调判断是否存在长期语义记忆；主窗口会用 `Mem0SearchWorker` 在独立 `QThread` 中一次性取回 `top_k=3` 的 Mem0 上下文并暂存给 `KnowledgeSpeakWorker` 复用，避免判断和生成阶段重复检索，也避免主动问候计时器回调阻塞 UI。检索进行中时返回 `None`，`BehaviorController._maybe_idle_prompt()` 会跳过本轮普通问候兜底，待检索成功后由主窗口触发知识问候；Mem0 不可用或无结果时回退到原 `memory.json` 检查。
+- 场景化主动问候由 `behavior.enable_scenario_greeting` 控制，默认开启但带 60 分钟冷却。基础守卫（免打扰、主动聊天开关、每日上限、动态间隔）通过后，若连续未回应达到 `scenario_greeting_low_interrupt_after_ignored`，优先使用 `low_interrupt` 低打扰话术；否则在冷却结束且 `memory.json` 中有足够近期任务或关系记忆时，构造场景上下文。`scenario_greeting_api_enabled` 为 true 且 API 主动额度可用时发出 `scenario_greeting_requested` 交给主窗口后台 worker，否则使用本地模板。
 - 主动问候气泡停留时间改为读取 `ui.bubble_durations_ms`：启动问候取 `startup_greeting`，时段变化问候取 `period_greeting`，普通空闲/测试问候取 `proactive_greeting`。
 - 修改场景：主动行为频率、话术分组、免打扰逻辑、时段判断规则、知识问候与内容比例。
 
@@ -188,6 +199,7 @@ wscript.exe .\start_main.vbs
 
 - 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`ui.show_reload_config` 控制“重新加载配置”菜单项显隐（默认 `true`）、`chat.force_summarize_before_clear`（默认 `true`）控制手动清空前是否强制摘要。
 - `ui.bubble_durations_ms` 用于配置主要气泡停留时长：`startup_greeting`、`period_greeting`、`proactive_greeting`、`assistant_reply`。
+- `behavior.enable_scenario_greeting`、`behavior.scenario_greeting_api_enabled`、`behavior.scenario_greeting_max_chars`、`behavior.scenario_greeting_min_memory_items`、`behavior.scenario_greeting_cooldown_minutes`、`behavior.scenario_greeting_low_interrupt_after_ignored` 控制场景化主动问候；默认保守启用，限制为 80 字、至少 1 条可用记忆、60 分钟冷却，连续 2 次未回应后走低打扰话术。
 - `memory.enable_mem0` 控制是否启用 Mem0 长期语义记忆；`memory.inject_mem0_to_prompt` 控制是否将 Mem0 检索结果注入聊天 Prompt；`memory.use_mem0_for_knowledge_speak` 控制知识问候是否优先使用 Mem0；`memory.mem0_search_top_k` 控制每轮检索数量；`memory.mem0_llm_provider` 默认 `deepseek`，`memory.mem0_use_app_deepseek_config` 默认复用项目 DeepSeek 配置，`memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 可覆盖模型和 base URL；`memory.mem0_embedder_provider` 默认 `dashscope_openai_compatible`，通过 DashScope / 阿里云百炼 OpenAI-compatible embeddings 接口使用 `text-embedding-v4` 和 1024 维向量；`memory.dashscope_api_key` / `memory.dashscope_api_key_env` 控制 DashScope key 来源；`memory.write_sensitive_memory` 默认 false，用于避免情绪陪伴场景下自动保存敏感长期记忆。
 - `memory.enable_memory_vectors` controls local vector indexing for `memory.json`; `memory.enable_semantic_memory_merge`, `memory.semantic_merge_interval_days`, and `memory.semantic_duplicate_similarity_threshold` control the post-startup background semantic duplicate merge.
 - `proactive_content_ratio.extra_knowledge` / `regular_greeting` 控制空闲主动问候中知识问候与普通问候的初始比例，当前默认 0.35 / 0.65；运行中用户回应会按 `_adjust_ratio()` 轻微调整，并持续钳制在 0.3-0.7 范围内。
@@ -203,7 +215,7 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/config/local_lines.json`
 
-- 本地主动话术和提示文案。`BehaviorController` 启动问候先看 `first_start.enable`，开启时优先使用 `first_start.data`，成功取用后自动写回 `enable=false`，未命中时继续回退到季节/时段问候和 `startup`；空闲/测试问候主要使用 `idle`、`quiet`、`encourage`，并混入时段分组 `greeting_morning`、`greeting_noon`、`greeting_afternoon`、`greeting_evening`、`sleepy`；季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter` 用于启动周期问候和时段/季节变化检测。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。知识问候确认使用 `reply`。
+- 本地主动话术和提示文案。`BehaviorController` 启动问候先看 `first_start.enable`，开启时优先使用 `first_start.data`，成功取用后自动写回 `enable=false`，未命中时继续回退到季节/时段问候和 `startup`；空闲/测试问候主要使用 `idle`、`quiet`、`encourage`，并混入时段分组 `greeting_morning`、`greeting_noon`、`greeting_afternoon`、`greeting_evening`、`sleepy`；季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter` 用于启动周期问候和时段/季节变化检测。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。知识问候确认使用 `reply`。场景化问候本地回退使用 `scenario_greeting_templates`，其中 `{task}` 会被近期任务替换；连续未回应后的低打扰回退使用 `low_interrupt`。
 
 `desktop_pet/tools/import_memory_json_to_mem0.py`
 
@@ -272,9 +284,10 @@ wscript.exe .\start_main.vbs
 
 1. `BehaviorController` 启动后设置空闲检查计时器，每 60 秒检查一次。
 2. 启动问候受 `do_not_disturb` 和 `startup_greeting` 约束，不受每日主动话术上限约束；优先级为 `first_start.data`（仅当 `first_start.enable` 为 true）→ 每 5 天周期首日季节问候 → 当前时段问候 → `startup`；成功展示后不计入本地主动话术次数。
-3. 空闲主动话术受 `proactive_chat`、`min_proactive_interval_minutes`、`awaiting_user_reply`、`last_proactive_at` 和每日上限约束，话术池从 `idle`/`quiet`/`encourage` 加当前时段分组中随机选取。
-4. 触发后发出 `speak_requested(text, duration_ms, action_name)`。
-5. `DesktopPetWindow._handle_behavior_speak()` 在未聊天且输入框不可见时显示气泡并切动作。
+3. 空闲主动话术受 `proactive_chat`、`min_proactive_interval_minutes`、`last_proactive_at`、动态未回应间隔和每日上限约束。若连续未回应达到低打扰阈值，优先从 `low_interrupt` 取一句低打扰问候；若场景化问候开启、冷却结束且记忆上下文足够，则从 `memory.json` 构造近期任务/相处方式上下文，API 可用时发出 `scenario_greeting_requested` 交给后台 worker，API 不可用或失败时回退 `scenario_greeting_templates`。
+4. 若未触发场景化问候，继续按 `proactive_content_ratio` 决定知识问候或普通问候；普通问候话术池从 `idle`/`quiet`/`encourage`/`break_reminder` 加当前时段分组中随机选取。
+5. 本地问候触发后发出 `speak_requested(text, duration_ms, action_name)`；场景化 API 问候由 `ScenarioGreetingWorker` 成功后回到主线程显示。
+6. `DesktopPetWindow._handle_behavior_speak()` / `_handle_scenario_greeting()` 在未聊天且输入框不可见时显示气泡并切动作。
 
 自动移动和测试动作流：
 
@@ -298,6 +311,7 @@ wscript.exe .\start_main.vbs
 
 - 当前使用 `desktop_pet/tests/` 下的 `unittest` 回归测试，没有 pytest、CI、格式化器配置。
 - 推荐使用项目本地虚拟环境运行：`desktop_pet\.desktop_pet_venv\Scripts\python.exe -m unittest discover -s desktop_pet\tests`。
+- 记忆系统相关回归测试包括 `test_memory_schema.py`、`test_summarizer_memory_updates.py`、`test_prompt_builder_memory_sections.py` 和 `test_memory_vector_store.py`，分别覆盖 memory schema 兼容、关系记忆提取、Prompt 记忆分区与本地向量索引。场景化主动问候测试包括 `test_proactive_context.py`、`test_scenario_greeting_config.py`、`test_scenario_greeting_worker.py` 和 `test_behavior_controller.py` 中的场景化分流用例。
 - 常用轻量校验方式还包括 Python AST 解析、JSON 合法性检查和手动启动。
 - `py_compile` 在本环境可能因为 `__pycache__` 写入权限失败，不适合作为唯一验证方式。
 
@@ -587,3 +601,5 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-30：扩展 `work_study.current_learning_topics` 本地触发关键词，新增 `请问`、`怎么做`、`如何实现`、`如何`、`怎么`、`是什么`、`为什么`、`区别` 等问题式表达；同时修正 `Summarizer._summary_mode()` 先判 `informal` 再判 `formal`，避免非正式摘要文件名中的 `formal` 子串触发正式问答兜底逻辑。新增对应回归测试并同步更新 `summarizer.py` 说明。
 - 2026-05-30：将 Mem0 初始化、重新加载配置时的 Mem0 重建、主动知识问候前的 Mem0 检索移出 Qt 主线程。新增 `Mem0InitializationWorker` 和 `Mem0SearchWorker`，分别在独立 `QThread` 中执行 `Mem0MemoryService` 构造/旧服务关闭和 `format_for_prompt()` 检索；`DesktopPetWindow` 通过完成信号替换服务引用并同步给两个摘要器，主动问候检索中返回 `None` 让 `BehaviorController` 跳过本轮普通问候兜底，检索成功后再触发知识问候。新增 `test_mem0_threading_boundaries.py` 防止 Mem0 初始化和主动问候检索回到主线程。
 - 2026-05-30: Added local semantic vector indexing for `memory.json`. `MemoryStore` now best-effort syncs `data/memory_vectors.json` after saves/merges, using the existing DashScope embedding config. `DesktopPetWindow` starts a `MemorySemanticMergeWorker` after the window is shown; it runs in a separate `QThread`, checks the two-month cadence, and merges only same-field high-similarity duplicates so UI display and normal Q&A are not blocked.
+- 2026-05-30：增强第一轮记忆系统。`MemoryStore` 新增 `normalize_memory_schema()`，兼容旧 `memory.json` 并补齐 `relationship_memory` 与 `memory_meta.schema_version=2`；`Summarizer` 的模型/本地记忆提取支持关系记忆，只基于用户发言记录沟通偏好、相处方式和近期互动模式；`PromptBuilder` 将本地事实记忆、相处方式记忆和 Mem0 相关语义记忆拆分为独立 Prompt 区块，并加入表达约束，避免机械复述记忆或暴露 memory.json/Mem0 等实现细节。新增 `test_memory_schema.py` 和 `test_prompt_builder_memory_sections.py`，扩展 `test_summarizer_memory_updates.py` 覆盖关系记忆提取与不使用助手回答推断用户偏好。
+- 2026-05-30：增强第二轮场景化主动问候。新增 `character/proactive_context.py` 负责从 `memory.json` 构造精简场景上下文、本地模板回退和 API prompt；`BehaviorController._maybe_idle_prompt()` 在基础守卫后优先处理连续未回应的低打扰问候，其次在冷却结束且记忆足够时触发 `memory_context_greeting`，API 启用且额度可用时发出 `scenario_greeting_requested`，否则使用本地模板；`DesktopPetWindow` 新增 `ScenarioGreetingWorker`，在独立 `QThread` 中生成短问候，失败或输出机械记忆表达时静默回退本地模板。`app_config.example.json` 新增 `behavior.scenario_greeting_*` 配置，`local_lines.json` 新增 `scenario_greeting_templates` 和 `low_interrupt`，并新增对应回归测试。

@@ -7,6 +7,11 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from character.proactive_context import (
+    build_local_scenario_greeting,
+    build_proactive_context,
+    has_scenario_context,
+)
 from storage.json_store import load_json, save_json
 from storage.usage_store import UsageStore
 from utils.time_utils import now_local
@@ -15,6 +20,7 @@ from utils.time_utils import now_local
 class BehaviorController(QObject):
     speak_requested = Signal(str, int, str)
     knowledge_speak_requested = Signal()
+    scenario_greeting_requested = Signal(dict)
 
     def __init__(
         self,
@@ -37,6 +43,7 @@ class BehaviorController(QObject):
 
         self.last_user_interaction = now_local()
         self.last_proactive_at = None
+        self.last_scenario_greeting_at = None
         self.awaiting_user_reply = False
         self._consecutive_unanswered = 0
         self._last_proactive_type = ""
@@ -61,6 +68,7 @@ class BehaviorController(QObject):
         self.awaiting_user_reply = False
         self._consecutive_unanswered = 0
         self._last_proactive_type = ""
+        self.last_scenario_greeting_at = None
         self._last_time_key = self._time_greeting_key()
         self._last_season_key = self._season_key()
 
@@ -89,6 +97,8 @@ class BehaviorController(QObject):
 
     def _adjust_ratio(self, responded_type: str) -> None:
         """Slightly bias future proactive content toward what got a response."""
+        if responded_type not in {"regular_greeting", "extra_knowledge"}:
+            return
         config = self.config_loader()
         ratio = self._proactive_ratio()
         other_type = "extra_knowledge" if responded_type == "regular_greeting" else "regular_greeting"
@@ -170,6 +180,14 @@ class BehaviorController(QObject):
             return 10
         return value if value > 0 else 10
 
+    def _max_api_proactive_per_day(self, behavior: dict[str, Any]) -> int:
+        """Read the API proactive daily limit with a safe default."""
+        try:
+            value = int(behavior.get("max_api_proactive_per_day", 10))
+        except (TypeError, ValueError):
+            return 10
+        return value if value > 0 else 10
+
     def _effective_proactive_interval_minutes(self, behavior: dict[str, Any]) -> int:
         """Use the dynamic idle interval, bounded by the configured minimum."""
         return max(
@@ -220,6 +238,9 @@ class BehaviorController(QObject):
         if self.awaiting_user_reply:
             self._consecutive_unanswered += 1
 
+        if self._try_scenario_greeting(behavior, now):
+            return
+
         ratio = self._proactive_ratio()
         extra_weight = ratio.get("extra_knowledge", 0.5)
         if random.random() < extra_weight:
@@ -241,14 +262,141 @@ class BehaviorController(QObject):
         if not line:
             return
 
+        self._emit_local_proactive_line(line, "regular_greeting")
+
+    def _try_scenario_greeting(self, behavior: dict[str, Any], now: Any) -> bool:
+        """Try low-interrupt or memory-context scenario greeting after base guards pass."""
+        if not behavior.get("enable_scenario_greeting", False):
+            return False
+
+        local_lines = load_json(self.local_lines_path, {})
+        max_chars = self._scenario_max_chars(behavior)
+        if self._should_use_low_interrupt_greeting(behavior):
+            line = build_local_scenario_greeting(
+                {"runtime_state": {"consecutive_unanswered": self._consecutive_unanswered}},
+                local_lines,
+                max_chars=max_chars,
+                greeting_type="low_interrupt_greeting",
+            )
+            if not line:
+                return False
+            self.last_scenario_greeting_at = now
+            self._emit_local_proactive_line(line, "low_interrupt_greeting")
+            return True
+
+        if self._scenario_cooldown_active(behavior, now):
+            return False
+
+        memory = load_json(self.memory_path, {})
+        context = build_proactive_context(
+            memory,
+            runtime_state={
+                "consecutive_unanswered": self._consecutive_unanswered,
+                "last_proactive_type": self._last_proactive_type,
+            },
+            time_period=self._time_period_label(),
+            season=self._season_label(),
+        )
+        if not has_scenario_context(context, self._scenario_min_memory_items(behavior)):
+            return False
+
+        fallback_line = build_local_scenario_greeting(
+            context,
+            local_lines,
+            max_chars=max_chars,
+            greeting_type="memory_context_greeting",
+        )
+        if not fallback_line:
+            return False
+
+        self.last_scenario_greeting_at = now
+        if behavior.get("scenario_greeting_api_enabled", True) and self._can_use_api(behavior):
+            self.usage_store.increment_api_line()
+            self.notify_proactive_shown("memory_context_greeting")
+            self.scenario_greeting_requested.emit(
+                {
+                    "greeting_type": "memory_context_greeting",
+                    "context": context,
+                    "fallback_line": fallback_line,
+                    "max_chars": max_chars,
+                }
+            )
+            self._consecutive_unanswered = 0
+            return True
+
+        self._emit_local_proactive_line(fallback_line, "memory_context_greeting")
+        return True
+
+    def _emit_local_proactive_line(self, line: str, proactive_type: str) -> None:
         self.usage_store.increment_local_line()
-        self.notify_proactive_shown("regular_greeting")
+        self.notify_proactive_shown(proactive_type)
         self.speak_requested.emit(
             line,
             self._bubble_duration_ms("proactive_greeting", 6000),
             "waving",
         )
         self._consecutive_unanswered = 0
+
+    def _can_use_api(self, behavior: dict[str, Any]) -> bool:
+        if not hasattr(self.usage_store, "can_use_api"):
+            return True
+        return bool(self.usage_store.can_use_api(self._max_api_proactive_per_day(behavior)))
+
+    def _scenario_max_chars(self, behavior: dict[str, Any]) -> int:
+        try:
+            value = int(behavior.get("scenario_greeting_max_chars", 80))
+        except (TypeError, ValueError):
+            return 80
+        return min(max(value, 20), 120)
+
+    def _scenario_min_memory_items(self, behavior: dict[str, Any]) -> int:
+        try:
+            value = int(behavior.get("scenario_greeting_min_memory_items", 1))
+        except (TypeError, ValueError):
+            return 1
+        return value if value > 0 else 1
+
+    def _scenario_cooldown_minutes(self, behavior: dict[str, Any]) -> int:
+        try:
+            value = int(behavior.get("scenario_greeting_cooldown_minutes", 60))
+        except (TypeError, ValueError):
+            return 60
+        return max(value, 0)
+
+    def _scenario_cooldown_active(self, behavior: dict[str, Any], now: Any) -> bool:
+        if self.last_scenario_greeting_at is None:
+            return False
+        cooldown = self._scenario_cooldown_minutes(behavior)
+        if cooldown <= 0:
+            return False
+        return now - self.last_scenario_greeting_at < timedelta(minutes=cooldown)
+
+    def _should_use_low_interrupt_greeting(self, behavior: dict[str, Any]) -> bool:
+        try:
+            threshold = int(behavior.get("scenario_greeting_low_interrupt_after_ignored", 2))
+        except (TypeError, ValueError):
+            threshold = 2
+        threshold = max(threshold, 1)
+        return self._consecutive_unanswered >= threshold
+
+    def _time_period_label(self) -> str:
+        mapping = {
+            "greeting_morning": "morning",
+            "greeting_noon": "noon",
+            "greeting_afternoon": "afternoon",
+            "greeting_evening": "evening",
+            "sleepy": "night",
+        }
+        return mapping.get(self._time_greeting_key() or "", "")
+
+    def _season_label(self) -> str:
+        mapping = {
+            "greeting_spring": "spring",
+            "greeting_summer": "summer",
+            "greeting_autumn": "autumn",
+            "greeting_winter": "winter",
+        }
+        return mapping.get(self._season_key(), "")
 
     def _check_period_change(self) -> None:
         """Show a time-of-day greeting when the period changes."""

@@ -222,11 +222,24 @@ class Summarizer:
                 "content": (
                     "你现在只能根据用户自己的发言提取可长期保存的记忆。"
                     "不要使用助手回复，不要脑补，不要把助手说过的话当成用户事实。"
-                    "只提取用户明确表达过的偏好、沟通风格、个人备注、学习主题、当前项目等信息。"
+                    "只提取用户明确表达过的事实记忆、互动偏好和相处方式。"
+                    "事实记忆包括偏好、个人备注、学习主题、当前项目等。"
+                    "关系记忆只记录用户希望你如何回答、如何陪伴、如何控制打扰强度；"
+                    "不要评价用户人格，不要输出心理诊断、医学判断或敏感标签。"
+                    "如果用户明确表达“不要频繁确认”“直接给方案”“不要像数据库工具”，"
+                    "应写入 relationship_memory。"
+                    "如果证据不足就留空，不要强行生成字段。"
                     "如果不确定就留空，不要猜。"
                     "请严格输出 JSON："
                     '{"user_profile":{"preferences":[],"communication_style":[],"important_personal_notes":[]},'
-                    '"work_study":{"current_learning_topics":[],"current_projects":[],"useful_context":[]}}'
+                    '"work_study":{"current_learning_topics":[],"current_projects":[],"useful_context":[]},'
+                    '"relationship_memory":{'
+                    '"communication_style":{"preferred_response_style":"","detail_level":"",'
+                    '"confirmation_preference":"","tone_preference":"","avoid_styles":[],"evidence":[]},'
+                    '"companionship_style":{"preferred_companion_role":"","proactive_boundary":"",'
+                    '"encouragement_style":"","avoid_behaviors":[],"evidence":[]},'
+                    '"interaction_patterns":{"task_focus":[],"recent_interaction_mode":"",'
+                    '"interruption_tolerance":""}}}'
                 ),
             },
             {"role": "user", "content": transcript},
@@ -252,6 +265,7 @@ class Summarizer:
         study_topics: list[str] = []
         styles: list[str] = []
         personal_notes: list[str] = []
+        relationship_memory = self._empty_relationship_memory_update()
 
         for item in history:
             if item.get("role") != "user":
@@ -269,6 +283,10 @@ class Summarizer:
                 styles.append(text[:40])
             if re.search(r"(我叫|我是|今天|最近)", text):
                 personal_notes.append(text[:60])
+            self._extract_relationship_memory_from_text(text, relationship_memory)
+
+        if projects:
+            relationship_memory["interaction_patterns"]["task_focus"] = projects[:3]
 
         return {
             "user_profile": {
@@ -281,6 +299,7 @@ class Summarizer:
                 "current_projects": projects[:5],
                 "useful_context": [],
             },
+            "relationship_memory": relationship_memory,
         }
 
     def _user_history(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -293,8 +312,20 @@ class Summarizer:
 
     def _normalize_memory_updates(self, payload: dict[str, Any]) -> dict[str, Any]:
         """标准化记忆更新数据."""
-        user_profile = payload.get("user_profile", {})
-        work_study = payload.get("work_study", {})
+        source = payload.get("memory_updates", payload)
+        if not isinstance(source, dict):
+            source = {}
+        fact_source = source.get("fact_memory_updates", source)
+        if not isinstance(fact_source, dict):
+            fact_source = {}
+        relationship_source = (
+            source.get("relationship_memory")
+            or source.get("relationship_memory_updates")
+            or payload.get("relationship_memory_updates")
+            or {}
+        )
+        user_profile = fact_source.get("user_profile", {})
+        work_study = fact_source.get("work_study", {})
         return {
             "user_profile": {
                 "preferences": self._string_list(user_profile.get("preferences", [])),
@@ -312,7 +343,116 @@ class Summarizer:
                 "current_projects": self._string_list(work_study.get("current_projects", [])),
                 "useful_context": self._string_list(work_study.get("useful_context", [])),
             },
+            "relationship_memory": self._normalize_relationship_memory_updates(
+                relationship_source
+            ),
         }
+
+    def _normalize_relationship_memory_updates(self, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return self._empty_relationship_memory_update()
+
+        communication = value.get("communication_style", {})
+        companionship = value.get("companionship_style", {})
+        interaction = value.get("interaction_patterns", {})
+        if not isinstance(communication, dict):
+            communication = {}
+        if not isinstance(companionship, dict):
+            companionship = {}
+        if not isinstance(interaction, dict):
+            interaction = {}
+
+        return {
+            "communication_style": {
+                "preferred_response_style": self._string_value(
+                    communication.get("preferred_response_style", "")
+                ),
+                "detail_level": self._string_value(communication.get("detail_level", "")),
+                "confirmation_preference": self._string_value(
+                    communication.get("confirmation_preference", "")
+                ),
+                "tone_preference": self._string_value(
+                    communication.get("tone_preference", "")
+                ),
+                "avoid_styles": self._string_list(communication.get("avoid_styles", [])),
+                "evidence": self._string_list(communication.get("evidence", [])),
+            },
+            "companionship_style": {
+                "preferred_companion_role": self._string_value(
+                    companionship.get("preferred_companion_role", "")
+                ),
+                "proactive_boundary": self._string_value(
+                    companionship.get("proactive_boundary", "")
+                ),
+                "encouragement_style": self._string_value(
+                    companionship.get("encouragement_style", "")
+                ),
+                "avoid_behaviors": self._string_list(companionship.get("avoid_behaviors", [])),
+                "evidence": self._string_list(companionship.get("evidence", [])),
+            },
+            "interaction_patterns": {
+                "task_focus": self._string_list(interaction.get("task_focus", [])),
+                "recent_interaction_mode": self._string_value(
+                    interaction.get("recent_interaction_mode", "")
+                ),
+                "interruption_tolerance": self._string_value(
+                    interaction.get("interruption_tolerance", "")
+                ),
+            },
+        }
+
+    def _empty_relationship_memory_update(self) -> dict[str, Any]:
+        return {
+            "communication_style": {
+                "preferred_response_style": "",
+                "detail_level": "",
+                "confirmation_preference": "",
+                "tone_preference": "",
+                "avoid_styles": [],
+                "evidence": [],
+            },
+            "companionship_style": {
+                "preferred_companion_role": "",
+                "proactive_boundary": "",
+                "encouragement_style": "",
+                "avoid_behaviors": [],
+                "evidence": [],
+            },
+            "interaction_patterns": {
+                "task_focus": [],
+                "recent_interaction_mode": "",
+                "interruption_tolerance": "",
+            },
+        }
+
+    def _extract_relationship_memory_from_text(
+        self, text: str, relationship_memory: dict[str, Any]
+    ) -> None:
+        stripped = text.strip()
+        if not stripped:
+            return
+        evidence = stripped[:80]
+        communication = relationship_memory["communication_style"]
+        companionship = relationship_memory["companionship_style"]
+
+        if re.search(r"(不要|别|不用|不需要).{0,8}(确认|问我)|别总是问|不要总是问", stripped):
+            communication["confirmation_preference"] = "avoid_unnecessary_confirmation"
+            self._append_unique(communication["evidence"], evidence)
+        if re.search(r"(直接给|直接.*方案|给我可执行|可执行方案|可执行的)", stripped):
+            communication["preferred_response_style"] = "direct_actionable"
+            self._append_unique(communication["evidence"], evidence)
+        if re.search(r"(详细一点|尽可能详细|写得完整|完整一点|展开一点)", stripped):
+            communication["detail_level"] = "high"
+            self._append_unique(communication["evidence"], evidence)
+        if re.search(r"(数据库|数据存储器|机械化记忆|机械.*记忆|不像陪伴|像工具)", stripped):
+            self._append_unique(communication["avoid_styles"], "机械化记忆表达")
+            self._append_unique(companionship["avoid_behaviors"], "像数据存储器一样说话")
+            self._append_unique(communication["evidence"], evidence)
+            self._append_unique(companionship["evidence"], evidence)
+
+    def _append_unique(self, items: list[str], value: str) -> None:
+        if value and value not in items:
+            items.append(value)
 
     def _string_list(self, value: Any) -> list[str]:
         """将任意输入标准化为去重的非空字符串列表."""
@@ -325,3 +465,6 @@ class Summarizer:
             if text and text not in normalized:
                 normalized.append(text)
         return normalized
+
+    def _string_value(self, value: Any) -> str:
+        return str(value).strip() if value not in (None, "") else ""

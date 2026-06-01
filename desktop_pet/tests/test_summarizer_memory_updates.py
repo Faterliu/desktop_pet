@@ -218,6 +218,90 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         topics = memory_store.merged[-1]["work_study"]["current_learning_topics"]  # type: ignore[index]
         self.assertEqual([], topics)
 
+    def test_user_interaction_preference_writes_relationship_memory(self) -> None:
+        temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_relationship_memory_updates"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = temp_dir / "conversation_summary_informal.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "summary": "",
+                    "covered_message_count": 0,
+                    "highlights": [],
+                    "last_updated": "",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        memory_store = FakeMemoryStore()
+        summarizer = Summarizer(
+            summary_path,
+            FakeChatStore(
+                [
+                    {
+                        "role": "user",
+                        "content": "以后不要总是问我确认，直接给我可执行方案。",
+                    },
+                    {"role": "assistant", "content": "好。"},
+                ]
+            ),  # type: ignore[arg-type]
+            memory_store,  # type: ignore[arg-type]
+            EmptyMemoryDeepSeekClient(),  # type: ignore[arg-type]
+        )
+
+        summarizer.maybe_summarize(trigger_rounds=1, force=True)
+
+        self.assertTrue(memory_store.merged)
+        communication_style = memory_store.merged[-1]["relationship_memory"][
+            "communication_style"
+        ]  # type: ignore[index]
+        self.assertEqual(
+            communication_style["confirmation_preference"],
+            "avoid_unnecessary_confirmation",
+        )
+        self.assertEqual(
+            communication_style["preferred_response_style"],
+            "direct_actionable",
+        )
+
+    def test_assistant_claim_does_not_write_relationship_memory(self) -> None:
+        temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_no_assistant_relationship_memory"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = temp_dir / "conversation_summary_informal.json"
+        summary_path.write_text(
+            json.dumps(
+                {
+                    "summary": "",
+                    "covered_message_count": 0,
+                    "highlights": [],
+                    "last_updated": "",
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        memory_store = FakeMemoryStore()
+        summarizer = Summarizer(
+            summary_path,
+            FakeChatStore(
+                [
+                    {"role": "user", "content": "这个功能怎么做？"},
+                    {"role": "assistant", "content": "你喜欢直接详细的回答，我之后都会这样。"},
+                ]
+            ),  # type: ignore[arg-type]
+            memory_store,  # type: ignore[arg-type]
+            EmptyMemoryDeepSeekClient(),  # type: ignore[arg-type]
+        )
+
+        summarizer.maybe_summarize(trigger_rounds=1, force=True)
+
+        self.assertTrue(memory_store.merged)
+        relationship_memory = memory_store.merged[-1].get("relationship_memory", {})
+        relationship_text = json.dumps(relationship_memory, ensure_ascii=False)
+        self.assertNotIn("direct_actionable", relationship_text)
+        self.assertNotIn("high", relationship_text)
+
 
 if __name__ == "__main__":
     unittest.main()

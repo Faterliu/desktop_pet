@@ -31,6 +31,11 @@ from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
 from app.speech_bubble import ReplyBubble, SpeechBubble
 from character.behavior_controller import BehaviorController
+from character.proactive_context import (
+    build_scenario_greeting_messages,
+    is_scenario_greeting_acceptable,
+    sanitize_scenario_greeting,
+)
 from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.memory_store import MemoryStore
@@ -142,6 +147,38 @@ class ProactiveSpeakWorker(QObject):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected proactive API worker failure")
             self.failed.emit(f"测试 API 主动说话失败：{exc}")
+
+
+class ScenarioGreetingWorker(QObject):
+    finished = Signal(str)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        client: DeepSeekClient,
+        context: dict[str, Any],
+        fallback_line: str,
+        max_chars: int = 80,
+    ) -> None:
+        """Generate one memory-context proactive greeting in a background thread."""
+        super().__init__()
+        self.client = client
+        self.context = context
+        self.fallback_line = fallback_line
+        self.max_chars = max_chars
+
+    def run(self) -> None:
+        try:
+            messages = build_scenario_greeting_messages(self.context, self.max_chars)
+            reply = sanitize_scenario_greeting(self.client.chat(messages), self.max_chars)
+            if not is_scenario_greeting_acceptable(reply):
+                reply = sanitize_scenario_greeting(self.fallback_line, self.max_chars)
+            self.finished.emit(reply)
+        except DeepSeekError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Unexpected scenario greeting worker failure")
+            self.failed.emit(f"场景化问候生成失败：{exc}")
 
 
 class KnowledgeSpeakWorker(QObject):
@@ -455,6 +492,9 @@ class DesktopPetWindow(QWidget):
         self.chat_input.message_submitted.connect(self._handle_user_message)
         self.behavior_controller.speak_requested.connect(self._handle_behavior_speak)
         self.behavior_controller.knowledge_speak_requested.connect(self._handle_knowledge_speak)
+        self.behavior_controller.scenario_greeting_requested.connect(
+            self._handle_scenario_greeting
+        )
         self.reply_bubble.clicked.connect(self._handle_reply_bubble_clicked)
 
     def showEvent(self, event) -> None:  # noqa: N802
@@ -1212,6 +1252,53 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action(action_name)
         self._display_message(text, duration_ms, "proactive")
 
+    def _handle_scenario_greeting(self, payload: dict[str, Any]) -> None:
+        """Start API scenario greeting generation, falling back locally when unavailable."""
+        if self._chat_in_progress() or self.chat_input.isVisible():
+            return
+        fallback_line = str(payload.get("fallback_line", "")).strip()
+        if not self.deepseek_client.is_configured():
+            self._show_scenario_greeting_line(fallback_line)
+            return
+        if self.chat_thread and self.chat_thread.isRunning():
+            return
+        self._start_scenario_greeting_worker(payload)
+
+    def _start_scenario_greeting_worker(self, payload: dict[str, Any]) -> None:
+        self.chat_thread = QThread(self)
+        self.chat_worker = ScenarioGreetingWorker(
+            self.deepseek_client,
+            context=payload.get("context", {}),
+            fallback_line=str(payload.get("fallback_line", "")),
+            max_chars=int(payload.get("max_chars", 80) or 80),
+        )
+        self.chat_worker.moveToThread(self.chat_thread)
+        self.chat_thread.started.connect(self.chat_worker.run)
+        self.chat_worker.finished.connect(self._on_scenario_greeting_success)
+        self.chat_worker.failed.connect(
+            lambda _error, fallback=str(payload.get("fallback_line", "")): (
+                logger.warning("Scenario greeting API failed; using local fallback"),
+                self._show_scenario_greeting_line(fallback),
+            )
+        )
+        self.chat_worker.finished.connect(self.chat_thread.quit)
+        self.chat_worker.failed.connect(self.chat_thread.quit)
+        self.chat_thread.finished.connect(self._cleanup_chat_thread)
+        self.chat_thread.start()
+
+    def _on_scenario_greeting_success(self, reply: str) -> None:
+        self._show_scenario_greeting_line(reply)
+
+    def _show_scenario_greeting_line(self, line: str) -> None:
+        if not line or self.chat_input.isVisible():
+            return
+        self.sprite_player.set_action("waving")
+        self._display_message(
+            line,
+            self._proactive_greeting_duration_ms(),
+            "proactive",
+        )
+
     def _handle_knowledge_speak(self) -> None:
         """响应主动知识问候请求：基于 memory 调用 API 生成额外内容。"""
         if self._chat_in_progress() or self.chat_input.isVisible():
@@ -1623,6 +1710,15 @@ class DesktopPetWindow(QWidget):
         except (TypeError, ValueError):
             return 15000
         return value if value > 0 else 15000
+
+    def _proactive_greeting_duration_ms(self) -> int:
+        """Read the proactive greeting bubble duration from config."""
+        durations = self._ui_config().setdefault("bubble_durations_ms", {})
+        try:
+            value = int(durations.get("proactive_greeting", 6000))
+        except (TypeError, ValueError):
+            return 6000
+        return value if value > 0 else 6000
 
     def _active_chat_store(self) -> ChatStore:
         """返回当前模式对应的聊天存储实例。"""
