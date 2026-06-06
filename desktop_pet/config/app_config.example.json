@@ -11,7 +11,7 @@
     "api_key": "",
     "enable_chat_api": true,
     "timeout_seconds": 30,
-    "max_recent_messages": 10,
+    "max_recent_messages": 20,
     "summary_trigger_rounds": 20
   },
   "ui": {

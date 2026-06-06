@@ -5,6 +5,7 @@
 !/desktop_pet/
 !/desktop_pet/**
 !/README.md
+!/LICENSE
 
 # Python 缓存与构建产物
 desktop_pet/**/__pycache__/
