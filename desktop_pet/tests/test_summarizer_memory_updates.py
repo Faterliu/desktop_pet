@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import json
 import sys
+import types
 import unittest
 from pathlib import Path
 
 
 DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
+sys.modules.setdefault(
+    "requests",
+    types.SimpleNamespace(
+        Timeout=RuntimeError,
+        RequestException=RuntimeError,
+        post=lambda *args, **kwargs: None,
+    ),
+)
 
 from ai.summarizer import Summarizer  # noqa: E402
 

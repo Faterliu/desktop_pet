@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from storage.json_store import load_json
+from ai.context_budget import clip_text, read_context_budget
+from storage.json_store import load_json, load_json_prefer_primary
 from storage.memory_store import DEFAULT_MEMORY, normalize_memory_schema
 
 
@@ -41,6 +42,8 @@ class PromptBuilder:
         memory_path: str | Path,
         summary_path_formal: str | Path,
         summary_path_informal: str | Path,
+        config_path: str | Path | None = None,
+        fallback_config_path: str | Path | None = None,
     ) -> None:
         """初始化提示词构建器，并绑定角色、安全、记忆与正式/非正式摘要配置。"""
         self.character_path = Path(character_path)
@@ -48,6 +51,10 @@ class PromptBuilder:
         self.memory_path = Path(memory_path)
         self.summary_path_formal = Path(summary_path_formal)
         self.summary_path_informal = Path(summary_path_informal)
+        self.config_path = Path(config_path) if config_path else None
+        self.fallback_config_path = (
+            Path(fallback_config_path) if fallback_config_path else self.config_path
+        )
 
     def build_messages(
         self,
@@ -62,15 +69,29 @@ class PromptBuilder:
         memory = normalize_memory_schema(load_json(self.memory_path, DEFAULT_MEMORY))
         summary_path = self.summary_path_formal if formal_qa_mode else self.summary_path_informal
         summary = load_json(summary_path, DEFAULT_SUMMARY)
+        budget = read_context_budget(self._config())
 
         safety_rules = "\n".join(f"- {rule}" for rule in safety.get("rules", []))
         personality = "、".join(character.get("personality", []))
         speaking = character.get("speaking_style", {})
         catchphrases = " / ".join(speaking.get("catchphrases", []))
-        fact_memory_text = self._format_fact_memory(memory)
-        relationship_memory_text = self._format_relationship_memory(memory, formal_qa_mode)
-        semantic_memory_text = self._format_relevant_semantic_memories(relevant_memories)
-        summary_text = summary.get("summary", "").strip()
+        fact_memory_text = self._fit_section(
+            self._format_fact_memory(memory),
+            budget["max_memory_chars"],
+        )
+        relationship_memory_text = self._fit_section(
+            self._format_relationship_memory(memory, formal_qa_mode),
+            budget["max_memory_chars"],
+        )
+        semantic_memory_text = self._fit_section(
+            self._format_relevant_semantic_memories(relevant_memories),
+            budget["max_mem0_chars"],
+        )
+        summary_text = self._fit_section(
+            summary.get("summary", "").strip(),
+            budget["max_summary_chars"],
+        )
+        current_user_message = clip_text(user_message, budget["max_user_message_chars"])
 
         system_messages = [
             {
@@ -84,7 +105,8 @@ class PromptBuilder:
             {
                 "role": "system",
                 "content": (
-                    f"你是{character.get('name', '小胡')}，角色定位是{character.get('role', '桌面陪伴小伙伴')}。"
+                    f"你是{character.get('name', '小胡')}，角色定位是"
+                    f"{character.get('role', '桌面陪伴小伙伴')}。\n"
                     f"你的性格关键词：{personality}。\n"
                     f"日常聊天风格：{speaking.get('daily_chat', '')}\n"
                     f"知识问答风格：{speaking.get('knowledge_answer', '')}\n"
@@ -105,8 +127,16 @@ class PromptBuilder:
             }
         )
 
+        optional_system_messages: list[dict[str, str]] = []
+        if summary_text:
+            optional_system_messages.append(
+                {
+                    "role": "system",
+                    "content": f"以下是之前对话摘要，请按需参考：\n{summary_text}",
+                }
+            )
         if fact_memory_text:
-            system_messages.append(
+            optional_system_messages.append(
                 {
                     "role": "system",
                     "content": (
@@ -118,7 +148,7 @@ class PromptBuilder:
                 }
             )
         if relationship_memory_text:
-            system_messages.append(
+            optional_system_messages.append(
                 {
                     "role": "system",
                     "content": (
@@ -129,46 +159,140 @@ class PromptBuilder:
                     ),
                 }
             )
-
         if semantic_memory_text:
-            system_messages.append(
+            optional_system_messages.append(
                 {
                     "role": "system",
                     "content": (
                         "【当前问题相关的长期语义记忆】\n"
-                        "以下内容由长期语义记忆检索得到，"
-                        "只在与当前问题直接相关时参考。不要机械复述，也不要强行使用。\n"
+                        "以下内容由长期语义记忆检索得到，只在与当前问题直接相关时参考。"
+                        "不要机械复述，也不要强行使用。\n"
                         f"{semantic_memory_text}"
                     ),
                 }
             )
-
         if fact_memory_text or relationship_memory_text or semantic_memory_text:
-            system_messages.append(
+            optional_system_messages.append(
                 {
                     "role": "system",
                     "content": self._format_memory_guidelines(formal_qa_mode),
                 }
             )
 
-        if summary_text:
-            system_messages.append(
-                {"role": "system", "content": f"以下是之前对话摘要，请按需参考：\n{summary_text}"}
-            )
+        trimmed_history = self._trim_conversation_messages(
+            recent_messages or [],
+            max_messages=budget["max_history_messages"],
+            max_message_chars=budget["max_history_message_chars"],
+        )
+        current_user = {"role": "user", "content": current_user_message}
 
-        conversation_messages = [
-            {"role": item.get("role", "user"), "content": str(item.get("content", ""))}
-            for item in (recent_messages or [])
-            if item.get("content")
+        prompt_chars = self._messages_char_count(system_messages + trimmed_history + [current_user])
+        max_prompt_chars = budget["max_prompt_chars"]
+        kept_optional: list[dict[str, str]] = []
+        for message in optional_system_messages:
+            candidate_total = prompt_chars + len(message["content"])
+            if candidate_total > max_prompt_chars:
+                continue
+            kept_optional.append(message)
+            prompt_chars = candidate_total
+
+        final_messages = system_messages + kept_optional + trimmed_history + [current_user]
+        if self._messages_char_count(final_messages) <= max_prompt_chars:
+            return final_messages
+
+        required_chars = self._messages_char_count(system_messages + kept_optional + [current_user])
+        trimmed_history = self._trim_history_to_budget(
+            trimmed_history,
+            max_prompt_chars - required_chars,
+        )
+        final_messages = system_messages + kept_optional + trimmed_history + [current_user]
+        if self._messages_char_count(final_messages) <= max_prompt_chars:
+            return final_messages
+
+        return self._force_fit_messages(final_messages, max_prompt_chars)
+
+    def _config(self) -> dict[str, Any]:
+        if self.config_path is None:
+            return {}
+        fallback = self.fallback_config_path or self.config_path
+        return load_json_prefer_primary(self.config_path, fallback, {})
+
+    def _trim_conversation_messages(
+        self,
+        messages: list[dict[str, Any]],
+        max_messages: int,
+        max_message_chars: int,
+    ) -> list[dict[str, str]]:
+        trimmed = [
+            {
+                "role": str(item.get("role", "user")),
+                "content": clip_text(item.get("content", ""), max_message_chars),
+            }
+            for item in messages
+            if str(item.get("content", "")).strip()
         ]
-        conversation_messages.append({"role": "user", "content": user_message})
-        return system_messages + conversation_messages
+        return trimmed[-max_messages:]
+
+    def _trim_history_to_budget(
+        self,
+        messages: list[dict[str, str]],
+        available_chars: int,
+    ) -> list[dict[str, str]]:
+        if available_chars <= 0:
+            return []
+
+        kept: list[dict[str, str]] = []
+        used = 0
+        for item in reversed(messages):
+            content = item.get("content", "")
+            if not content:
+                continue
+            if used + len(content) > available_chars:
+                remaining = available_chars - used
+                if remaining > 20:
+                    clipped = clip_text(content, remaining)
+                    if clipped:
+                        kept.append({"role": item.get("role", "user"), "content": clipped})
+                break
+            kept.append(item)
+            used += len(content)
+        kept.reverse()
+        return kept
+
+    def _fit_section(self, text: str, limit: int) -> str:
+        if not text:
+            return ""
+        return clip_text(text, limit)
+
+    def _messages_char_count(self, messages: list[dict[str, str]]) -> int:
+        return sum(len(item.get("content", "")) for item in messages)
+
+    def _force_fit_messages(
+        self,
+        messages: list[dict[str, str]],
+        max_prompt_chars: int,
+    ) -> list[dict[str, str]]:
+        if max_prompt_chars <= 0:
+            return messages
+
+        fitted: list[dict[str, str]] = []
+        used = 0
+        for item in messages:
+            remaining = max_prompt_chars - used
+            if remaining <= 0:
+                break
+            content = item.get("content", "")
+            if len(content) > remaining:
+                content = clip_text(content, remaining)
+            fitted.append({"role": item.get("role", "system"), "content": content})
+            used += len(content)
+        return fitted
 
     def _format_mode_guidance(self, formal_qa_mode: bool) -> str:
         if formal_qa_mode:
             return (
                 "当前处于正式问答模式。请优先保证回答准确、结构清晰、可执行。"
-                "可以参考用户事实记忆理解项目背景；相处方式记忆只用于调整结构、"
+                "可以参考用户事实记忆理解项目背景；相处方式记忆只用于调整回答结构、"
                 "详细程度和确认频率。减少闲聊和陪伴式铺垫。"
             )
         return (
@@ -255,7 +379,7 @@ class PromptBuilder:
         if not relevant_memories:
             return ""
         lines = [
-            self._clip_text(line.strip())
+            clip_text(line.strip(), 120)
             for line in str(relevant_memories).splitlines()
             if line.strip()
         ]
@@ -281,7 +405,7 @@ class PromptBuilder:
     def _append_memory_items(self, fragments: list[str], label: str, value: Any) -> None:
         items = self._string_items(value)
         if items:
-            fragments.append(f"{label}：" + "、".join(items[:3]))
+            fragments.append(f"{label}：{'、'.join(items[:3])}")
 
     def _append_scalar(self, fragments: list[str], label: str, value: Any) -> None:
         text = self._string_value(value)
@@ -293,24 +417,18 @@ class PromptBuilder:
             for key, item in value.items():
                 items = self._string_items(item)
                 if items:
-                    fragments.append(f"旧版偏好 {key}：" + "、".join(items[:3]))
+                    fragments.append(f"旧版偏好 {key}：{'、'.join(items[:3])}")
         else:
             self._append_memory_items(fragments, "旧版偏好", value)
 
     def _string_items(self, value: Any) -> list[str]:
         if isinstance(value, list):
-            return [self._clip_text(str(item).strip()) for item in value if str(item).strip()]
+            return [clip_text(str(item).strip(), 80) for item in value if str(item).strip()]
         if isinstance(value, str) and value.strip():
-            return [self._clip_text(value.strip())]
+            return [clip_text(value.strip(), 80)]
         return []
 
     def _string_value(self, value: Any) -> str:
         if value in (None, ""):
             return ""
-        return self._clip_text(str(value).strip())
-
-    def _clip_text(self, text: str, limit: int = 80) -> str:
-        text = text.strip()
-        if len(text) <= limit:
-            return text
-        return text[: limit - 1] + "..."
+        return clip_text(str(value).strip(), 80)

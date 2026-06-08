@@ -408,6 +408,8 @@ class DesktopPetWindow(QWidget):
             self.memory_path,
             self.summary_formal_path,
             self.summary_informal_path,
+            self.config_path,
+            self.example_config_path,
         )
         self.context_manager = ContextManager(
             self.config_path,
@@ -422,6 +424,8 @@ class DesktopPetWindow(QWidget):
             self.deepseek_client,
             mem0_memory_service=self.mem0_memory_service,
             user_id=self._memory_user_id(),
+            config_path=self.config_path,
+            fallback_config_path=self.example_config_path,
         )
         self.summarizer_informal = Summarizer(
             self.summary_informal_path,
@@ -430,6 +434,8 @@ class DesktopPetWindow(QWidget):
             self.deepseek_client,
             mem0_memory_service=self.mem0_memory_service,
             user_id=self._memory_user_id(),
+            config_path=self.config_path,
+            fallback_config_path=self.example_config_path,
         )
 
         self.sprite_player = SpritePlayer(self.sprite_config_path, self._ui_scale())

@@ -5,9 +5,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ai.context_budget import clip_text, read_context_budget
 from ai.deepseek_client import DeepSeekClient, DeepSeekError
 from storage.chat_store import ChatStore
-from storage.json_store import load_json, save_json
+from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.memory_store import MemoryStore
 from utils.log_sanitizer import safe_exception
 from utils.logger import get_logger
@@ -33,6 +34,8 @@ class Summarizer:
         deepseek_client: DeepSeekClient,
         mem0_memory_service: Any | None = None,
         user_id: str = "default_user",
+        config_path: str | Path | None = None,
+        fallback_config_path: str | Path | None = None,
     ) -> None:
         """初始化摘要器，关联摘要文件、聊天记录、记忆存储和模型客户端。"""
         self.summary_path = Path(summary_path)
@@ -41,6 +44,10 @@ class Summarizer:
         self.deepseek_client = deepseek_client
         self.mem0_memory_service = mem0_memory_service
         self.user_id = user_id
+        self.config_path = Path(config_path) if config_path else None
+        self.fallback_config_path = (
+            Path(fallback_config_path) if fallback_config_path else self.config_path
+        )
 
     def load_summary(self) -> dict[str, Any]:
         """读取当前对话摘要数据。"""
@@ -71,6 +78,15 @@ class Summarizer:
         if self._has_memory_update_text(extracted_memory):
             self.memory_store.merge(extracted_memory)
             self._write_memory_updates_to_mem0(extracted_memory)
+
+    def _config(self) -> dict[str, Any]:
+        if self.config_path is None:
+            return {}
+        fallback = self.fallback_config_path or self.config_path
+        return load_json_prefer_primary(self.config_path, fallback, {})
+
+    def _budget(self) -> dict[str, int]:
+        return read_context_budget(self._config())
 
     def _write_memory_updates_to_mem0(self, memory_updates: dict[str, Any]) -> None:
         """Best-effort shadow write of extracted memory updates into Mem0."""
@@ -164,14 +180,18 @@ class Summarizer:
         return summary_payload
 
     def _model_summary(self, history: list[dict[str, Any]]) -> dict[str, Any] | None:
-        """Build summary and highlights from the full conversation."""
+        """Build summary and highlights from the capped conversation."""
         try:
             content = self.deepseek_client.chat(self._summary_messages(history))
             parsed = json.loads(content)
             if isinstance(parsed, dict):
+                budget = self._budget()
                 return {
-                    "summary": str(parsed.get("summary", "")).strip(),
-                    "highlights": self._string_list(parsed.get("highlights", [])),
+                    "summary": clip_text(str(parsed.get("summary", "")).strip(), budget["max_summary_chars"]),
+                    "highlights": [
+                        clip_text(item, 120)
+                        for item in self._string_list(parsed.get("highlights", []))[:3]
+                    ],
                 }
         except (DeepSeekError, json.JSONDecodeError) as exc:
             logger.warning("Falling back to local summary after model failure: %s", safe_exception(exc))
@@ -193,12 +213,14 @@ class Summarizer:
         except (DeepSeekError, json.JSONDecodeError) as exc:
             logger.warning("Falling back to local memory extraction after model failure: %s", safe_exception(exc))
 
-        return self._extract_memory(user_history[-12:])
+        return self._extract_memory(self._cap_user_messages(user_history, self._budget()["memory_extract_max_input_chars"]))
 
     def _summary_messages(self, history: list[dict[str, Any]]) -> list[dict[str, str]]:
-        """从近期对话构建模型摘要输入，保留角色信息以便模型区分用户和助手发言。"""
-        transcript = "\n".join(
-            f"{item.get('role', 'user')}: {item.get('content', '')}" for item in history[-24:]
+        """从最近对话构建模型摘要输入，保留角色信息以便模型区分用户和助手发言。"""
+        transcript = self._build_transcript(
+            history,
+            char_budget=self._budget()["summary_max_input_chars"],
+            role_prefix="role",
         )
         return [
             {
@@ -214,8 +236,10 @@ class Summarizer:
 
     def _memory_messages(self, history: list[dict[str, Any]]) -> list[dict[str, str]]:
         """仅从用户消息中构建记忆提取输入。"""
-        transcript = "\n".join(
-            f"user: {item.get('content', '')}" for item in history[-24:] if item.get("content")
+        transcript = self._build_transcript(
+            history,
+            char_budget=self._budget()["memory_extract_max_input_chars"],
+            role_prefix="user_only",
         )
         return [
             {
@@ -227,7 +251,7 @@ class Summarizer:
                     "事实记忆包括偏好、个人备注、学习主题、当前项目等。"
                     "关系记忆只记录用户希望你如何回答、如何陪伴、如何控制打扰强度；"
                     "不要评价用户人格，不要输出心理诊断、医学判断或敏感标签。"
-                    "如果用户明确表达“不要频繁确认”“直接给方案”“不要像数据库工具”，"
+                    "如果用户明确表达“不用频繁确认”“直接给方案”“不要像数据库工具”，"
                     "应写入 relationship_memory。"
                     "如果证据不足就留空，不要强行生成字段。"
                     "如果不确定就留空，不要猜。"
@@ -247,16 +271,19 @@ class Summarizer:
         ]
 
     def _local_summary(self, history: list[dict[str, Any]]) -> dict[str, Any]:
-        """在没有模型可用时，根据近期对话生成简化本地摘要。"""
-        recent = history[-12:]
+        """在没有模型可用时，根据最近对话生成简化本地摘要。"""
+        budget = self._budget()
+        recent = self._cap_messages(history, budget["summary_max_input_chars"])
         summary_lines = [
             f"{item.get('role', 'user')}: {item.get('content', '')}" for item in recent if item.get("content")
         ]
         summary = " | ".join(summary_lines[-6:])
         return {
-            "summary": summary[:500],
-            "highlights": [item.get("content", "")[:80] for item in recent[-3:]],
-            "memory_updates": self._extract_memory(recent),
+            "summary": clip_text(summary, budget["max_summary_chars"]),
+            "highlights": [clip_text(item.get("content", ""), 80) for item in recent[-3:]],
+            "memory_updates": self._extract_memory(
+                self._cap_user_messages(self._user_history(history), budget["memory_extract_max_input_chars"])
+            ),
         }
 
     def _extract_memory(self, history: list[dict[str, Any]]) -> dict[str, Any]:
@@ -273,17 +300,17 @@ class Summarizer:
                 continue
             text = str(item.get("content", ""))
             if self._summary_mode() == "formal" and text.strip():
-                study_topics.append(text[:60])
+                study_topics.append(clip_text(text, 60))
             if "喜欢" in text:
-                preferences.append(text[:50])
+                preferences.append(clip_text(text, 50))
             if re.search(r"(项目|需求|实现|代码)", text):
-                projects.append(text[:60])
+                projects.append(clip_text(text, 60))
             if re.search(r"(学习|复习|知识|课程|算法|请问|怎么做|如何实现|如何|怎么|是什么|为什么|区别)", text):
-                study_topics.append(text[:60])
+                study_topics.append(clip_text(text, 60))
             if re.search(r"(简短|直接|详细|慢一点)", text):
-                styles.append(text[:40])
+                styles.append(clip_text(text, 40))
             if re.search(r"(我叫|我是|今天|最近)", text):
-                personal_notes.append(text[:60])
+                personal_notes.append(clip_text(text, 60))
             self._extract_relationship_memory_from_text(text, relationship_memory)
 
         if projects:
@@ -303,8 +330,52 @@ class Summarizer:
             "relationship_memory": relationship_memory,
         }
 
+    def _build_transcript(
+        self,
+        history: list[dict[str, Any]],
+        char_budget: int,
+        role_prefix: str,
+    ) -> str:
+        messages = self._cap_messages(history, char_budget)
+        lines: list[str] = []
+        for item in messages:
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            if role_prefix == "user_only":
+                lines.append(f"user: {content}")
+            else:
+                lines.append(f"{item.get('role', 'user')}: {content}")
+        return clip_text("\n".join(lines), char_budget)
+
+    def _cap_messages(self, history: list[dict[str, Any]], char_budget: int) -> list[dict[str, Any]]:
+        kept: list[dict[str, Any]] = []
+        used = 0
+        per_message_limit = self._budget()["max_history_message_chars"]
+        for item in reversed(history):
+            content = clip_text(item.get("content", ""), per_message_limit)
+            if not content:
+                continue
+            role = str(item.get("role", "user"))
+            line = f"{role}: {content}"
+            if used + len(line) > char_budget:
+                remaining = char_budget - used
+                if remaining > len(role) + 10:
+                    clipped = clip_text(content, max(1, remaining - len(role) - 2))
+                    if clipped:
+                        kept.append({**item, "content": clipped})
+                break
+            kept.append({**item, "content": content})
+            used += len(line)
+        kept.reverse()
+        return kept
+
+    def _cap_user_messages(self, history: list[dict[str, Any]], char_budget: int) -> list[dict[str, Any]]:
+        users = self._user_history(history)
+        return self._cap_messages(users, char_budget)
+
     def _user_history(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """仅返回非空的用户消息."""
+        """仅返回非空的用户消息。"""
         return [
             item
             for item in history
@@ -312,7 +383,7 @@ class Summarizer:
         ]
 
     def _normalize_memory_updates(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """标准化记忆更新数据."""
+        """标准化记忆更新数据。"""
         source = payload.get("memory_updates", payload)
         if not isinstance(source, dict):
             source = {}
@@ -432,11 +503,11 @@ class Summarizer:
         stripped = text.strip()
         if not stripped:
             return
-        evidence = stripped[:80]
+        evidence = clip_text(stripped, 80)
         communication = relationship_memory["communication_style"]
         companionship = relationship_memory["companionship_style"]
 
-        if re.search(r"(不要|别|不用|不需要).{0,8}(确认|问我)|别总是问|不要总是问", stripped):
+        if re.search(r"((不要|别|不用|不需要).{0,8}(确认|问我)|别总是问|不要总是问)", stripped):
             communication["confirmation_preference"] = "avoid_unnecessary_confirmation"
             self._append_unique(communication["evidence"], evidence)
         if re.search(r"(直接给|直接.*方案|给我可执行|可执行方案|可执行的)", stripped):
@@ -446,7 +517,7 @@ class Summarizer:
             communication["detail_level"] = "high"
             self._append_unique(communication["evidence"], evidence)
         if re.search(r"(数据库|数据存储器|机械化记忆|机械.*记忆|不像陪伴|像工具)", stripped):
-            self._append_unique(communication["avoid_styles"], "机械化记忆表达")
+            self._append_unique(communication["avoid_styles"], "避免机械化记忆表达")
             self._append_unique(companionship["avoid_behaviors"], "像数据存储器一样说话")
             self._append_unique(communication["evidence"], evidence)
             self._append_unique(companionship["evidence"], evidence)
@@ -456,7 +527,7 @@ class Summarizer:
             items.append(value)
 
     def _string_list(self, value: Any) -> list[str]:
-        """将任意输入标准化为去重的非空字符串列表."""
+        """将任意输入标准化为去重的非空字符串列表。"""
         if not isinstance(value, list):
             return []
 
@@ -464,8 +535,8 @@ class Summarizer:
         for item in value:
             text = str(item).strip()
             if text and text not in normalized:
-                normalized.append(text)
+                normalized.append(clip_text(text, 120))
         return normalized
 
     def _string_value(self, value: Any) -> str:
-        return str(value).strip() if value not in (None, "") else ""
+        return clip_text(value, 120) if value not in (None, "") else ""
