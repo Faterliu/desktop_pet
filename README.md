@@ -138,3 +138,11 @@
 2. 提供 API key 脱敏、Bearer/api_key= 形态清理。
 3. 增加长文本截断、异常摘要、messages 统计和响应结构摘要。
 4. DeepSeekClient、Summarizer、Mem0MemoryService 的日志已改为记录结构信息和截断异常，不再输出完整 payload、prompt、memory、模型回复或 API response。
+
+[v1.2.5] - 20260609
+1. memory_vector_store.py 改为紧凑 JSON 保存：separators=(",", ":")，不再缩进。
+2. embedding 写入前按配置精度压缩，默认 6 位小数。
+3. 跳过短文本：配置缺失时内部默认少于 3 字符跳过；app_config.example.json 模板中设置。
+4. 增加最大条目限制，默认 300，超限时优先保留关系记忆、当前项目等更重要字段和较新的条目。
+5. embedding_signature 纳入精度配置，模型、维度、编码格式或精度变化会触发旧索引重建。
+

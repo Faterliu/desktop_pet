@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import hashlib
+import json
 import math
 import os
 from pathlib import Path
@@ -29,6 +30,10 @@ DEFAULT_VECTOR_INDEX = {
     "last_synced_at": "",
     "last_semantic_merge_at": "",
 }
+
+DEFAULT_VECTOR_PRECISION = 6
+DEFAULT_VECTOR_MIN_TEXT_LENGTH = 3
+DEFAULT_VECTOR_MAX_ITEMS = 300
 
 
 @dataclass(frozen=True)
@@ -146,8 +151,9 @@ class MemoryVectorStore:
 
         with MEMORY_IO_LOCK:
             index = self._load_index()
-            if index.get("embedding_signature") != client.signature():
-                index["embedding_signature"] = client.signature()
+            embedding_signature = self._embedding_signature(client)
+            if index.get("embedding_signature") != embedding_signature:
+                index["embedding_signature"] = embedding_signature
                 index["items"] = []
 
             text_items = self._iter_memory_texts(memory)
@@ -175,14 +181,14 @@ class MemoryVectorStore:
                     "path": item.path,
                     "text": item.text,
                     "order": item.order,
-                    "embedding": vector,
+                    "embedding": self._compress_embedding(vector),
                     "updated_at": now_iso(),
                 }
                 for item, vector in zip(missing_items, vectors)
             ]
             index = self._load_index()
-            if index.get("embedding_signature") != client.signature():
-                index["embedding_signature"] = client.signature()
+            if index.get("embedding_signature") != embedding_signature:
+                index["embedding_signature"] = embedding_signature
                 index["items"] = new_items
             else:
                 fresh_existing = {
@@ -198,8 +204,9 @@ class MemoryVectorStore:
                         ordered_items.append(stored)
                 ordered_items.extend(new_items)
                 index["items"] = ordered_items
+            index["items"] = self._limit_items(index["items"])
             index["last_synced_at"] = now_iso()
-            save_json(self.path, index)
+            self._save_index(index)
 
     def run_due_semantic_merge(self, memory_path: str | Path) -> dict[str, Any]:
         memory_config = self._memory_config()
@@ -365,11 +372,12 @@ class MemoryVectorStore:
         with MEMORY_IO_LOCK:
             index = self._load_index()
             index["last_semantic_merge_at"] = now_iso()
-            save_json(self.path, index)
+            self._save_index(index)
 
     def _iter_memory_texts(self, memory: dict[str, Any]) -> list[MemoryTextItem]:
         items: list[MemoryTextItem] = []
         seen: set[tuple[str, str]] = set()
+        min_text_length = self._memory_vector_min_text_length()
 
         def visit(node: Any, path: list[str]) -> None:
             if isinstance(node, dict):
@@ -383,7 +391,7 @@ class MemoryVectorStore:
                     if not isinstance(value, str):
                         continue
                     text = value.strip()
-                    if not text:
+                    if not text or len(text) < min_text_length:
                         continue
                     key = (list_path, text)
                     if key in seen:
@@ -419,6 +427,85 @@ class MemoryVectorStore:
         index.setdefault("last_synced_at", "")
         index.setdefault("last_semantic_merge_at", "")
         return index
+
+    def _save_index(self, index: dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.path.with_name(f"{self.path.name}.tmp")
+        try:
+            with tmp_path.open("w", encoding="utf-8") as file:
+                json.dump(index, file, ensure_ascii=False, separators=(",", ":"))
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(tmp_path, self.path)
+        except Exception:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError as exc:
+                logger.warning("Failed to remove temporary memory vector file %s: %s", tmp_path, exc)
+            raise
+
+    def _embedding_signature(self, client: MemoryEmbeddingClient) -> str:
+        return f"{client.signature()}|precision={self._memory_vector_precision()}"
+
+    def _compress_embedding(self, embedding: list[float]) -> list[float]:
+        precision = self._memory_vector_precision()
+        return [round(float(value), precision) for value in embedding]
+
+    def _limit_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        max_items = self._memory_vector_max_items()
+        valid_items = [item for item in items if isinstance(item, dict)]
+        if len(valid_items) <= max_items:
+            return valid_items
+
+        ranked = sorted(
+            valid_items,
+            key=lambda item: (
+                self._memory_item_importance(str(item.get("path", "") or "")),
+                self._timestamp_score(str(item.get("updated_at", "") or "")),
+                -int(item.get("order", 0) or 0),
+            ),
+            reverse=True,
+        )
+        keep_ids = {str(item.get("id")) for item in ranked[:max_items]}
+        return [item for item in valid_items if str(item.get("id")) in keep_ids]
+
+    def _memory_item_importance(self, path: str) -> int:
+        if path.startswith("relationship_memory."):
+            return 30
+        if path.startswith("work_study.current_projects"):
+            return 25
+        if path.startswith("work_study.current_learning_topics"):
+            return 20
+        if path.startswith("user_profile.important_personal_notes"):
+            return 20
+        if path.startswith("user_profile.preferences"):
+            return 15
+        return 10
+
+    def _timestamp_score(self, value: str) -> float:
+        try:
+            return datetime.fromisoformat(value).timestamp()
+        except ValueError:
+            return 0.0
+
+    def _memory_vector_precision(self) -> int:
+        return self._positive_int(
+            self._memory_config().get("memory_vector_precision", DEFAULT_VECTOR_PRECISION),
+            DEFAULT_VECTOR_PRECISION,
+        )
+
+    def _memory_vector_min_text_length(self) -> int:
+        return self._positive_int(
+            self._memory_config().get("memory_vector_min_text_length", DEFAULT_VECTOR_MIN_TEXT_LENGTH),
+            DEFAULT_VECTOR_MIN_TEXT_LENGTH,
+        )
+
+    def _memory_vector_max_items(self) -> int:
+        return self._positive_int(
+            self._memory_config().get("memory_vector_max_items", DEFAULT_VECTOR_MAX_ITEMS),
+            DEFAULT_VECTOR_MAX_ITEMS,
+        )
 
     def _memory_config(self) -> dict[str, Any]:
         return self.app_config.setdefault("memory", {})

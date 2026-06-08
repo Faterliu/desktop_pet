@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -36,6 +37,34 @@ class FakeRequests:
         return FakeEmbeddingResponse(len(kwargs["json"]["input"]))
 
 
+class PreciseEmbeddingResponse:
+    def __init__(self, count: int) -> None:
+        self.count = count
+
+    def raise_for_status(self) -> None:
+        return
+
+    def json(self) -> dict[str, object]:
+        return {
+            "data": [
+                {
+                    "index": index,
+                    "embedding": [
+                        0.123456789 + index,
+                        0.987654321 - index,
+                    ],
+                }
+                for index in range(self.count)
+            ]
+        }
+
+
+class PreciseFakeRequests:
+    @staticmethod
+    def post(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return PreciseEmbeddingResponse(len(kwargs["json"]["input"]))
+
+
 class MemoryVectorStoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / self._testMethodName
@@ -70,6 +99,145 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(len(index["items"]), 1)
         self.assertEqual(index["items"][0]["text"], "喜欢简洁直接的回答")
         self.assertEqual(index["items"][0]["embedding"], [1.0, 0.0])
+
+    def test_vector_index_is_compact_and_embeddings_are_rounded(self) -> None:
+        app_config = {
+            "memory": {
+                "enable_memory_vectors": True,
+                "dashscope_api_key": "test-key",
+                "dashscope_embedding_base_url": "https://dashscope.test/v1",
+                "dashscope_embedding_model": "text-embedding-v4",
+                "dashscope_embedding_dimensions": 2,
+                "memory_vector_precision": 6,
+                "memory_vector_min_text_length": 3,
+            }
+        }
+        store = MemoryVectorStore(self.vector_path, app_config)
+        memory = {
+            "user_profile": {
+                "preferences": ["first long memory text", "second long memory text"],
+            }
+        }
+
+        with patch("storage.memory_vector_store.requests", PreciseFakeRequests):
+            store.sync_memory(memory)
+
+        raw = self.vector_path.read_text(encoding="utf-8")
+        index = json.loads(raw)
+        pretty = json.dumps(index, ensure_ascii=False, indent=2)
+
+        self.assertLess(len(raw), int(len(pretty) * 0.8))
+        self.assertEqual(index["items"][0]["embedding"], [0.123457, 0.987654])
+        self.assertNotIn("\n  ", raw)
+
+    def test_missing_vector_config_uses_defaults(self) -> None:
+        app_config = {
+            "memory": {
+                "enable_memory_vectors": True,
+                "dashscope_api_key": "test-key",
+                "dashscope_embedding_base_url": "https://dashscope.test/v1",
+                "dashscope_embedding_model": "text-embedding-v4",
+                "dashscope_embedding_dimensions": 2,
+            }
+        }
+        store = MemoryVectorStore(self.vector_path, app_config)
+
+        with patch("storage.memory_vector_store.requests", PreciseFakeRequests):
+            store.sync_memory({"user_profile": {"preferences": ["abc"]}})
+
+        index = load_json(self.vector_path, {})
+        self.assertEqual(len(index["items"]), 1)
+        self.assertEqual(index["items"][0]["embedding"], [0.123457, 0.987654])
+        self.assertIn("precision=6", index["embedding_signature"])
+
+    def test_short_texts_are_skipped(self) -> None:
+        app_config = {
+            "memory": {
+                "enable_memory_vectors": True,
+                "dashscope_api_key": "test-key",
+                "dashscope_embedding_base_url": "https://dashscope.test/v1",
+                "dashscope_embedding_model": "text-embedding-v4",
+                "dashscope_embedding_dimensions": 2,
+                "memory_vector_min_text_length": 8,
+            }
+        }
+        store = MemoryVectorStore(self.vector_path, app_config)
+
+        with patch("storage.memory_vector_store.requests", FakeRequests):
+            store.sync_memory({"user_profile": {"preferences": ["short", "long enough memory"]}})
+
+        index = load_json(self.vector_path, {})
+        self.assertEqual([item["text"] for item in index["items"]], ["long enough memory"])
+
+    def test_old_signature_index_is_rebuilt_with_precision_signature(self) -> None:
+        save_json(
+            self.vector_path,
+            {
+                "schema_version": "1.0",
+                "embedding_signature": "old-signature",
+                "last_synced_at": "",
+                "last_semantic_merge_at": "",
+                "items": [
+                    self._vector_item(
+                        MemoryVectorStore(self.vector_path, {"memory": {}}),
+                        "user_profile.preferences",
+                        "stale memory text",
+                        0,
+                        [9.0, 9.0],
+                    )
+                ],
+            },
+        )
+        app_config = {
+            "memory": {
+                "enable_memory_vectors": True,
+                "dashscope_api_key": "test-key",
+                "dashscope_embedding_base_url": "https://dashscope.test/v1",
+                "dashscope_embedding_model": "text-embedding-v4",
+                "dashscope_embedding_dimensions": 2,
+                "memory_vector_precision": 4,
+            }
+        }
+        store = MemoryVectorStore(self.vector_path, app_config)
+
+        with patch("storage.memory_vector_store.requests", PreciseFakeRequests):
+            store.sync_memory({"user_profile": {"preferences": ["fresh memory text"]}})
+
+        index = load_json(self.vector_path, {})
+        self.assertEqual([item["text"] for item in index["items"]], ["fresh memory text"])
+        self.assertEqual(index["items"][0]["embedding"], [0.1235, 0.9877])
+        self.assertIn("precision=4", index["embedding_signature"])
+
+    def test_vector_index_keeps_max_items_by_recent_or_important_memory(self) -> None:
+        app_config = {
+            "memory": {
+                "enable_memory_vectors": True,
+                "dashscope_api_key": "test-key",
+                "dashscope_embedding_base_url": "https://dashscope.test/v1",
+                "dashscope_embedding_model": "text-embedding-v4",
+                "dashscope_embedding_dimensions": 2,
+                "memory_vector_max_items": 2,
+                "memory_vector_min_text_length": 3,
+            }
+        }
+        store = MemoryVectorStore(self.vector_path, app_config)
+        memory = {
+            "user_profile": {
+                "preferences": ["older preference memory"],
+            },
+            "work_study": {
+                "current_projects": ["important project memory"],
+                "useful_context": ["ordinary context memory"],
+            },
+        }
+
+        with patch("storage.memory_vector_store.requests", FakeRequests):
+            store.sync_memory(memory)
+
+        index = load_json(self.vector_path, {})
+        texts = {item["text"] for item in index["items"]}
+        self.assertEqual(len(texts), 2)
+        self.assertIn("important project memory", texts)
 
     def test_semantic_merge_removes_same_field_high_similarity_duplicate(self) -> None:
         memory = {
