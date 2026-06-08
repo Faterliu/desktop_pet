@@ -166,7 +166,7 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/storage/*.py`
 
-- `json_store.py`：JSON 读写基础设施，缺文件时自动创建父目录和默认文件，解析失败时记录日志并尽量返回默认值。
+- `json_store.py`：JSON 读写基础设施，缺文件时自动创建父目录和默认文件；保存时先写同目录 `.tmp`，`flush` + `os.fsync` 后用 `os.replace` 原子替换目标文件，并在目标文件非空时保留 `.bak`；读取遇到损坏 JSON 时会先把主文件重命名为 `.corrupt.<timestamp>`，再优先读取 `.bak`，备份也不可用时返回默认值深拷贝。`cleanup_tmp_json_files()` 用于清理中断写入留下的 `.tmp` 文件。
 - `chat_store.py`：保存和读取正式/非正式聊天记录（`chat_history_formal.json` / `chat_history_informal.json`），记录 `last_cleaned_at` 时间戳供手动清空时标记。
 - `memory_store.py`：保存和合并 `data/memory.json`。读取、保存和合并时会通过 `normalize_memory_schema()` 兼容旧结构并补齐 v2 默认字段：`relationship_memory.communication_style`、`relationship_memory.companionship_style`、`relationship_memory.interaction_patterns` 和 `memory_meta.schema_version=2`；补齐时保留未知旧字段，不会清空用户已有记忆。保存/合并仍写入 UTF-8 JSON，并同步更新顶层 `last_updated` 与 `memory_meta.last_updated`；合并关系记忆时会为被更新的关系子区块写入 `last_updated` 或 `last_observed_at`。
 - `memory_vector_store.py`: maintains `data/memory_vectors.json` for `memory.json` text leaves. It uses the existing DashScope OpenAI-compatible embedding config, skips cleanly when no key or `requests` is unavailable, and supports same-field semantic duplicate merging on a two-month cadence.
@@ -401,7 +401,7 @@ wscript.exe .\start_main.vbs
 
 `json_store.py`
 
-- 影响所有配置和运行时数据。修改默认创建、解析失败或保存行为时，要考虑用户旧数据和权限问题。
+- 影响所有配置和运行时数据。修改默认创建、解析失败、备份恢复、临时文件清理或保存行为时，要考虑用户旧数据、Windows 文件句柄、权限和崩溃中断场景。
 
 `app_config.example.json`
 
@@ -603,3 +603,4 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-30: Added local semantic vector indexing for `memory.json`. `MemoryStore` now best-effort syncs `data/memory_vectors.json` after saves/merges, using the existing DashScope embedding config. `DesktopPetWindow` starts a `MemorySemanticMergeWorker` after the window is shown; it runs in a separate `QThread`, checks the two-month cadence, and merges only same-field high-similarity duplicates so UI display and normal Q&A are not blocked.
 - 2026-05-30：增强第一轮记忆系统。`MemoryStore` 新增 `normalize_memory_schema()`，兼容旧 `memory.json` 并补齐 `relationship_memory` 与 `memory_meta.schema_version=2`；`Summarizer` 的模型/本地记忆提取支持关系记忆，只基于用户发言记录沟通偏好、相处方式和近期互动模式；`PromptBuilder` 将本地事实记忆、相处方式记忆和 Mem0 相关语义记忆拆分为独立 Prompt 区块，并加入表达约束，避免机械复述记忆或暴露 memory.json/Mem0 等实现细节。新增 `test_memory_schema.py` 和 `test_prompt_builder_memory_sections.py`，扩展 `test_summarizer_memory_updates.py` 覆盖关系记忆提取与不使用助手回答推断用户偏好。
 - 2026-05-30：增强第二轮场景化主动问候。新增 `character/proactive_context.py` 负责从 `memory.json` 构造精简场景上下文、本地模板回退和 API prompt；`BehaviorController._maybe_idle_prompt()` 在基础守卫后优先处理连续未回应的低打扰问候，其次在冷却结束且记忆足够时触发 `memory_context_greeting`，API 启用且额度可用时发出 `scenario_greeting_requested`，否则使用本地模板；`DesktopPetWindow` 新增 `ScenarioGreetingWorker`，在独立 `QThread` 中生成短问候，失败或输出机械记忆表达时静默回退本地模板。`app_config.example.json` 新增 `behavior.scenario_greeting_*` 配置，`local_lines.json` 新增 `scenario_greeting_templates` 和 `low_interrupt`，并新增对应回归测试。
+- 2026-06-08：增强 `storage/json_store.py` 的 JSON 存储可靠性。`save_json()` 改为同目录 `.tmp` 原子写入，写入前为非空目标文件保留 `.bak`，完成 `flush` + `os.fsync` 后使用 `os.replace` 替换；`load_json()` 遇到主文件损坏时将其隔离为 `.corrupt.<timestamp>` 并优先从 `.bak` 恢复，备份也损坏时才回退默认值深拷贝；新增 `cleanup_tmp_json_files()` 清理遗留临时文件。新增 `test_json_store.py` 覆盖缺文件创建、正常读写、备份恢复、双损坏回退和失败写入不留下半截 JSON。

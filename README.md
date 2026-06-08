@@ -127,3 +127,8 @@
 1. 将部分后端处理功能与主线程隔离。
 2. 为memory.json生成对应语义向量。
 3. 增加语义级重复记忆合并的功能。
+
+[v1.2.3] - 20260608
+1. 新增 .tmp 清理，.bak 备份
+2. 增加损坏主文件 .corrupt.<timestamp> 隔离、.bak 恢复
+3. 增加flush + os.fsync + os.replace 原子保存

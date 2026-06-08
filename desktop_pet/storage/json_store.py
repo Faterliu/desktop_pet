@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,12 +15,57 @@ logger = get_logger(__name__)
 
 
 def _normalize_path(path: str | Path) -> Path:
-    """把字符串或 Path 统一转换为 Path 对象。"""
     return Path(path)
 
 
+def _backup_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.bak")
+
+
+def _tmp_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.tmp")
+
+
+def _corrupt_path(path: Path) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    candidate = path.with_name(f"{path.name}.corrupt.{timestamp}")
+    counter = 1
+    while candidate.exists():
+        candidate = path.with_name(f"{path.name}.corrupt.{timestamp}.{counter}")
+        counter += 1
+    return candidate
+
+
+def _read_json_file(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def _move_corrupt_file(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+
+    corrupt = _corrupt_path(path)
+    os.replace(path, corrupt)
+    return corrupt
+
+
+def cleanup_tmp_json_files(directory: Path) -> None:
+    """Remove leftover temp files from interrupted JSON writes."""
+    target_dir = _normalize_path(directory)
+    if not target_dir.exists() or not target_dir.is_dir():
+        return
+
+    for tmp_file in target_dir.glob("*.tmp"):
+        if not tmp_file.is_file():
+            continue
+        try:
+            tmp_file.unlink()
+        except OSError as exc:
+            logger.warning("Failed to remove temporary JSON file %s: %s", tmp_file, exc)
+
+
 def ensure_json_file(path: str | Path, default: Any) -> Path:
-    """确保 JSON 文件存在；若不存在则写入默认内容。"""
     target = _normalize_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
@@ -26,18 +74,26 @@ def ensure_json_file(path: str | Path, default: Any) -> Path:
 
 
 def load_json(path: str | Path, default: Any = None) -> Any:
-    """读取 JSON 文件；文件缺失时自动创建，损坏时回退到默认值。"""
     target = _normalize_path(path)
     ensure_json_file(target, default if default is not None else {})
+
     try:
-        with target.open("r", encoding="utf-8") as file:
-            return json.load(file)
+        return _read_json_file(target)
     except json.JSONDecodeError as exc:
         logger.error("JSON parse failed for %s: %s", target, exc)
-        if default is not None:
-            logger.warning("Falling back to default content for %s", target)
-            return copy.deepcopy(default)
-        raise ValueError(f"Invalid JSON content in {target}: {exc}") from exc
+        corrupt = _move_corrupt_file(target)
+        if corrupt is not None:
+            logger.warning("Moved corrupt JSON file from %s to %s", target, corrupt)
+
+        backup = _backup_path(target)
+        if backup.exists():
+            try:
+                return _read_json_file(backup)
+            except json.JSONDecodeError as backup_exc:
+                logger.error("JSON backup parse failed for %s: %s", backup, backup_exc)
+
+        logger.warning("Falling back to default content for %s", target)
+        return copy.deepcopy(default)
 
 
 def load_json_prefer_primary(
@@ -45,7 +101,6 @@ def load_json_prefer_primary(
     fallback_path: str | Path,
     default: Any = None,
 ) -> Any:
-    """优先读取主文件；主文件缺失时回退到示例文件。"""
     primary = _normalize_path(primary_path)
     fallback = _normalize_path(fallback_path)
 
@@ -57,9 +112,26 @@ def load_json_prefer_primary(
 
 
 def save_json(path: str | Path, data: Any) -> Path:
-    """把数据保存为 UTF-8 编码的 JSON 文件。"""
     target = _normalize_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with target.open("w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=2)
+    cleanup_tmp_json_files(target.parent)
+
+    if target.exists() and target.stat().st_size > 0:
+        shutil.copy2(target, _backup_path(target))
+
+    tmp = _tmp_path(target)
+    try:
+        with tmp.open("w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(tmp, target)
+    except Exception:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError as exc:
+            logger.warning("Failed to remove temporary JSON file %s: %s", tmp, exc)
+        raise
+
     return target
