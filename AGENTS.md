@@ -240,7 +240,11 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/utils/logger.py`
 
-- 配置全局日志，写入控制台和 `desktop_pet/data/app.log`。
+- 配置全局日志，写入控制台和 `desktop_pet/data/app.log`。文件日志使用 `RotatingFileHandler`，默认单个 `app.log` 最多约 1MB，并保留 5 份备份，避免长期运行时日志无限增长。
+
+`desktop_pet/utils/log_sanitizer.py`
+
+- 日志隐私辅助工具。提供 API key 掩码、常见 `Bearer` / `api_key=` 形态脱敏、长文本截断、异常摘要、请求 messages 结构统计和响应结构摘要；AI 模块日志应记录 message_count、chars_count、status_code、响应 keys 等结构信息，不应记录完整 prompt、完整用户输入、完整模型回复、完整 memory 或完整 API response。
 
 `xiaohu_codex_package/xiaohu_codex/`
 
@@ -604,3 +608,4 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-05-30：增强第一轮记忆系统。`MemoryStore` 新增 `normalize_memory_schema()`，兼容旧 `memory.json` 并补齐 `relationship_memory` 与 `memory_meta.schema_version=2`；`Summarizer` 的模型/本地记忆提取支持关系记忆，只基于用户发言记录沟通偏好、相处方式和近期互动模式；`PromptBuilder` 将本地事实记忆、相处方式记忆和 Mem0 相关语义记忆拆分为独立 Prompt 区块，并加入表达约束，避免机械复述记忆或暴露 memory.json/Mem0 等实现细节。新增 `test_memory_schema.py` 和 `test_prompt_builder_memory_sections.py`，扩展 `test_summarizer_memory_updates.py` 覆盖关系记忆提取与不使用助手回答推断用户偏好。
 - 2026-05-30：增强第二轮场景化主动问候。新增 `character/proactive_context.py` 负责从 `memory.json` 构造精简场景上下文、本地模板回退和 API prompt；`BehaviorController._maybe_idle_prompt()` 在基础守卫后优先处理连续未回应的低打扰问候，其次在冷却结束且记忆足够时触发 `memory_context_greeting`，API 启用且额度可用时发出 `scenario_greeting_requested`，否则使用本地模板；`DesktopPetWindow` 新增 `ScenarioGreetingWorker`，在独立 `QThread` 中生成短问候，失败或输出机械记忆表达时静默回退本地模板。`app_config.example.json` 新增 `behavior.scenario_greeting_*` 配置，`local_lines.json` 新增 `scenario_greeting_templates` 和 `low_interrupt`，并新增对应回归测试。
 - 2026-06-08：增强 `storage/json_store.py` 的 JSON 存储可靠性。`save_json()` 改为同目录 `.tmp` 原子写入，写入前为非空目标文件保留 `.bak`，完成 `flush` + `os.fsync` 后使用 `os.replace` 替换；`load_json()` 遇到主文件损坏时将其隔离为 `.corrupt.<timestamp>` 并优先从 `.bak` 恢复，备份也损坏时才回退默认值深拷贝；新增 `cleanup_tmp_json_files()` 清理遗留临时文件。新增 `test_json_store.py` 覆盖缺文件创建、正常读写、备份恢复、双损坏回退和失败写入不留下半截 JSON。
+- 2026-06-08：优化日志系统长期运行稳定性和隐私安全。`utils/logger.py` 将 `app.log` 文件输出改为 `RotatingFileHandler`，限制单文件大小并保留有限备份；新增 `utils/log_sanitizer.py`，提供 API key 脱敏、常见密钥形态清理、长文本截断、异常摘要、messages 统计和响应结构摘要；`DeepSeekClient`、`Summarizer`、`Mem0MemoryService` 的错误日志改为记录状态码、消息数量、字符数、响应 keys 和截断异常，不再输出完整 payload、prompt、memory、模型回复或 API 响应。新增 `test_logging_privacy.py` 覆盖日志创建、轮转配置、API key 脱敏和超长文本截断。

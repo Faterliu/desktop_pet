@@ -132,3 +132,9 @@
 1. 新增 .tmp 清理，.bak 备份
 2. 增加损坏主文件 .corrupt.<timestamp> 隔离、.bak 恢复
 3. 增加flush + os.fsync + os.replace 原子保存
+
+[v1.2.4] - 20260608
+1. 新增 log_sanitizer.py (line 11)。
+2. 提供 API key 脱敏、Bearer/api_key= 形态清理。
+3. 增加长文本截断、异常摘要、messages 统计和响应结构摘要。
+4. DeepSeekClient、Summarizer、Mem0MemoryService 的日志已改为记录结构信息和截断异常，不再输出完整 payload、prompt、memory、模型回复或 API response。

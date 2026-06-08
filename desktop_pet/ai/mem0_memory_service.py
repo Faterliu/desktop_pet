@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from utils.log_sanitizer import safe_exception
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +40,14 @@ class Mem0MemoryService:
         try:
             from mem0 import Memory
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Mem0 is enabled but mem0ai import failed: %s", exc)
+            logger.warning("Mem0 is enabled but mem0ai import failed: %s", safe_exception(exc))
             self.enabled = False
             return
 
         try:
             self._memory = Memory.from_config(self._build_mem0_config(app_config))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to initialize Mem0 memory: %s", exc)
+            logger.warning("Failed to initialize Mem0 memory: %s", safe_exception(exc))
             self.enabled = False
             self._memory = None
 
@@ -62,7 +64,7 @@ class Mem0MemoryService:
             if callable(close):
                 close()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to close Mem0 memory: %s", exc)
+            logger.warning("Failed to close Mem0 memory: %s", safe_exception(exc))
         finally:
             self._memory = None
             self.enabled = False
@@ -189,7 +191,7 @@ class Mem0MemoryService:
                 metadata=metadata or {},
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to add Mem0 dialogue memory: %s", exc)
+            logger.warning("Failed to add Mem0 dialogue memory: %s", safe_exception(exc))
 
     def add_memory_text(
         self,
@@ -216,7 +218,7 @@ class Mem0MemoryService:
                 metadata=metadata or {},
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to add Mem0 text memory: %s", exc)
+            logger.warning("Failed to add Mem0 text memory: %s", safe_exception(exc))
 
     def search(
         self,
@@ -244,10 +246,10 @@ class Mem0MemoryService:
             try:
                 results = self._memory.search(query=query, user_id=actual_user_id, limit=limit)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed to search Mem0 memory: %s", exc)
+                logger.warning("Failed to search Mem0 memory: %s", safe_exception(exc))
                 return []
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to search Mem0 memory: %s", exc)
+            logger.warning("Failed to search Mem0 memory: %s", safe_exception(exc))
             return []
 
         return self._normalize_search_results(results)

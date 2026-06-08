@@ -9,6 +9,7 @@ from ai.deepseek_client import DeepSeekClient, DeepSeekError
 from storage.chat_store import ChatStore
 from storage.json_store import load_json, save_json
 from storage.memory_store import MemoryStore
+from utils.log_sanitizer import safe_exception
 from utils.logger import get_logger
 from utils.time_utils import now_iso
 
@@ -60,7 +61,7 @@ class Summarizer:
         try:
             payload = self._summarize_history(history)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Summary generation failed: %s", exc)
+            logger.error("Summary generation failed: %s", safe_exception(exc))
             return
 
         extracted_memory = payload.pop("memory_updates", {})
@@ -89,7 +90,7 @@ class Summarizer:
                     },
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed to shadow-write memory update to Mem0: %s", exc)
+                logger.warning("Failed to shadow-write memory update to Mem0: %s", safe_exception(exc))
 
     def _iter_memory_texts(self, value: Any) -> list[str]:
         """Flatten the structured memory update payload into unique text items."""
@@ -173,7 +174,7 @@ class Summarizer:
                     "highlights": self._string_list(parsed.get("highlights", [])),
                 }
         except (DeepSeekError, json.JSONDecodeError) as exc:
-            logger.warning("Falling back to local summary after model failure: %s", exc)
+            logger.warning("Falling back to local summary after model failure: %s", safe_exception(exc))
         return None
 
     def _model_memory_updates(self, history: list[dict[str, Any]]) -> dict[str, Any]:
@@ -190,7 +191,7 @@ class Summarizer:
                 if self._has_memory_update_text(normalized):
                     return normalized
         except (DeepSeekError, json.JSONDecodeError) as exc:
-            logger.warning("Falling back to local memory extraction after model failure: %s", exc)
+            logger.warning("Falling back to local memory extraction after model failure: %s", safe_exception(exc))
 
         return self._extract_memory(user_history[-12:])
 

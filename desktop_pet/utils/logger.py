@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
 _CONFIGURED = False
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LOG_MAX_BYTES = 1_000_000
+LOG_BACKUP_COUNT = 5
 
 
 def configure_logging() -> None:
@@ -13,8 +17,7 @@ def configure_logging() -> None:
     if _CONFIGURED:
         return
 
-    project_root = Path(__file__).resolve().parents[1]
-    log_dir = project_root / "data"
+    log_dir = PROJECT_ROOT / "data"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "app.log"
 
@@ -29,7 +32,12 @@ def configure_logging() -> None:
     stream_handler.setFormatter(formatter)
     root_logger.addHandler(stream_handler)
 
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        log_path,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
