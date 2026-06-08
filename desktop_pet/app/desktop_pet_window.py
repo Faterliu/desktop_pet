@@ -25,6 +25,7 @@ from ai.mem0_memory_service import Mem0MemoryService
 from ai.prompt_builder import PromptBuilder
 from ai.summarizer import Summarizer
 from animation.sprite_player import SpritePlayer
+from app.background_task_registry import BackgroundTaskRegistry
 from app.chat_input import ChatInput
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
@@ -374,12 +375,15 @@ class DesktopPetWindow(QWidget):
         self.mem0_search_worker: QObject | None = None
         self.memory_maintenance_thread: QThread | None = None
         self.memory_maintenance_worker: QObject | None = None
+        self.background_tasks = BackgroundTaskRegistry(default_wait_timeout_ms=1000)
         self.move_animation: QPropertyAnimation | None = None
         self.behavior_started = False
         self.memory_maintenance_started = False
         self.exit_animation_in_progress = False
         self.allow_immediate_close = False
         self._close_after_workers_finished = False
+        self._is_closing = False
+        self._summaries_running: set[str] = set()
         self._suppress_click = False
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
@@ -583,15 +587,17 @@ class DesktopPetWindow(QWidget):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """关闭窗口前保存位置并安全回收后台线程。"""
+        self._is_closing = True
         if not self.allow_immediate_close:
             event.ignore()
             self.request_exit()
             return
         if self._background_workers_running():
-            event.ignore()
             self._close_after_workers_finished = True
-            self._request_background_workers_quit()
-            return
+            stuck_tasks = self._stop_background_workers()
+            if stuck_tasks:
+                logger.warning("Forcing close with unfinished background tasks: %s", stuck_tasks)
+            self._close_after_workers_finished = False
         self._destroy_formal_answer_panels()
         self._save_window_position()
         self.bubble.hide()
@@ -877,7 +883,7 @@ class DesktopPetWindow(QWidget):
         chat_store: ChatStore,
     ) -> None:
         """Start backend-only chat-history cleanup in a worker thread."""
-        if self.clear_history_thread and self.clear_history_thread.isRunning():
+        if self.background_tasks.is_registered("clear_history"):
             return
 
         self.clear_history_thread = QThread(self)
@@ -894,16 +900,28 @@ class DesktopPetWindow(QWidget):
         self.clear_history_worker.finished.connect(self.clear_history_thread.quit)
         self.clear_history_worker.failed.connect(self.clear_history_thread.quit)
         self.clear_history_thread.finished.connect(self._cleanup_clear_history_thread)
+        if not self._register_background_task(
+            "clear_history",
+            self.clear_history_thread,
+            self.clear_history_worker,
+            self._clear_history_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.clear_history_thread,
+                self.clear_history_worker,
+                self._clear_history_task_refs,
+            )
+            return
         self.clear_history_thread.start()
 
     def _on_clear_history_success(self, mode: str) -> None:
-        if self._close_after_workers_finished:
+        if self._closing_or_closed():
             return
         label = "这些知识真有趣呢" if mode == "formal" else "我会好好保存我们聊天的回忆哦"
         self._display_message(f"{label}", 3500, "system")
 
     def _on_clear_history_failure(self, mode: str, error_message: str) -> None:
-        if self._close_after_workers_finished:
+        if self._closing_or_closed():
             return
         label = "正式问答记录" if mode == "formal" else "非正式聊天记录"
         self._display_message(f"{label}清理失败：{error_message}", 5000, "assistant")
@@ -1017,7 +1035,7 @@ class DesktopPetWindow(QWidget):
 
     def _start_chat_worker(self, message: str) -> None:
         """创建后台线程执行模型请求，避免阻塞界面。"""
-        if self.chat_thread and self.chat_thread.isRunning():
+        if self.background_tasks.is_registered("chat"):
             return
 
         self.chat_thread = QThread(self)
@@ -1038,11 +1056,23 @@ class DesktopPetWindow(QWidget):
         self.chat_worker.finished.connect(self.chat_thread.quit)
         self.chat_worker.failed.connect(self.chat_thread.quit)
         self.chat_thread.finished.connect(self._cleanup_chat_thread)
+        if not self._register_background_task(
+            "chat",
+            self.chat_thread,
+            self.chat_worker,
+            self._clear_chat_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.chat_thread,
+                self.chat_worker,
+                self._clear_chat_task_refs,
+            )
+            return
         self.chat_thread.start()
 
     def _start_proactive_api_worker(self) -> None:
         """创建后台线程执行 API 主动说话测试。"""
-        if self.chat_thread and self.chat_thread.isRunning():
+        if self.background_tasks.is_registered("chat"):
             return
 
         self.chat_thread = QThread(self)
@@ -1057,27 +1087,83 @@ class DesktopPetWindow(QWidget):
         self.chat_worker.finished.connect(self.chat_thread.quit)
         self.chat_worker.failed.connect(self.chat_thread.quit)
         self.chat_thread.finished.connect(self._cleanup_chat_thread)
+        if not self._register_background_task(
+            "chat",
+            self.chat_thread,
+            self.chat_worker,
+            self._clear_chat_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.chat_thread,
+                self.chat_worker,
+                self._clear_chat_task_refs,
+            )
+            return
         self.chat_thread.start()
 
     def _cleanup_chat_thread(self) -> None:
         """在线程结束后清理工作对象和线程对象。"""
-        if self.chat_worker:
-            self.chat_worker.deleteLater()
-            self.chat_worker = None
-        if self.chat_thread:
-            self.chat_thread.deleteLater()
-            self.chat_thread = None
+        self.background_tasks.remove("chat", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _cleanup_clear_history_thread(self) -> None:
         """清理聊天记录后台线程。"""
-        if self.clear_history_worker:
-            self.clear_history_worker.deleteLater()
-            self.clear_history_worker = None
-        if self.clear_history_thread:
-            self.clear_history_thread.deleteLater()
-            self.clear_history_thread = None
+        self.background_tasks.remove("clear_history", delete_later=True)
         self._maybe_close_after_workers_finished()
+
+    def _clear_chat_task_refs(self) -> None:
+        self.chat_worker = None
+        self.chat_thread = None
+
+    def _clear_history_task_refs(self) -> None:
+        self.clear_history_worker = None
+        self.clear_history_thread = None
+
+    def _clear_mem0_init_task_refs(self) -> None:
+        self.mem0_init_worker = None
+        self.mem0_init_thread = None
+
+    def _clear_mem0_search_task_refs(self) -> None:
+        self.mem0_search_worker = None
+        self.mem0_search_thread = None
+
+    def _clear_memory_maintenance_task_refs(self) -> None:
+        self.memory_maintenance_worker = None
+        self.memory_maintenance_thread = None
+
+    def _register_background_task(
+        self,
+        name: str,
+        thread: QThread,
+        worker: QObject,
+        cleanup,
+        wait_timeout_ms: int | None = None,
+    ) -> bool:
+        return self.background_tasks.register(
+            name,
+            thread,
+            worker,
+            cleanup=cleanup,
+            wait_timeout_ms=wait_timeout_ms,
+        )
+
+    def _discard_unregistered_task(self, thread: QThread, worker: QObject, cleanup) -> None:
+        try:
+            worker.deleteLater()
+            thread.deleteLater()
+        except RuntimeError:
+            pass
+        cleanup()
+
+    def _mem0_init_wait_timeout_ms(self) -> int:
+        try:
+            timeout_seconds = float(self._memory_config().get("mem0_init_timeout_seconds", 10))
+        except (TypeError, ValueError):
+            timeout_seconds = 10.0
+        return max(0, int(timeout_seconds * 1000))
+
+    def _closing_or_closed(self) -> bool:
+        return self._is_closing or self._close_after_workers_finished
 
     def _set_mem0_memory_service(self, service: Mem0MemoryService | None) -> None:
         """Replace the active Mem0 service and update background users."""
@@ -1087,7 +1173,7 @@ class DesktopPetWindow(QWidget):
 
     def _start_mem0_initialization(self, close_existing: bool) -> None:
         """Build or rebuild Mem0 on a worker thread."""
-        if self.mem0_init_thread and self.mem0_init_thread.isRunning():
+        if self.background_tasks.is_registered("mem0_init"):
             return
 
         existing_service = self.mem0_memory_service if close_existing else None
@@ -1107,28 +1193,42 @@ class DesktopPetWindow(QWidget):
         self.mem0_init_worker.finished.connect(self.mem0_init_thread.quit)
         self.mem0_init_worker.failed.connect(self.mem0_init_thread.quit)
         self.mem0_init_thread.finished.connect(self._cleanup_mem0_init_thread)
+        if not self._register_background_task(
+            "mem0_init",
+            self.mem0_init_thread,
+            self.mem0_init_worker,
+            self._clear_mem0_init_task_refs,
+            wait_timeout_ms=self._mem0_init_wait_timeout_ms(),
+        ):
+            self._discard_unregistered_task(
+                self.mem0_init_thread,
+                self.mem0_init_worker,
+                self._clear_mem0_init_task_refs,
+            )
+            return
         self.mem0_init_thread.start()
 
     def _on_mem0_initialization_success(self, service: object) -> None:
+        if self._closing_or_closed():
+            if isinstance(service, Mem0MemoryService):
+                service.close()
+            return
         if isinstance(service, Mem0MemoryService):
             self._set_mem0_memory_service(service)
 
     def _on_mem0_initialization_failure(self, error_message: str) -> None:
         logger.warning("Mem0 initialization failed: %s", error_message)
+        if self._closing_or_closed():
+            return
         self._set_mem0_memory_service(None)
 
     def _cleanup_mem0_init_thread(self) -> None:
-        if self.mem0_init_worker:
-            self.mem0_init_worker.deleteLater()
-            self.mem0_init_worker = None
-        if self.mem0_init_thread:
-            self.mem0_init_thread.deleteLater()
-            self.mem0_init_thread = None
+        self.background_tasks.remove("mem0_init", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _start_mem0_search_worker(self) -> None:
         """Search Mem0 for knowledge-greeting context on a worker thread."""
-        if self.mem0_search_thread and self.mem0_search_thread.isRunning():
+        if self.background_tasks.is_registered("mem0_search"):
             return
         if self.mem0_memory_service is None or not self.mem0_memory_service.is_available():
             return
@@ -1147,9 +1247,23 @@ class DesktopPetWindow(QWidget):
         self.mem0_search_worker.finished.connect(self.mem0_search_thread.quit)
         self.mem0_search_worker.failed.connect(self.mem0_search_thread.quit)
         self.mem0_search_thread.finished.connect(self._cleanup_mem0_search_thread)
+        if not self._register_background_task(
+            "mem0_search",
+            self.mem0_search_thread,
+            self.mem0_search_worker,
+            self._clear_mem0_search_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.mem0_search_thread,
+                self.mem0_search_worker,
+                self._clear_mem0_search_task_refs,
+            )
+            return
         self.mem0_search_thread.start()
 
     def _on_mem0_search_success(self, context: str) -> None:
+        if self._closing_or_closed():
+            return
         self._pending_knowledge_mem0_context = context
         if not context or self._chat_in_progress() or self.chat_input.isVisible():
             return
@@ -1158,20 +1272,17 @@ class DesktopPetWindow(QWidget):
 
     def _on_mem0_search_failure(self, error_message: str) -> None:
         logger.warning("Mem0 knowledge search failed: %s", error_message)
+        if self._closing_or_closed():
+            return
         self._pending_knowledge_mem0_context = ""
 
     def _cleanup_mem0_search_thread(self) -> None:
-        if self.mem0_search_worker:
-            self.mem0_search_worker.deleteLater()
-            self.mem0_search_worker = None
-        if self.mem0_search_thread:
-            self.mem0_search_thread.deleteLater()
-            self.mem0_search_thread = None
+        self.background_tasks.remove("mem0_search", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _start_memory_maintenance_worker(self) -> None:
         """Start the due semantic memory merge after the window is visible."""
-        if self.memory_maintenance_thread and self.memory_maintenance_thread.isRunning():
+        if self.background_tasks.is_registered("memory_maintenance"):
             return
         self.memory_vector_store.update_config(self.app_config)
         if not self._memory_config().get("enable_semantic_memory_merge", True):
@@ -1189,26 +1300,39 @@ class DesktopPetWindow(QWidget):
         self.memory_maintenance_worker.finished.connect(self.memory_maintenance_thread.quit)
         self.memory_maintenance_worker.failed.connect(self.memory_maintenance_thread.quit)
         self.memory_maintenance_thread.finished.connect(self._cleanup_memory_maintenance_thread)
+        if not self._register_background_task(
+            "memory_maintenance",
+            self.memory_maintenance_thread,
+            self.memory_maintenance_worker,
+            self._clear_memory_maintenance_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.memory_maintenance_thread,
+                self.memory_maintenance_worker,
+                self._clear_memory_maintenance_task_refs,
+            )
+            return
         self.memory_maintenance_thread.start()
 
     def _on_memory_maintenance_success(self, result: object) -> None:
+        if self._closing_or_closed():
+            return
         if isinstance(result, dict) and int(result.get("merged_count", 0) or 0) > 0:
             logger.info("Semantic memory merge completed: %s", result)
 
     def _on_memory_maintenance_failure(self, error_message: str) -> None:
+        if self._closing_or_closed():
+            return
         logger.warning("Semantic memory maintenance failed: %s", error_message)
 
     def _cleanup_memory_maintenance_thread(self) -> None:
-        if self.memory_maintenance_worker:
-            self.memory_maintenance_worker.deleteLater()
-            self.memory_maintenance_worker = None
-        if self.memory_maintenance_thread:
-            self.memory_maintenance_thread.deleteLater()
-            self.memory_maintenance_thread = None
+        self.background_tasks.remove("memory_maintenance", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _on_chat_success(self, reply: str) -> None:
         """处理模型成功返回后的界面更新与消息落盘。"""
+        if self._closing_or_closed():
+            return
         cleaned_reply = reply.strip() or "我在这里哦。"
         store = self.chat_store_formal if self._pending_was_formal else self.chat_store_informal
         store.append_message("assistant", cleaned_reply)
@@ -1221,22 +1345,28 @@ class DesktopPetWindow(QWidget):
         self.pending_formal_question = ""
         was_formal = self._pending_was_formal
         self._pending_was_formal = False
-        threading.Thread(target=self._maybe_summarize, args=(was_formal,), daemon=True).start()
+        self._start_summary_task(was_formal)
 
     def _on_chat_failure(self, error_message: str) -> None:
         """处理模型请求失败后的动作和气泡提示。"""
+        if self._closing_or_closed():
+            return
         self.sprite_player.set_action("failed")
         self._display_message(error_message, 12000, "assistant")
         self.pending_formal_question = ""
 
     def _on_proactive_api_success(self, reply: str) -> None:
         """处理 API 主动说话测试成功后的界面更新。"""
+        if self._closing_or_closed():
+            return
         cleaned_reply = reply.strip() or "我在这里哦。"
         self.sprite_player.set_action("idle")
         self._display_message(cleaned_reply, 12000, "assistant")
 
     def _on_proactive_api_failure(self, error_message: str) -> None:
         """处理 API 主动说话测试失败后的界面更新。"""
+        if self._closing_or_closed():
+            return
         self.sprite_player.set_action("failed")
         self._display_message(error_message, 12000, "assistant")
 
@@ -1250,6 +1380,20 @@ class DesktopPetWindow(QWidget):
                 self.summarizer_informal.maybe_summarize(trigger_rounds)
         except Exception:  # noqa: BLE001
             logger.exception("Background summarization failed")
+
+    def _start_summary_task(self, formal_qa_mode: bool) -> None:
+        mode = "formal" if formal_qa_mode else "informal"
+        if mode in self._summaries_running or self._closing_or_closed():
+            return
+        self._summaries_running.add(mode)
+
+        def run_summary() -> None:
+            try:
+                self._maybe_summarize(formal_qa_mode)
+            finally:
+                self._summaries_running.discard(mode)
+
+        threading.Thread(target=run_summary, daemon=True).start()
 
     def _handle_behavior_speak(self, text: str, duration_ms: int, action_name: str) -> None:
         """响应主动行为控制器的说话请求。"""
@@ -1266,7 +1410,7 @@ class DesktopPetWindow(QWidget):
         if not self.deepseek_client.is_configured():
             self._show_scenario_greeting_line(fallback_line)
             return
-        if self.chat_thread and self.chat_thread.isRunning():
+        if self.background_tasks.is_registered("chat"):
             return
         self._start_scenario_greeting_worker(payload)
 
@@ -1284,15 +1428,29 @@ class DesktopPetWindow(QWidget):
         self.chat_worker.failed.connect(
             lambda _error, fallback=str(payload.get("fallback_line", "")): (
                 logger.warning("Scenario greeting API failed; using local fallback"),
-                self._show_scenario_greeting_line(fallback),
+                None if self._closing_or_closed() else self._show_scenario_greeting_line(fallback),
             )
         )
         self.chat_worker.finished.connect(self.chat_thread.quit)
         self.chat_worker.failed.connect(self.chat_thread.quit)
         self.chat_thread.finished.connect(self._cleanup_chat_thread)
+        if not self._register_background_task(
+            "chat",
+            self.chat_thread,
+            self.chat_worker,
+            self._clear_chat_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.chat_thread,
+                self.chat_worker,
+                self._clear_chat_task_refs,
+            )
+            return
         self.chat_thread.start()
 
     def _on_scenario_greeting_success(self, reply: str) -> None:
+        if self._closing_or_closed():
+            return
         self._show_scenario_greeting_line(reply)
 
     def _show_scenario_greeting_line(self, line: str) -> None:
@@ -1321,7 +1479,7 @@ class DesktopPetWindow(QWidget):
 
     def _start_knowledge_worker(self) -> None:
         """创建后台线程执行记忆增强的知识问候 API 请求。"""
-        if self.chat_thread and self.chat_thread.isRunning():
+        if self.background_tasks.is_registered("chat"):
             return
 
         memory = load_json(self.memory_path, {})
@@ -1343,10 +1501,24 @@ class DesktopPetWindow(QWidget):
         self.chat_worker.finished.connect(self.chat_thread.quit)
         self.chat_worker.failed.connect(self.chat_thread.quit)
         self.chat_thread.finished.connect(self._cleanup_chat_thread)
+        if not self._register_background_task(
+            "chat",
+            self.chat_thread,
+            self.chat_worker,
+            self._clear_chat_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.chat_thread,
+                self.chat_worker,
+                self._clear_chat_task_refs,
+            )
+            return
         self.chat_thread.start()
 
     def _on_knowledge_speak_success(self, reply: str) -> None:
         """知识问候 API 成功返回后，展示内容并在右侧弹出可点击的应答气泡。"""
+        if self._closing_or_closed():
+            return
         cleaned_reply = reply.strip() or "让我再看看哦。"
         self.sprite_player.set_action("idle")
         self._display_message(cleaned_reply, 15000, "proactive")
@@ -1358,6 +1530,8 @@ class DesktopPetWindow(QWidget):
 
     def _on_knowledge_speak_failure(self, error_message: str) -> None:
         """知识问候 API 失败后展示错误提示。"""
+        if self._closing_or_closed():
+            return
         self.sprite_player.set_action("failed")
         self._display_message(error_message, 8000, "assistant")
 
@@ -1615,34 +1789,20 @@ class DesktopPetWindow(QWidget):
 
     def _chat_in_progress(self) -> bool:
         """判断当前是否仍有聊天请求在后台执行。"""
-        return bool(self.chat_thread and self.chat_thread.isRunning())
+        return self.background_tasks.is_running("chat")
 
     def _clear_history_in_progress(self) -> bool:
         """判断是否正在后台整理并清空聊天记录。"""
-        return bool(self.clear_history_thread and self.clear_history_thread.isRunning())
+        return self.background_tasks.is_running("clear_history")
 
     def _background_workers_running(self) -> bool:
-        return (
-            self._chat_in_progress()
-            or self._clear_history_in_progress()
-            or bool(self.mem0_init_thread and self.mem0_init_thread.isRunning())
-            or bool(self.mem0_search_thread and self.mem0_search_thread.isRunning())
-            or bool(
-                self.memory_maintenance_thread and self.memory_maintenance_thread.isRunning()
-            )
-        )
+        return self.background_tasks.any_running()
 
     def _request_background_workers_quit(self) -> None:
-        if self.chat_thread and self.chat_thread.isRunning():
-            self.chat_thread.quit()
-        if self.clear_history_thread and self.clear_history_thread.isRunning():
-            self.clear_history_thread.quit()
-        if self.mem0_init_thread and self.mem0_init_thread.isRunning():
-            self.mem0_init_thread.quit()
-        if self.mem0_search_thread and self.mem0_search_thread.isRunning():
-            self.mem0_search_thread.quit()
-        if self.memory_maintenance_thread and self.memory_maintenance_thread.isRunning():
-            self.memory_maintenance_thread.quit()
+        self.background_tasks.request_quit_all()
+
+    def _stop_background_workers(self) -> list[str]:
+        return self.background_tasks.stop_all()
 
     def _maybe_close_after_workers_finished(self) -> None:
         if not self._close_after_workers_finished:
@@ -1699,9 +1859,9 @@ class DesktopPetWindow(QWidget):
             return False
         if self._pending_knowledge_mem0_context:
             return True
-        if self.mem0_init_thread and self.mem0_init_thread.isRunning():
+        if self.background_tasks.is_registered("mem0_init"):
             return None
-        if self.mem0_search_thread and self.mem0_search_thread.isRunning():
+        if self.background_tasks.is_registered("mem0_search"):
             return None
         if self.mem0_memory_service is None or not self.mem0_memory_service.is_available():
             return False

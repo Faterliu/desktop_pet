@@ -65,7 +65,7 @@ wscript.exe .\start_main.vbs
 - `_sync_floating_widgets()` 在气泡/输入框跟随角色位置时，将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入 `reposition()`，使两个气泡互相避让不重叠。
 - 空闲主动问候命中场景化生成时，`BehaviorController` 发出 `scenario_greeting_requested`，主窗口创建 `ScenarioGreetingWorker` 放入独立 `QThread` 调用 DeepSeek 生成一句短问候；API 不可用、线程忙或生成失败时静默回退到本地模板，不向用户显示错误。
 - 清理正式/非正式聊天记录时不再在 UI 线程中强制摘要，而是创建 `ChatHistoryClearWorker` 放到独立 `QThread` 执行摘要、清空和 `last_cleaned_at` 更新；主窗口只接收完成/失败信号并在后台操作结束后决定是否显示结果。
-- 退出时若聊天请求或清理线程仍在运行，`closeEvent()` 会延迟真正关闭，等待后台线程 `finished` 后再重新调用 `close()`，避免销毁仍在运行的 `QThread`。
+- `BackgroundTaskRegistry` 统一登记聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护等 `QThread` 后台任务；同名任务登记会被拒绝，避免重复并发。退出时 `closeEvent()` 会统一请求后台线程停止并按任务配置做有界 `wait()`，超时任务记录 warning 后继续关闭，避免无限等待。
 - 修改场景：几乎所有用户可见行为的入口都在这里接线。
 - 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`clear_history_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_close_after_workers_finished`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`、`_topmost_enforcement_timer`。
 
@@ -74,6 +74,12 @@ wscript.exe .\start_main.vbs
 - 后台清理 worker。`ChatHistoryClearWorker.run()` 在非 UI 线程中按配置强制摘要、清空对应 `ChatStore`，并更新 `last_cleaned_at`。
 - 修改场景：清理聊天历史、清空前摘要、清理失败降级。
 - 风险：worker 不应直接操作任何 QWidget 或气泡；UI 展示必须留在 `DesktopPetWindow` 的信号回调中。
+
+`desktop_pet/app/background_task_registry.py`
+
+- 轻量后台任务注册表。统一登记、移除、查询和停止 `QThread`/worker，负责 `quit()`、有界 `wait()`、必要时 `terminate()`、`deleteLater()` 和清理回调。
+- 修改场景：新增后台 `QThread` 任务、调整退出等待超时、排查重复任务并发或线程泄漏。
+- 风险：注册表只管理生命周期，不应放入具体业务逻辑；业务 worker 的成功/失败信号仍由 `DesktopPetWindow` 处理。
 
 `desktop_pet/app/context_menu.py`
 
@@ -611,3 +617,4 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-06-08：优化日志系统长期运行稳定性和隐私安全。`utils/logger.py` 将 `app.log` 文件输出改为 `RotatingFileHandler`，限制单文件大小并保留有限备份；新增 `utils/log_sanitizer.py`，提供 API key 脱敏、常见密钥形态清理、长文本截断、异常摘要、messages 统计和响应结构摘要；`DeepSeekClient`、`Summarizer`、`Mem0MemoryService` 的错误日志改为记录状态码、消息数量、字符数、响应 keys 和截断异常，不再输出完整 payload、prompt、memory、模型回复或 API 响应。新增 `test_logging_privacy.py` 覆盖日志创建、轮转配置、API key 脱敏和超长文本截断。
 - 2026-06-08：压缩 `data/memory_vectors.json` 体积。`MemoryVectorStore` 改为使用紧凑 JSON 保存向量索引，embedding 写入前按 `memory.memory_vector_precision` 做浮点精度压缩，跳过短于 `memory.memory_vector_min_text_length` 的文本，并通过 `memory.memory_vector_max_items` 限制索引条目数，超限时优先保留重要字段和较新条目；`embedding_signature` 纳入精度配置，模型、维度或精度变化时会重建索引。`app_config.example.json` 新增对应配置项，扩展 `test_memory_vector_store.py` 覆盖紧凑体积、默认配置、短文本跳过、旧签名重建和最大条目裁剪，语义去重逻辑保持不变。
 - 2026-06-08：为 Prompt / Context / Summarizer 新增上下文预算控制。新增 `desktop_pet/ai/context_budget.py` 集中提供 `max_prompt_chars`、`max_history_messages`、`max_user_message_chars`、`max_history_message_chars`、`max_summary_chars`、`max_memory_chars`、`max_mem0_chars`、`summary_max_input_chars` 和 `memory_extract_max_input_chars` 的缺省值；`app_config.example.json` 的 `api` 节新增同名配置项。`PromptBuilder` 改为对用户输入、历史消息、摘要、普通记忆、关系记忆和 Mem0 检索结果分别做长度限制，并在全局 `max_prompt_chars` 下按“安全规则/角色设定/当前用户输入/最近对话/高价值记忆”的优先级裁剪；`ContextManager` 改为同时限制历史消息条数和单条长度；`Summarizer` 改为按字符预算从最近消息向前构建 summary / memory extraction transcript，并保证输入不超过配置预算。新增 `desktop_pet/tests/test_context_budget_controls.py`，重写 `test_prompt_builder_memory_sections.py`，并在 `test_summarizer_memory_updates.py` 中注入 `requests` stub，覆盖长历史 prompt 裁剪、超长用户输入限制、摘要输入预算和缺少新配置项时的默认回退。
+- 2026-06-08：收拢后台任务和 `QThread` 生命周期管理。新增 `desktop_pet/app/background_task_registry.py`，统一登记、查询、移除和停止 `QThread`/worker，负责 `quit()`、有界 `wait()`、必要时 `terminate()`、`deleteLater()` 和清理回调；`DesktopPetWindow` 将聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护接入注册表，同名任务重复启动会被拒绝，关闭窗口时统一有界停止后台线程并避免关闭中 worker 回调继续更新 UI；`memory.mem0_init_timeout_seconds` 接入 Mem0 初始化线程等待超时。新增 `desktop_pet/tests/test_background_task_registry.py` 覆盖注册/移除、重复登记拦截、退出清理和超时终止。
