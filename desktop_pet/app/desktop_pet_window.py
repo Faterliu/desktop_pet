@@ -26,6 +26,7 @@ from ai.prompt_builder import PromptBuilder
 from ai.summarizer import Summarizer
 from animation.sprite_player import SpritePlayer
 from app.background_task_registry import BackgroundTaskRegistry
+from app.bubble_position_service import BubblePositionService
 from app.chat_input import ChatInput
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
@@ -366,6 +367,7 @@ class DesktopPetWindow(QWidget):
             self.window_state_path,
             QApplication,
         )
+        self.bubble_position_service = BubblePositionService(QApplication)
         self.mem0_memory_service: Mem0MemoryService | None = None
         self.drag_start_offset = QPoint()
         self.dragging = False
@@ -1765,10 +1767,22 @@ class DesktopPetWindow(QWidget):
         reply_visible = self.reply_bubble.isVisible()
         if bubble_visible:
             exclusions = [self.reply_bubble.geometry()] if reply_visible else None
-            self.bubble.reposition(anchor_rect, exclusion_rects=exclusions)
+            self.bubble.move(
+                self.bubble_position_service.speech_bubble_position(
+                    (self.bubble.width(), self.bubble.height()),
+                    anchor_rect,
+                    exclusions,
+                )
+            )
         if reply_visible:
             exclusions = [self.bubble.geometry()] if bubble_visible else None
-            self.reply_bubble.reposition(anchor_rect, exclusion_rects=exclusions)
+            self.reply_bubble.move(
+                self.bubble_position_service.reply_bubble_position(
+                    (self.reply_bubble.width(), self.reply_bubble.height()),
+                    anchor_rect,
+                    exclusions,
+                )
+            )
         if self.chat_input.isVisible():
             self.chat_input.reposition(anchor_rect)
 

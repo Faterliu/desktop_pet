@@ -62,7 +62,7 @@ wscript.exe .\start_main.vbs
 
 - 核心协调器。负责窗口属性、鼠标事件（单击聊天、双击回复/打招呼、拖拽移动、右键菜单，含置顶开关）、聊天流程、后台线程、正式问答面板、自动移动、位置恢复和退出动画（退出时播放 waving 并显示 `farewell` 道别气泡）。
 - `_enforce_topmost()` 由 `_topmost_enforcement_timer` 每 30 秒驱动，通过 `force_window_topmost()` 在 Windows API 级别强制 `WS_EX_TOPMOST`，防止频繁 `setMask()` 导致置顶样式被系统清除。
-- `_sync_floating_widgets()` 在气泡/输入框跟随角色位置时，将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入 `reposition()`，使两个气泡互相避让不重叠。
+- `_sync_floating_widgets()` 在气泡/输入框跟随角色位置时，仍由主窗口判断哪些浮动控件可见，但气泡目标坐标改由 `BubblePositionService` 计算；主窗口只把对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入服务，并移动 `SpeechBubble` / `ReplyBubble`，使两个气泡互相避让不重叠。聊天输入框仍使用 `ChatInput.reposition()`。
 - 空闲主动问候命中场景化生成时，`BehaviorController` 发出 `scenario_greeting_requested`，主窗口创建 `ScenarioGreetingWorker` 放入独立 `QThread` 调用 DeepSeek 生成一句短问候；API 不可用、线程忙或生成失败时静默回退到本地模板，不向用户显示错误。
 - 清理正式/非正式聊天记录时不再在 UI 线程中强制摘要，而是创建 `ChatHistoryClearWorker` 放到独立 `QThread` 执行摘要、清空和 `last_cleaned_at` 更新；主窗口只接收完成/失败信号并在后台操作结束后决定是否显示结果。
 - `BackgroundTaskRegistry` 统一登记聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护等 `QThread` 后台任务；同名任务登记会被拒绝，避免重复并发。退出时 `closeEvent()` 会统一请求后台线程停止并按任务配置做有界 `wait()`，超时任务记录 warning 后继续关闭，避免无限等待。
@@ -81,6 +81,13 @@ wscript.exe .\start_main.vbs
 - 修改场景：新增后台 `QThread` 任务、调整退出等待超时、排查重复任务并发或线程泄漏。
 - 风险：注册表只管理生命周期，不应放入具体业务逻辑；业务 worker 的成功/失败信号仍由 `DesktopPetWindow` 处理。
 
+`desktop_pet/app/bubble_position_service.py`
+
+- 气泡位置计算服务。集中负责普通气泡和知识问候应答气泡相对桌宠窗口的候选位置、屏幕可用区域 clamp、避免覆盖桌宠、以及根据 `exclusion_rects` 避让另一个可见气泡。
+- `DesktopPetWindow._sync_floating_widgets()` 使用该服务计算目标坐标后调用气泡 `move()`；气泡创建、显示、隐藏、计时关闭和样式仍保留在 `SpeechBubble` / `ReplyBubble` 与主窗口原显示方法中。
+- 修改场景：调整气泡在桌宠上/下/左/右的优先级、屏幕边缘避让策略、两个气泡互斥规则。
+- 风险：不要在这里引入聊天、主动问候、QThread 或 QWidget 创建逻辑；它应保持为可单元测试的位置计算服务。
+
 `desktop_pet/app/context_menu.py`
 
 - 构建右键菜单，包括测试菜单（由 `ui.show_test_menu` 控制，默认关闭）、清理菜单（由 `ui.show_clear_menu` 控制，默认关闭，可分别清除非正式和正式聊天记录）、重新加载配置（由 `ui.show_reload_config` 控制，默认开启）、人物缩放、免打扰、窗口置顶、自主移动、聊天 API 开关、正式问答模式和退出。
@@ -95,8 +102,8 @@ wscript.exe .\start_main.vbs
 `desktop_pet/app/speech_bubble.py`
 
 - 短消息气泡，自动关闭，跟随角色位置。`show_message()` 前由主窗口调用 `set_always_on_top()` 同步置顶状态。
-- 模块级 `_find_bubble_position()` 为两个气泡提供屏幕感知定位：遍历候选方位列表，选取第一个完全在屏幕可用区域内、不与角色锚点重叠、且不与 `exclusion_rects` 交叉的位置；所有候选不满足时 clamp 首选到屏幕内。
-- `SpeechBubble.reposition()` 和 `ReplyBubble._reposition()` 均通过 `_find_bubble_position()` 实现多方位自动避让（上/下/左/右），避免气泡超出屏幕或覆盖人物。
+- 气泡样式、自动关闭、点击信号、透明窗口修正和窗口 mask 仍在本模块内；主窗口同步两个可见气泡位置时，目标坐标由 `BubblePositionService` 计算。
+- `SpeechBubble.reposition()` 和 `ReplyBubble.reposition()` 仍保留为气泡组件自身的跟随接口，避免破坏现有显示调用和外部调用约定。
 - `ReplyBubble`：知识问候右侧独立应答气泡，可点击、无尾巴、绿色配色，点击发出 `clicked` 信号供主窗口处理用户回应。
 - 修改场景：本地提示、普通聊天回复、系统提示的展示样式和定位；新增气泡方位或避让规则。
 
@@ -619,3 +626,4 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-06-08：为 Prompt / Context / Summarizer 新增上下文预算控制。新增 `desktop_pet/ai/context_budget.py` 集中提供 `max_prompt_chars`、`max_history_messages`、`max_user_message_chars`、`max_history_message_chars`、`max_summary_chars`、`max_memory_chars`、`max_mem0_chars`、`summary_max_input_chars` 和 `memory_extract_max_input_chars` 的缺省值；`app_config.example.json` 的 `api` 节新增同名配置项。`PromptBuilder` 改为对用户输入、历史消息、摘要、普通记忆、关系记忆和 Mem0 检索结果分别做长度限制，并在全局 `max_prompt_chars` 下按“安全规则/角色设定/当前用户输入/最近对话/高价值记忆”的优先级裁剪；`ContextManager` 改为同时限制历史消息条数和单条长度；`Summarizer` 改为按字符预算从最近消息向前构建 summary / memory extraction transcript，并保证输入不超过配置预算。新增 `desktop_pet/tests/test_context_budget_controls.py`，重写 `test_prompt_builder_memory_sections.py`，并在 `test_summarizer_memory_updates.py` 中注入 `requests` stub，覆盖长历史 prompt 裁剪、超长用户输入限制、摘要输入预算和缺少新配置项时的默认回退。
 - 2026-06-08：收拢后台任务和 `QThread` 生命周期管理。新增 `desktop_pet/app/background_task_registry.py`，统一登记、查询、移除和停止 `QThread`/worker，负责 `quit()`、有界 `wait()`、必要时 `terminate()`、`deleteLater()` 和清理回调；`DesktopPetWindow` 将聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护接入注册表，同名任务重复启动会被拒绝，关闭窗口时统一有界停止后台线程并避免关闭中 worker 回调继续更新 UI；`memory.mem0_init_timeout_seconds` 接入 Mem0 初始化线程等待超时。新增 `desktop_pet/tests/test_background_task_registry.py` 覆盖注册/移除、重复登记拦截、退出清理和超时终止。
 - 2026-06-08：第一阶段低风险拆分 `DesktopPetWindow `的窗口位置逻辑。新增 `desktop_pet/app/window_position_service.py`，集中负责读取/保存 `window_state.json`、多屏可见性判断和屏幕外坐标回退默认位置；`DesktopPetWindow._restore_position()`、`_save_window_position()`、_position_visible_on_any_screen() 保留原方法名并转调服务，未改变聊天、气泡、主动问候、动画、菜单逻辑和 `window_state.json `结构。新增 `desktop_pet/tests/test_window_position_service.py` 覆盖首次启动、位置保存、下次恢复、多屏可见性和屏幕外回退。
+- 2026-06-09：第二阶段低风险拆分 `DesktopPetWindow` 的气泡位置计算逻辑。新增 `desktop_pet/app/bubble_position_service.py`，集中负责普通气泡和知识问候应答气泡的候选位置、屏幕可用区域避让、避免覆盖桌宠以及气泡间 `exclusion_rects` 互斥；`DesktopPetWindow._sync_floating_widgets()` 保留原方法名和可见性判断，只调用服务计算坐标后移动气泡，未改变气泡样式、显示时机、聊天流程、主动问候流程、输入框和正式问答面板。新增 `desktop_pet/tests/test_bubble_position_service.py` 覆盖屏幕中央、左边缘、右边缘、底部和气泡互斥避让。
