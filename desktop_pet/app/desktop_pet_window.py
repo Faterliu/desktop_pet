@@ -1110,12 +1110,12 @@ class DesktopPetWindow(QWidget):
 
     def _cleanup_chat_thread(self) -> None:
         """在线程结束后清理工作对象和线程对象。"""
-        self.background_tasks.remove("chat", delete_later=True)
+        self.background_tasks.unregister("chat", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _cleanup_clear_history_thread(self) -> None:
         """清理聊天记录后台线程。"""
-        self.background_tasks.remove("clear_history", delete_later=True)
+        self.background_tasks.unregister("clear_history", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _clear_chat_task_refs(self) -> None:
@@ -1230,7 +1230,7 @@ class DesktopPetWindow(QWidget):
         self._set_mem0_memory_service(None)
 
     def _cleanup_mem0_init_thread(self) -> None:
-        self.background_tasks.remove("mem0_init", delete_later=True)
+        self.background_tasks.unregister("mem0_init", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _start_mem0_search_worker(self) -> None:
@@ -1284,7 +1284,7 @@ class DesktopPetWindow(QWidget):
         self._pending_knowledge_mem0_context = ""
 
     def _cleanup_mem0_search_thread(self) -> None:
-        self.background_tasks.remove("mem0_search", delete_later=True)
+        self.background_tasks.unregister("mem0_search", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _start_memory_maintenance_worker(self) -> None:
@@ -1333,7 +1333,7 @@ class DesktopPetWindow(QWidget):
         logger.warning("Semantic memory maintenance failed: %s", error_message)
 
     def _cleanup_memory_maintenance_thread(self) -> None:
-        self.background_tasks.remove("memory_maintenance", delete_later=True)
+        self.background_tasks.unregister("memory_maintenance", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     def _on_chat_success(self, reply: str) -> None:
@@ -1798,7 +1798,7 @@ class DesktopPetWindow(QWidget):
         return self.background_tasks.any_running()
 
     def _request_background_workers_quit(self) -> None:
-        self.background_tasks.request_quit_all()
+        self.background_tasks.request_quit_all(timeout_ms=1000)
 
     def _stop_background_workers(self) -> list[str]:
         return self.background_tasks.stop_all()

@@ -62,6 +62,10 @@ class BackgroundTaskRegistry:
             task.cleanup()
         return True
 
+    def unregister(self, name: str, delete_later: bool = True) -> bool:
+        """Remove a task from the registry and clear its owned references."""
+        return self.remove(name, delete_later=delete_later)
+
     def is_registered(self, name: str) -> bool:
         return name in self._tasks
 
@@ -75,10 +79,21 @@ class BackgroundTaskRegistry:
     def active_names(self) -> list[str]:
         return [name for name, task in self._tasks.items() if self._is_running(task.thread)]
 
-    def request_quit_all(self) -> None:
+    def request_quit_all(self, timeout_ms: int | None = None) -> list[str]:
+        """Ask all running threads to quit and optionally wait for a bounded time."""
+        still_running: list[str] = []
         for task in list(self._tasks.values()):
             if self._is_running(task.thread):
                 self._quit_thread(task.thread)
+                if timeout_ms is not None and not self._wait_thread(task, self._timeout(timeout_ms)):
+                    still_running.append(task.name)
+        return still_running
+
+    def clear_finished(self) -> None:
+        """Drop registry entries whose threads have already stopped."""
+        for task in list(self._tasks.values()):
+            if not self._is_running(task.thread):
+                self.unregister(task.name)
 
     def stop_all(self, wait_timeout_ms: int | None = None) -> list[str]:
         stuck: list[str] = []

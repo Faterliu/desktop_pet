@@ -103,6 +103,40 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         self.assertEqual(thread.terminate_calls, 1)
         self.assertFalse(registry.is_registered("mem0_init"))
 
+    def test_unregister_alias_removes_task(self) -> None:
+        registry = BackgroundTaskRegistry()
+
+        registry.register("chat", FakeThread(), FakeQtObject())
+
+        self.assertTrue(registry.unregister("chat"))
+        self.assertFalse(registry.is_registered("chat"))
+
+    def test_request_quit_all_waits_without_terminating(self) -> None:
+        registry = BackgroundTaskRegistry(default_wait_timeout_ms=500)
+        thread = FakeThread(running=True, wait_result=False)
+
+        registry.register("mem0_search", thread, FakeQtObject())
+        still_running = registry.request_quit_all(timeout_ms=50)
+
+        self.assertEqual(still_running, ["mem0_search"])
+        self.assertEqual(thread.quit_calls, 1)
+        self.assertEqual(thread.wait_calls, [50])
+        self.assertEqual(thread.terminate_calls, 0)
+        self.assertTrue(registry.is_registered("mem0_search"))
+
+    def test_clear_finished_removes_only_stopped_threads(self) -> None:
+        registry = BackgroundTaskRegistry()
+        stopped = FakeThread(running=False)
+        running = FakeThread(running=True)
+
+        registry.register("clear_history", stopped, FakeQtObject())
+        registry.register("memory_maintenance", running, FakeQtObject())
+
+        registry.clear_finished()
+
+        self.assertFalse(registry.is_registered("clear_history"))
+        self.assertTrue(registry.is_registered("memory_maintenance"))
+
 
 if __name__ == "__main__":
     unittest.main()

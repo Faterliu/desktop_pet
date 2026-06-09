@@ -77,7 +77,8 @@ wscript.exe .\start_main.vbs
 
 `desktop_pet/app/background_task_registry.py`
 
-- 轻量后台任务注册表。统一登记、移除、查询和停止 `QThread`/worker，负责 `quit()`、有界 `wait()`、必要时 `terminate()`、`deleteLater()` 和清理回调。
+- 轻量后台任务注册表。统一登记、注销/移除、查询和停止 `QThread`/worker，负责 `quit()`、有界 `wait()`、必要时 `terminate()`、`deleteLater()` 和清理回调。
+- 主要接口包括 `register(name, thread, worker, cleanup=None, wait_timeout_ms=None)`、`unregister(name)`、`is_running(name)`、`request_quit_all(timeout_ms=None)`、`clear_finished()` 和 `stop_all()`；`remove()` 仍作为兼容别名路径保留。
 - 修改场景：新增后台 `QThread` 任务、调整退出等待超时、排查重复任务并发或线程泄漏。
 - 风险：注册表只管理生命周期，不应放入具体业务逻辑；业务 worker 的成功/失败信号仍由 `DesktopPetWindow` 处理。
 
@@ -627,3 +628,4 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-06-08：收拢后台任务和 `QThread` 生命周期管理。新增 `desktop_pet/app/background_task_registry.py`，统一登记、查询、移除和停止 `QThread`/worker，负责 `quit()`、有界 `wait()`、必要时 `terminate()`、`deleteLater()` 和清理回调；`DesktopPetWindow` 将聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护接入注册表，同名任务重复启动会被拒绝，关闭窗口时统一有界停止后台线程并避免关闭中 worker 回调继续更新 UI；`memory.mem0_init_timeout_seconds` 接入 Mem0 初始化线程等待超时。新增 `desktop_pet/tests/test_background_task_registry.py` 覆盖注册/移除、重复登记拦截、退出清理和超时终止。
 - 2026-06-08：第一阶段低风险拆分 `DesktopPetWindow `的窗口位置逻辑。新增 `desktop_pet/app/window_position_service.py`，集中负责读取/保存 `window_state.json`、多屏可见性判断和屏幕外坐标回退默认位置；`DesktopPetWindow._restore_position()`、`_save_window_position()`、_position_visible_on_any_screen() 保留原方法名并转调服务，未改变聊天、气泡、主动问候、动画、菜单逻辑和 `window_state.json `结构。新增 `desktop_pet/tests/test_window_position_service.py` 覆盖首次启动、位置保存、下次恢复、多屏可见性和屏幕外回退。
 - 2026-06-09：第二阶段低风险拆分 `DesktopPetWindow` 的气泡位置计算逻辑。新增 `desktop_pet/app/bubble_position_service.py`，集中负责普通气泡和知识问候应答气泡的候选位置、屏幕可用区域避让、避免覆盖桌宠以及气泡间 `exclusion_rects` 互斥；`DesktopPetWindow._sync_floating_widgets()` 保留原方法名和可见性判断，只调用服务计算坐标后移动气泡，未改变气泡样式、显示时机、聊天流程、主动问候流程、输入框和正式问答面板。新增 `desktop_pet/tests/test_bubble_position_service.py` 覆盖屏幕中央、左边缘、右边缘、底部和气泡互斥避让。
+- 2026-06-09：补齐第三阶段后台任务注册表接口。`BackgroundTaskRegistry` 新增 `unregister()`、支持 `request_quit_all(timeout_ms)` 返回仍在运行的任务、并新增 `clear_finished()` 清理已结束线程引用；`DesktopPetWindow` 原线程清理方法名保留，内部改为调用 `unregister()`，`_request_background_workers_quit()` 改为带 1000ms 有界等待。未改变 `ChatWorker`、Mem0 初始化/检索 worker、语义记忆维护 worker 或清理历史 worker 的业务逻辑。扩展 `test_background_task_registry.py` 覆盖新接口。
