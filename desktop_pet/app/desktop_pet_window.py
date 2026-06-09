@@ -31,6 +31,7 @@ from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
 from app.speech_bubble import ReplyBubble, SpeechBubble
+from app.window_position_service import WindowPositionService
 from character.behavior_controller import BehaviorController
 from character.proactive_context import (
     build_scenario_greeting_messages,
@@ -361,6 +362,10 @@ class DesktopPetWindow(QWidget):
         self.window_state_path = self.data_dir / "window_state.json"
 
         self.app_config = self._load_app_config()
+        self.window_position_service = WindowPositionService(
+            self.window_state_path,
+            QApplication,
+        )
         self.mem0_memory_service: Mem0MemoryService | None = None
         self.drag_start_offset = QPoint()
         self.dragging = False
@@ -1631,43 +1636,23 @@ class DesktopPetWindow(QWidget):
 
     def _restore_position(self) -> None:
         """恢复上次窗口位置；首次启动则放到屏幕右下角。"""
-        state = load_json(self.window_state_path, {"x": None, "y": None})
-        ui = self._ui_config()
-        remember = ui.get("remember_last_position", True)
-        if remember and state.get("x") is not None and state.get("y") is not None:
-            saved_position = QPoint(int(state["x"]), int(state["y"]))
-            if self._position_visible_on_any_screen(saved_position):
-                self.move(saved_position)
-                return
-            logger.warning(
-                "Saved window position is outside visible screens: x=%s, y=%s. Falling back.",
-                state.get("x"),
-                state.get("y"),
-            )
-
-        screen = QApplication.primaryScreen()
-        if not screen:
-            self.move(50, 50)
-            return
-        available = screen.availableGeometry()
-        width, height = self.sprite_player.base_size()
-        margin = 30
-        self.move(
-            available.right() - width - margin,
-            available.bottom() - height - margin,
+        position = self.window_position_service.restore_position(
+            self.size(),
+            self.sprite_player.base_size(),
+            remember_last_position=self._ui_config().get("remember_last_position", True),
         )
+        self.move(position)
 
     def _save_window_position(self) -> None:
         """保存当前窗口位置到本地状态文件。"""
-        save_json(self.window_state_path, {"x": self.x(), "y": self.y()})
+        self.window_position_service.save_position(self.pos())
 
     def _position_visible_on_any_screen(self, position: QPoint) -> bool:
         """判断窗口放在给定坐标后，是否至少有一部分仍位于某个屏幕可见区域内。"""
-        window_rect = QRect(position, self.size())
-        for screen in QApplication.screens():
-            if screen.availableGeometry().intersects(window_rect):
-                return True
-        return False
+        return self.window_position_service.position_visible_on_any_screen(
+            position,
+            self.size(),
+        )
 
     def _enforce_topmost(self) -> None:
         """在 Windows API 级别强制置顶主窗口，防止 WS_EX_TOPMOST 被系统清除。"""
