@@ -64,6 +64,7 @@ wscript.exe .\start_main.vbs
 - `_enforce_topmost()` 由 `_topmost_enforcement_timer` 每 30 秒驱动，通过 `force_window_topmost()` 在 Windows API 级别强制 `WS_EX_TOPMOST`，防止频繁 `setMask()` 导致置顶样式被系统清除。
 - `_sync_floating_widgets()` 在气泡/输入框跟随角色位置时，仍由主窗口判断哪些浮动控件可见，但气泡目标坐标改由 `BubblePositionService` 计算；主窗口只把对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入服务，并移动 `SpeechBubble` / `ReplyBubble`，使两个气泡互相避让不重叠。聊天输入框仍使用 `ChatInput.reposition()`。
 - 空闲主动问候命中场景化生成时，`BehaviorController` 发出 `scenario_greeting_requested`，主窗口创建 `ScenarioGreetingWorker` 放入独立 `QThread` 调用 DeepSeek 生成一句短问候；API 不可用、线程忙或生成失败时静默回退到本地模板，不向用户显示错误。
+- 用户提交聊天消息后，主窗口仍负责气泡、动作、正式问答面板和 `QThread` 创建，但普通/正式模式快照、用户/助手消息落盘、本地回复/API 缺配置/API worker 分流、成功/失败后的 pending 状态由 `ChatFlowController` 协助管理。
 - 清理正式/非正式聊天记录时不再在 UI 线程中强制摘要，而是创建 `ChatHistoryClearWorker` 放到独立 `QThread` 执行摘要、清空和 `last_cleaned_at` 更新；主窗口只接收完成/失败信号并在后台操作结束后决定是否显示结果。
 - `BackgroundTaskRegistry` 统一登记聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护等 `QThread` 后台任务；同名任务登记会被拒绝，避免重复并发。退出时 `closeEvent()` 会统一请求后台线程停止并按任务配置做有界 `wait()`，超时任务记录 warning 后继续关闭，避免无限等待。
 - `ConfigService` 封装主窗口内低风险配置读取、默认值和嵌套字段读取；写回配置仍保留在主窗口现有 `setdefault()` 路径中，避免改变 `app_config.json` 结构或持久化行为。
@@ -95,6 +96,12 @@ wscript.exe .\start_main.vbs
 - 轻量配置读取服务。`ConfigService` 基于内存中的配置字典支持 `get(path, default=None)`、`get_bool()`、`get_int()` 和 `get_str()`，其中 `path` 使用点分嵌套路径，例如 `api.enable_chat_api`、`ui.bubble_durations_ms.assistant_reply`。
 - 修改场景：主窗口或其他模块中重复的只读配置读取、缺省值兜底、嵌套字段读取。
 - 风险：该服务不负责加载、保存或迁移配置，不应在这里改变 `app_config.json` / `app_config.example.json` 结构；需要写回配置时仍使用原有保存路径。
+
+`desktop_pet/app/chat_flow_controller.py`
+
+- 轻量聊天流程协调器。`ChatFlowController` 不创建 QWidget、不切换动作、不启动 `QThread`，只协助 `DesktopPetWindow` 管理普通/正式问答模式快照、当前用户消息落盘、本地回复或 API 缺配置分流、`ChatWorker` 参数字典、成功/失败后的助手消息落盘和 pending 状态。
+- 修改场景：调整用户聊天流程的非 UI 状态、正式/非正式聊天记录路由、本地回复/API 请求分流、防止重复发起同名聊天任务。
+- 风险：不要在这里引入 `DeepSeekClient.chat()` 调用、`PromptBuilder` 改造、`ContextManager` 改造、气泡/正式问答面板展示或线程生命周期管理；这些仍由 `ChatWorker` 和 `DesktopPetWindow` 负责。
 
 `desktop_pet/app/context_menu.py`
 
@@ -338,6 +345,7 @@ wscript.exe .\start_main.vbs
 - 当前使用 `desktop_pet/tests/` 下的 `unittest` 回归测试，没有 pytest、CI、格式化器配置。
 - 推荐使用项目本地虚拟环境运行：`desktop_pet\.desktop_pet_venv\Scripts\python.exe -m unittest discover -s desktop_pet\tests`。
 - 配置读取服务回归测试为 `test_config_service.py`，覆盖点分路径读取、缺失字段默认值、类型转换和 reload 后更新引用。
+- 聊天流程协调器回归测试为 `test_chat_flow_controller.py`，覆盖本地回复、API 缺配置、正式问答成功落盘、`ChatWorker` 参数快照和重复聊天任务拦截判断。
 - 记忆系统相关回归测试包括 `test_memory_schema.py`、`test_summarizer_memory_updates.py`、`test_prompt_builder_memory_sections.py` 和 `test_memory_vector_store.py`，分别覆盖 memory schema 兼容、关系记忆提取、Prompt 记忆分区与本地向量索引。场景化主动问候测试包括 `test_proactive_context.py`、`test_scenario_greeting_config.py`、`test_scenario_greeting_worker.py` 和 `test_behavior_controller.py` 中的场景化分流用例。
 - 常用轻量校验方式还包括 Python AST 解析、JSON 合法性检查和手动启动。
 - `py_compile` 在本环境可能因为 `__pycache__` 写入权限失败，不适合作为唯一验证方式。
@@ -639,3 +647,4 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-06-09：第二阶段低风险拆分 `DesktopPetWindow` 的气泡位置计算逻辑。新增 `desktop_pet/app/bubble_position_service.py`，集中负责普通气泡和知识问候应答气泡的候选位置、屏幕可用区域避让、避免覆盖桌宠以及气泡间 `exclusion_rects` 互斥；`DesktopPetWindow._sync_floating_widgets()` 保留原方法名和可见性判断，只调用服务计算坐标后移动气泡，未改变气泡样式、显示时机、聊天流程、主动问候流程、输入框和正式问答面板。新增 `desktop_pet/tests/test_bubble_position_service.py` 覆盖屏幕中央、左边缘、右边缘、底部和气泡互斥避让。
 - 2026-06-09：补齐第三阶段后台任务注册表接口。`BackgroundTaskRegistry` 新增 `unregister()`、支持 `request_quit_all(timeout_ms)` 返回仍在运行的任务、并新增 `clear_finished()` 清理已结束线程引用；`DesktopPetWindow` 原线程清理方法名保留，内部改为调用 `unregister()`，`_request_background_workers_quit()` 改为带 1000ms 有界等待。未改变 `ChatWorker`、Mem0 初始化/检索 worker、语义记忆维护 worker 或清理历史 worker 的业务逻辑。扩展 `test_background_task_registry.py` 覆盖新接口。
 - 2026-06-11：第四阶段低风险拆分 `DesktopPetWindow` 的配置读取辅助逻辑。新增 `desktop_pet/app/config_service.py`，提供点分路径 `get()`、`get_bool()`、`get_int()`、`get_str()` 和缺失字段默认值兜底；`DesktopPetWindow` 仅迁移右键菜单状态、窗口置顶/点击聊天/自主移动、清理前摘要、Mem0 超时、语义记忆维护开关、摘要轮数、正式问答显示、气泡时长等低风险只读配置读取，保留原配置文件结构、配置项名称和写回路径。新增 `desktop_pet/tests/test_config_service.py` 覆盖配置服务行为，并同步更新配置加载与测试说明。
+- 2026-06-11：第五阶段低风险拆分 `DesktopPetWindow` 的用户聊天流程协调逻辑。新增 `desktop_pet/app/chat_flow_controller.py`，协助管理普通/正式问答模式快照、用户与助手消息落盘、本地回复/API 缺配置/API worker 分流、`ChatWorker` 参数准备、成功/失败后的 pending 状态；`DesktopPetWindow` 保留 `_handle_user_message()`、`_start_chat_worker()`、`_on_chat_success()`、`_on_chat_failure()` 等方法名，并继续负责气泡、正式问答面板、动作切换、鼠标/菜单和 `QThread` 生命周期。新增 `desktop_pet/tests/test_chat_flow_controller.py` 覆盖本地回复、缺 API、正式问答、worker 参数和重复聊天任务判断。

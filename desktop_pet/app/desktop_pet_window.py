@@ -28,6 +28,7 @@ from animation.sprite_player import SpritePlayer
 from app.background_task_registry import BackgroundTaskRegistry
 from app.bubble_position_service import BubblePositionService
 from app.chat_input import ChatInput
+from app.chat_flow_controller import ChatFlowController
 from app.config_service import ConfigService
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
@@ -415,6 +416,14 @@ class DesktopPetWindow(QWidget):
         )
         self.memory_store = MemoryStore(self.memory_path, self.memory_vector_store)
         self.deepseek_client = DeepSeekClient(self.config_path, self.example_config_path)
+        self.chat_flow_controller = ChatFlowController(
+            self.chat_store_formal,
+            self.chat_store_informal,
+            self._formal_qa_enabled,
+            self._api_chat_enabled,
+            self.deepseek_client.is_configured,
+            self._generate_local_reply,
+        )
         self.prompt_builder = PromptBuilder(
             self.character_path,
             self.safety_rules_path,
@@ -976,11 +985,8 @@ class DesktopPetWindow(QWidget):
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
         self._waiting_timer.stop()
         self.behavior_controller.notify_user_interaction()
-        store = self._active_chat_store()
-        store.append_message("user", message)
-        self._pending_was_formal = self._formal_qa_enabled()
-        if self._pending_was_formal:
-            self.pending_formal_question = message
+        chat_context = self.chat_flow_controller.begin_user_message(message)
+        self._sync_chat_flow_state()
 
         if (
             self._is_poetry_request(message)
@@ -991,7 +997,7 @@ class DesktopPetWindow(QWidget):
         ):
             poetry_line = self.behavior_controller.pick_poetry_line()
             if poetry_line:
-                store.append_message("assistant", poetry_line)
+                self.chat_flow_controller.append_assistant_reply(chat_context, poetry_line)
                 self.sprite_player.set_action("running", force_single_cycle=True)
                 self._show_answer_output(poetry_line, source="assistant", question=message)
                 return
@@ -999,21 +1005,15 @@ class DesktopPetWindow(QWidget):
         self._display_message("我收到啦，让我想一想。", 3200, "system")
         self.sprite_player.set_action("review" if len(message) > 24 else "running")
 
-        if not self._api_chat_enabled():
-            reply = self._generate_local_reply(message, formal_qa_mode=self._formal_qa_enabled())
-            store.append_message("assistant", reply)
+        decision = self.chat_flow_controller.decide_after_thinking(chat_context)
+        if decision.kind == "local_reply":
             self.sprite_player.set_action("idle")
-            self._show_answer_output(reply, source="assistant", question=message)
+            self._show_answer_output(decision.reply, source="assistant", question=decision.question)
             return
 
-        if not self.deepseek_client.is_configured():
-            reply = (
-                "我已经收到你说的话啦。先在 config/app_config.json 里填好 DeepSeek API key，"
-                "或者先关闭“聊天接入 API”。"
-            )
-            store.append_message("assistant", reply)
+        if decision.kind == "missing_api_config":
             self.sprite_player.set_action("failed")
-            self._show_answer_output(reply, source="assistant", question=message)
+            self._show_answer_output(decision.reply, source="assistant", question=decision.question)
             return
 
         self._start_chat_worker(message)
@@ -1048,19 +1048,22 @@ class DesktopPetWindow(QWidget):
 
     def _start_chat_worker(self, message: str) -> None:
         """创建后台线程执行模型请求，避免阻塞界面。"""
-        if self.background_tasks.is_registered("chat"):
+        if not self.chat_flow_controller.can_start_chat(
+            self.background_tasks.is_registered("chat")
+        ):
             return
 
         self.chat_thread = QThread(self)
         self.chat_worker = ChatWorker(
-            message,
-            self.deepseek_client,
-            self.prompt_builder,
-            self.context_manager,
-            self._formal_qa_enabled(),
-            mem0_memory_service=self.mem0_memory_service,
-            user_id=self._memory_user_id(),
-            app_config=self.app_config,
+            **self.chat_flow_controller.chat_worker_kwargs(
+                message,
+                client=self.deepseek_client,
+                prompt_builder=self.prompt_builder,
+                context_manager=self.context_manager,
+                mem0_memory_service=self.mem0_memory_service,
+                user_id=self._memory_user_id(),
+                app_config=self.app_config,
+            )
         )
         self.chat_worker.moveToThread(self.chat_thread)
         self.chat_thread.started.connect(self.chat_worker.run)
@@ -1348,27 +1351,24 @@ class DesktopPetWindow(QWidget):
         """处理模型成功返回后的界面更新与消息落盘。"""
         if self._closing_or_closed():
             return
-        cleaned_reply = reply.strip() or "我在这里哦。"
-        store = self.chat_store_formal if self._pending_was_formal else self.chat_store_informal
-        store.append_message("assistant", cleaned_reply)
+        completion = self.chat_flow_controller.complete_success(reply)
+        self._sync_chat_flow_state()
         self.sprite_player.set_action("idle")
         self._show_answer_output(
-            cleaned_reply,
+            completion.reply,
             source="assistant",
-            question=self.pending_formal_question,
+            question=completion.question,
         )
-        self.pending_formal_question = ""
-        was_formal = self._pending_was_formal
-        self._pending_was_formal = False
-        self._start_summary_task(was_formal)
+        self._start_summary_task(completion.formal_qa_mode)
 
     def _on_chat_failure(self, error_message: str) -> None:
         """处理模型请求失败后的动作和气泡提示。"""
         if self._closing_or_closed():
             return
+        failure = self.chat_flow_controller.complete_failure(error_message)
+        self._sync_chat_flow_state()
         self.sprite_player.set_action("failed")
-        self._display_message(error_message, 12000, "assistant")
-        self.pending_formal_question = ""
+        self._display_message(failure.error_message, 12000, "assistant")
 
     def _on_proactive_api_success(self, reply: str) -> None:
         """处理 API 主动说话测试成功后的界面更新。"""
@@ -1890,9 +1890,14 @@ class DesktopPetWindow(QWidget):
         value = self.config_service.get_int("ui.bubble_durations_ms.proactive_greeting", 6000)
         return value if value > 0 else 6000
 
+    def _sync_chat_flow_state(self) -> None:
+        """Keep legacy pending chat attributes in sync with ChatFlowController."""
+        self.pending_formal_question = self.chat_flow_controller.pending_question
+        self._pending_was_formal = self.chat_flow_controller.pending_was_formal
+
     def _active_chat_store(self) -> ChatStore:
         """返回当前模式对应的聊天存储实例。"""
-        return self.chat_store_formal if self._formal_qa_enabled() else self.chat_store_informal
+        return self.chat_flow_controller.active_store()
 
     def _config_snapshot(self) -> dict[str, Any]:
         """返回当前内存中的配置快照。"""
