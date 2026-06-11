@@ -12,7 +12,8 @@ from character.proactive_context import (
     build_proactive_context,
     has_scenario_context,
 )
-from storage.json_store import load_json, save_json
+from storage.json_store import load_json
+from storage.local_lines_service import LocalLinesService
 from storage.usage_store import UsageStore
 from utils.time_utils import now_local
 
@@ -35,6 +36,7 @@ class BehaviorController(QObject):
         super().__init__()
         self.app_config_path = Path(app_config_path)
         self.local_lines_path = Path(local_lines_path)
+        self.local_lines_service = LocalLinesService(self.local_lines_path)
         self.usage_store = usage_store
         self.config_loader = config_loader
         self.memory_checker = memory_checker
@@ -543,24 +545,8 @@ class BehaviorController(QObject):
 
     def _first_start_line(self) -> str:
         """Pick a first-start greeting when local_lines.first_start.enable is true."""
-        payload = load_json(self.local_lines_path, {})
-        first_start = payload.get("first_start", {})
-        if not isinstance(first_start, dict) or not first_start.get("enable", False):
-            return ""
-
-        lines = first_start.get("data", [])
-        if not lines:
-            return ""
-        line = random.choice(lines)
-        first_start["enable"] = False
-        payload["first_start"] = first_start
-        save_json(self.local_lines_path, payload)
-        return line
+        return self.local_lines_service.consume_first_start_line()
 
     def _random_line(self, group_name: str) -> str:
         """Pick a random line from the given local-lines group."""
-        payload = load_json(self.local_lines_path, {})
-        lines = payload.get(group_name, [])
-        if not lines:
-            return ""
-        return random.choice(lines)
+        return self.local_lines_service.pick_line(group_name)

@@ -43,6 +43,7 @@ from character.proactive_context import (
 )
 from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
+from storage.local_lines_service import LocalLinesService
 from storage.memory_store import MemoryStore
 from storage.memory_vector_store import MemoryVectorStore
 from storage.usage_store import UsageStore
@@ -366,6 +367,10 @@ class DesktopPetWindow(QWidget):
 
         self.app_config = self._load_app_config()
         self.config_service = ConfigService(self.app_config)
+        self.local_lines_service = LocalLinesService(
+            self.local_lines_path,
+            self.data_dir / "local_lines_generated_meta.json",
+        )
         self.window_position_service = WindowPositionService(
             self.window_state_path,
             QApplication,
@@ -1489,7 +1494,11 @@ class DesktopPetWindow(QWidget):
             return
 
         self.sprite_player.set_action("waving")
-        self._display_message("小胡想和你分享一些知识。", 2800, "system")
+        intro = self.local_lines_service.pick_line(
+            "knowledge_speak_intro",
+            fallback="我想到一个小知识。",
+        )
+        self._display_message(intro, 2800, "system")
         self._start_knowledge_worker()
 
     def _start_knowledge_worker(self) -> None:
