@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -103,6 +103,46 @@ class LocalLinesService:
         self._record_generated_metadata(group, accepted, source)
         return LocalLinesUpdateResult(group, accepted, validation.rejected, True)
 
+    def should_refresh_generated_lines(
+        self,
+        group: str,
+        *,
+        interval_days: int = 7,
+        monthly_refresh: bool = True,
+        now: datetime | None = None,
+    ) -> bool:
+        metadata = self.group_metadata(group)
+        if not metadata:
+            return True
+
+        current = now or datetime.now()
+        if monthly_refresh and metadata.get("last_monthly_refresh") != current.strftime("%Y-%m"):
+            return True
+
+        last_refreshed = _parse_datetime(str(metadata.get("last_refreshed_at", "")))
+        if last_refreshed is None:
+            return True
+
+        try:
+            days = int(interval_days)
+        except (TypeError, ValueError):
+            days = 7
+        if days <= 0:
+            return True
+        return current - last_refreshed >= timedelta(days=days)
+
+    def group_metadata(self, group: str) -> dict[str, Any]:
+        if self.metadata_path is None:
+            return {}
+        metadata = load_json(self.metadata_path, {})
+        if not isinstance(metadata, dict):
+            return {}
+        groups = metadata.get("groups", {})
+        if not isinstance(groups, dict):
+            return {}
+        group_metadata = groups.get(group, {})
+        return group_metadata if isinstance(group_metadata, dict) else {}
+
     def validate_lines(self, lines: list[str], *, max_chars: int = 80) -> LocalLinesUpdateResult:
         accepted: list[str] = []
         rejected: list[str] = []
@@ -162,9 +202,16 @@ class LocalLinesService:
         if not isinstance(metadata, dict):
             metadata = {}
         groups = metadata.setdefault("groups", {})
+        now = datetime.now()
+        previous = groups.get(group, {})
+        if not isinstance(previous, dict):
+            previous = {}
         groups[group] = {
+            **previous,
             "source": source,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "updated_at": now.isoformat(timespec="seconds"),
+            "last_refreshed_at": now.isoformat(timespec="seconds"),
+            "last_monthly_refresh": now.strftime("%Y-%m"),
             "count": len(lines),
             "lines": lines,
         }
@@ -185,3 +232,12 @@ def _dedupe_preserve_order(lines: list[str]) -> list[str]:
 def _contains_blocked_expression(line: str) -> bool:
     lowered = line.lower()
     return any(blocked.lower() in lowered for blocked in BLOCKED_SUBSTRINGS)
+
+
+def _parse_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None

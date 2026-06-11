@@ -33,6 +33,7 @@ from app.config_service import ConfigService
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
+from app.message_splitter import split_knowledge_bubble_text
 from app.speech_bubble import ReplyBubble, SpeechBubble
 from app.window_position_service import WindowPositionService
 from character.behavior_controller import BehaviorController
@@ -342,6 +343,99 @@ class MemorySemanticMergeWorker(QObject):
             self.failed.emit(str(exc))
 
 
+class LocalLinesRefreshWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        client: DeepSeekClient,
+        local_lines_service: LocalLinesService,
+        group: str,
+        interval_days: int,
+        monthly_refresh: bool,
+        max_chars: int,
+        max_items: int,
+    ) -> None:
+        """Refresh generated local lines when the configured schedule is due."""
+        super().__init__()
+        self.client = client
+        self.local_lines_service = local_lines_service
+        self.group = group
+        self.interval_days = interval_days
+        self.monthly_refresh = monthly_refresh
+        self.max_chars = max_chars
+        self.max_items = max_items
+
+    def run(self) -> None:
+        try:
+            if not self.local_lines_service.should_refresh_generated_lines(
+                self.group,
+                interval_days=self.interval_days,
+                monthly_refresh=self.monthly_refresh,
+            ):
+                self.finished.emit({"refreshed": False, "reason": "not_due", "group": self.group})
+                return
+            if not self.client.is_configured():
+                self.finished.emit({"refreshed": False, "reason": "api_not_configured", "group": self.group})
+                return
+
+            reply = self.client.chat(self._messages())
+            candidates = self._parse_lines(reply)
+            result = self.local_lines_service.replace_generated_lines(
+                self.group,
+                candidates,
+                source="deepseek",
+                max_chars=self.max_chars,
+                max_items=self.max_items,
+            )
+            self.finished.emit(
+                {
+                    "refreshed": result.saved,
+                    "group": self.group,
+                    "accepted_count": len(result.accepted),
+                    "rejected_count": len(result.rejected),
+                }
+            )
+        except DeepSeekError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Local lines refresh worker failed")
+            self.failed.emit(str(exc))
+
+    def _messages(self) -> list[dict[str, str]]:
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "你是 Windows 桌面 AI 宠物“小胡”的本地话术编辑器。"
+                    "只输出中文短句列表，不要解释，不要编号，不要 Markdown。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"为知识问候前置提示生成 {self.max_items} 条自然、不机械、不打扰的中文短句。"
+                    f"每条不超过 {self.max_chars} 个汉字或字符。"
+                    "语气轻松温柔，不要说“根据记忆”“你之前说过”“数据库”“Mem0”“memory.json”。"
+                    "每行一条。"
+                ),
+            },
+        ]
+
+    def _parse_lines(self, text: str) -> list[str]:
+        lines: list[str] = []
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            line = line.lstrip("-*0123456789.、)） \t").strip()
+            if line:
+                lines.append(line.strip('"“”'))
+        if lines:
+            return lines
+        stripped = text.strip()
+        return [stripped] if stripped else []
+
+
 class DesktopPetWindow(QWidget):
     def __init__(self, project_root: Path) -> None:
         """初始化桌宠主窗口、依赖模块与 UI 组件。"""
@@ -390,10 +484,13 @@ class DesktopPetWindow(QWidget):
         self.mem0_search_worker: QObject | None = None
         self.memory_maintenance_thread: QThread | None = None
         self.memory_maintenance_worker: QObject | None = None
+        self.local_lines_refresh_thread: QThread | None = None
+        self.local_lines_refresh_worker: QObject | None = None
         self.background_tasks = BackgroundTaskRegistry(default_wait_timeout_ms=1000)
         self.move_animation: QPropertyAnimation | None = None
         self.behavior_started = False
         self.memory_maintenance_started = False
+        self.local_lines_refresh_started = False
         self.exit_animation_in_progress = False
         self.allow_immediate_close = False
         self._close_after_workers_finished = False
@@ -481,6 +578,8 @@ class DesktopPetWindow(QWidget):
         self.auto_move_timer.timeout.connect(self._trigger_auto_move)
         self._topmost_enforcement_timer = QTimer(self)
         self._topmost_enforcement_timer.timeout.connect(self._enforce_topmost)
+        self._local_lines_refresh_timer = QTimer(self)
+        self._local_lines_refresh_timer.timeout.connect(self._start_local_lines_refresh_worker)
 
         self._setup_window()
         self._setup_ui()
@@ -539,6 +638,10 @@ class DesktopPetWindow(QWidget):
         if not self.memory_maintenance_started:
             self.memory_maintenance_started = True
             QTimer.singleShot(0, self._start_memory_maintenance_worker)
+        if not self.local_lines_refresh_started:
+            self.local_lines_refresh_started = True
+            QTimer.singleShot(0, self._start_local_lines_refresh_worker)
+            self._local_lines_refresh_timer.start(6 * 60 * 60 * 1000)
         apply_transparent_window_fixes(self)
         self._enforce_topmost()
         self._topmost_enforcement_timer.start(30_000)
@@ -1152,6 +1255,10 @@ class DesktopPetWindow(QWidget):
         self.memory_maintenance_worker = None
         self.memory_maintenance_thread = None
 
+    def _clear_local_lines_refresh_task_refs(self) -> None:
+        self.local_lines_refresh_worker = None
+        self.local_lines_refresh_thread = None
+
     def _register_background_task(
         self,
         name: str,
@@ -1352,6 +1459,65 @@ class DesktopPetWindow(QWidget):
         self.background_tasks.unregister("memory_maintenance", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    def _start_local_lines_refresh_worker(self) -> None:
+        """Refresh generated local lines after the window is visible."""
+        if self.background_tasks.is_registered("local_lines_refresh"):
+            return
+        if not self.config_service.get_bool("local_lines_refresh.enabled", True):
+            return
+
+        group = self.config_service.get_str("local_lines_refresh.knowledge_intro_group", "knowledge_speak_intro")
+        interval_days = self.config_service.get_int("local_lines_refresh.interval_days", 7)
+        max_chars = self.config_service.get_int("local_lines_refresh.max_chars", 40)
+        max_items = self.config_service.get_int("local_lines_refresh.max_items", 8)
+        monthly_refresh = self.config_service.get_bool("local_lines_refresh.monthly_refresh", True)
+
+        self.local_lines_refresh_thread = QThread(self)
+        self.local_lines_refresh_worker = LocalLinesRefreshWorker(
+            self.deepseek_client,
+            self.local_lines_service,
+            group=group,
+            interval_days=interval_days if interval_days > 0 else 7,
+            monthly_refresh=monthly_refresh,
+            max_chars=max_chars if max_chars > 0 else 40,
+            max_items=max_items if max_items > 0 else 8,
+        )
+        self.local_lines_refresh_worker.moveToThread(self.local_lines_refresh_thread)
+        self.local_lines_refresh_thread.started.connect(self.local_lines_refresh_worker.run)
+        self.local_lines_refresh_worker.finished.connect(self._on_local_lines_refresh_success)
+        self.local_lines_refresh_worker.failed.connect(self._on_local_lines_refresh_failure)
+        self.local_lines_refresh_worker.finished.connect(self.local_lines_refresh_thread.quit)
+        self.local_lines_refresh_worker.failed.connect(self.local_lines_refresh_thread.quit)
+        self.local_lines_refresh_thread.finished.connect(self._cleanup_local_lines_refresh_thread)
+        if not self._register_background_task(
+            "local_lines_refresh",
+            self.local_lines_refresh_thread,
+            self.local_lines_refresh_worker,
+            self._clear_local_lines_refresh_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.local_lines_refresh_thread,
+                self.local_lines_refresh_worker,
+                self._clear_local_lines_refresh_task_refs,
+            )
+            return
+        self.local_lines_refresh_thread.start()
+
+    def _on_local_lines_refresh_success(self, result: object) -> None:
+        if self._closing_or_closed():
+            return
+        if isinstance(result, dict) and result.get("refreshed"):
+            logger.info("Local lines refresh completed: %s", result)
+
+    def _on_local_lines_refresh_failure(self, error_message: str) -> None:
+        if self._closing_or_closed():
+            return
+        logger.warning("Local lines refresh failed: %s", error_message)
+
+    def _cleanup_local_lines_refresh_thread(self) -> None:
+        self.background_tasks.unregister("local_lines_refresh", delete_later=True)
+        self._maybe_close_after_workers_finished()
+
     def _on_chat_success(self, reply: str) -> None:
         """处理模型成功返回后的界面更新与消息落盘。"""
         if self._closing_or_closed():
@@ -1545,7 +1711,22 @@ class DesktopPetWindow(QWidget):
             return
         cleaned_reply = reply.strip() or "让我再看看哦。"
         self.sprite_player.set_action("idle")
-        self._display_message(cleaned_reply, 15000, "proactive")
+        parts = split_knowledge_bubble_text(cleaned_reply)
+        if len(parts) <= 1:
+            self._display_message(parts[0] if parts else cleaned_reply, 15000, "proactive")
+            self._show_knowledge_reply_ack()
+            return
+
+        self._display_message(parts[0], 7000, "proactive")
+        QTimer.singleShot(5200, lambda second=parts[1]: self._show_knowledge_second_part(second))
+
+    def _show_knowledge_second_part(self, text: str) -> None:
+        if self._closing_or_closed() or self.chat_input.isVisible():
+            return
+        self._display_message(text, 12000, "proactive")
+        self._show_knowledge_reply_ack()
+
+    def _show_knowledge_reply_ack(self) -> None:
         ack = self.behavior_controller.pick_reply_ack_line()
         if ack:
             self.reply_bubble.set_always_on_top(

@@ -66,7 +66,7 @@ wscript.exe .\start_main.vbs
 - 空闲主动问候命中场景化生成时，`BehaviorController` 发出 `scenario_greeting_requested`，主窗口创建 `ScenarioGreetingWorker` 放入独立 `QThread` 调用 DeepSeek 生成一句短问候；API 不可用、线程忙或生成失败时静默回退到本地模板，不向用户显示错误。
 - 用户提交聊天消息后，主窗口仍负责气泡、动作、正式问答面板和 `QThread` 创建，但普通/正式模式快照、用户/助手消息落盘、本地回复/API 缺配置/API worker 分流、成功/失败后的 pending 状态由 `ChatFlowController` 协助管理。
 - 清理正式/非正式聊天记录时不再在 UI 线程中强制摘要，而是创建 `ChatHistoryClearWorker` 放到独立 `QThread` 执行摘要、清空和 `last_cleaned_at` 更新；主窗口只接收完成/失败信号并在后台操作结束后决定是否显示结果。
-- `BackgroundTaskRegistry` 统一登记聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护等 `QThread` 后台任务；同名任务登记会被拒绝，避免重复并发。退出时 `closeEvent()` 会统一请求后台线程停止并按任务配置做有界 `wait()`，超时任务记录 warning 后继续关闭，避免无限等待。
+- `BackgroundTaskRegistry` 统一登记聊天类任务、清理历史、Mem0 初始化/检索、语义记忆维护和本地话术刷新等 `QThread` 后台任务；同名任务登记会被拒绝，避免重复并发。退出时 `closeEvent()` 会统一请求后台线程停止并按任务配置做有界 `wait()`，超时任务记录 warning 后继续关闭，避免无限等待。
 - `ConfigService` 封装主窗口内低风险配置读取、默认值和嵌套字段读取；写回配置仍保留在主窗口现有 `setdefault()` 路径中，避免改变 `app_config.json` 结构或持久化行为。
 - 修改场景：几乎所有用户可见行为的入口都在这里接线。
 - 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`clear_history_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_close_after_workers_finished`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`、`_topmost_enforcement_timer`。
@@ -102,6 +102,12 @@ wscript.exe .\start_main.vbs
 - 轻量聊天流程协调器。`ChatFlowController` 不创建 QWidget、不切换动作、不启动 `QThread`，只协助 `DesktopPetWindow` 管理普通/正式问答模式快照、当前用户消息落盘、本地回复或 API 缺配置分流、`ChatWorker` 参数字典、成功/失败后的助手消息落盘和 pending 状态。
 - 修改场景：调整用户聊天流程的非 UI 状态、正式/非正式聊天记录路由、本地回复/API 请求分流、防止重复发起同名聊天任务。
 - 风险：不要在这里引入 `DeepSeekClient.chat()` 调用、`PromptBuilder` 改造、`ContextManager` 改造、气泡/正式问答面板展示或线程生命周期管理；这些仍由 `ChatWorker` 和 `DesktopPetWindow` 负责。
+
+`desktop_pet/app/message_splitter.py`
+
+- 本地消息展示拆分工具。`split_knowledge_bubble_text()` 会把知识问候模型返回的一整段文本按中文句号、问号、感叹号、分号等句末符号拆为最多两段；首段过短时会合并下一句，单句或无法安全拆分时保持原文。
+- 修改场景：调整知识问候气泡展示节奏、拆分符号、最短首段长度或最多展示段数。
+- 风险：这里只处理纯文本拆分，不应引入 QWidget、QTimer、API 调用或聊天记录落盘逻辑。
 
 `desktop_pet/app/context_menu.py`
 
@@ -195,7 +201,7 @@ wscript.exe .\start_main.vbs
 `desktop_pet/storage/*.py`
 
 - `json_store.py`：JSON 读写基础设施，缺文件时自动创建父目录和默认文件；保存时先写同目录 `.tmp`，`flush` + `os.fsync` 后用 `os.replace` 原子替换目标文件，并在目标文件非空时保留 `.bak`；读取遇到损坏 JSON 时会先把主文件重命名为 `.corrupt.<timestamp>`，再优先读取 `.bak`，备份也不可用时返回默认值深拷贝。`cleanup_tmp_json_files()` 用于清理中断写入留下的 `.tmp` 文件。
-- `local_lines_service.py`：本地话术读取和受控更新接口。`LocalLinesService` 支持 `pick_line()`、`get_lines()`、`append_manual_line()`、`replace_generated_lines()`、`validate_lines()` 和 `consume_first_start_line()`；更新仍保持 `local_lines.json` 现有数组结构，使用 `json_store.save_json()` 原子写入，并可把生成话术来源、更新时间和条数记录到 `data/local_lines_generated_meta.json`。用于后续 API 定期刷新本地话术时做去重、长度限制和机械记忆表达过滤。
+- `local_lines_service.py`：本地话术读取和受控更新接口。`LocalLinesService` 支持 `pick_line()`、`get_lines()`、`append_manual_line()`、`replace_generated_lines()`、`validate_lines()`、`consume_first_start_line()`、`should_refresh_generated_lines()` 和 `group_metadata()`；更新仍保持 `local_lines.json` 现有数组结构，使用 `json_store.save_json()` 原子写入，并可把生成话术来源、更新时间、最近刷新时间、月度刷新标记和条数记录到 `data/local_lines_generated_meta.json`。用于 API 定期刷新本地话术时做去重、长度限制、七天周期/月初到期判断和机械记忆表达过滤。
 - `chat_store.py`：保存和读取正式/非正式聊天记录（`chat_history_formal.json` / `chat_history_informal.json`），记录 `last_cleaned_at` 时间戳供手动清空时标记。
 - `memory_store.py`：保存和合并 `data/memory.json`。读取、保存和合并时会通过 `normalize_memory_schema()` 兼容旧结构并补齐 v2 默认字段：`relationship_memory.communication_style`、`relationship_memory.companionship_style`、`relationship_memory.interaction_patterns` 和 `memory_meta.schema_version=2`；补齐时保留未知旧字段，不会清空用户已有记忆。保存/合并仍写入 UTF-8 JSON，并同步更新顶层 `last_updated` 与 `memory_meta.last_updated`；合并关系记忆时会为被更新的关系子区块写入 `last_updated` 或 `last_observed_at`。
 - `memory_vector_store.py`: maintains compact machine-written `data/memory_vectors.json` for eligible `memory.json` text leaves. It uses the existing DashScope OpenAI-compatible embedding config, rounds embeddings according to `memory.memory_vector_precision`, skips texts shorter than `memory.memory_vector_min_text_length`, limits stored entries with `memory.memory_vector_max_items`, includes precision in `embedding_signature`, skips cleanly when no key or `requests` is unavailable, and supports same-field semantic duplicate merging on a two-month cadence.
@@ -229,6 +235,7 @@ wscript.exe .\start_main.vbs
 - 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`ui.show_reload_config` 控制“重新加载配置”菜单项显隐（默认 `true`）、`chat.force_summarize_before_clear`（默认 `true`）控制手动清空前是否强制摘要。
 - `ui.bubble_durations_ms` 用于配置主要气泡停留时长：`startup_greeting`、`period_greeting`、`proactive_greeting`、`assistant_reply`。
 - `behavior.enable_scenario_greeting`、`behavior.scenario_greeting_api_enabled`、`behavior.scenario_greeting_max_chars`、`behavior.scenario_greeting_min_memory_items`、`behavior.scenario_greeting_cooldown_minutes`、`behavior.scenario_greeting_low_interrupt_after_ignored` 控制场景化主动问候；默认保守启用，限制为 80 字、至少 1 条可用记忆、60 分钟冷却，连续 2 次未回应后走低打扰话术。
+- `local_lines_refresh` 控制 API 定期刷新本地生成话术：`enabled` 默认开启，`interval_days` 默认 7 天，`monthly_refresh` 默认开启并在进入新月份后固定刷新一次，`knowledge_intro_group` 默认 `knowledge_speak_intro`，`max_items` / `max_chars` 控制每次生成条数和单条长度。主窗口显示后立即检查一次，并由 `_local_lines_refresh_timer` 每 6 小时再次检查是否到期；API 未配置或未到期时静默跳过。
 - `memory.enable_mem0` 控制是否启用 Mem0 长期语义记忆；`memory.inject_mem0_to_prompt` 控制是否将 Mem0 检索结果注入聊天 Prompt；`memory.use_mem0_for_knowledge_speak` 控制知识问候是否优先使用 Mem0；`memory.mem0_search_top_k` 控制每轮检索数量；`memory.mem0_llm_provider` 默认 `deepseek`，`memory.mem0_use_app_deepseek_config` 默认复用项目 DeepSeek 配置，`memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 可覆盖模型和 base URL；`memory.mem0_embedder_provider` 默认 `dashscope_openai_compatible`，通过 DashScope / 阿里云百炼 OpenAI-compatible embeddings 接口使用 `text-embedding-v4` 和 1024 维向量；`memory.dashscope_api_key` / `memory.dashscope_api_key_env` 控制 DashScope key 来源；`memory.write_sensitive_memory` 默认 false，用于避免情绪陪伴场景下自动保存敏感长期记忆。
 - `memory.enable_memory_vectors` controls local vector indexing for `memory.json`; `memory.memory_vector_precision`, `memory.memory_vector_min_text_length`, and `memory.memory_vector_max_items` control vector file size; `memory.enable_semantic_memory_merge`, `memory.semantic_merge_interval_days`, and `memory.semantic_duplicate_similarity_threshold` control the post-startup background semantic duplicate merge.
 - `proactive_content_ratio.extra_knowledge` / `regular_greeting` 控制空闲主动问候中知识问候与普通问候的初始比例，当前默认 0.35 / 0.65；运行中用户回应会按 `_adjust_ratio()` 轻微调整，并持续钳制在 0.3-0.7 范围内。
@@ -650,3 +657,5 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-06-11：第四阶段低风险拆分 `DesktopPetWindow` 的配置读取辅助逻辑。新增 `desktop_pet/app/config_service.py`，提供点分路径 `get()`、`get_bool()`、`get_int()`、`get_str()` 和缺失字段默认值兜底；`DesktopPetWindow` 仅迁移右键菜单状态、窗口置顶/点击聊天/自主移动、清理前摘要、Mem0 超时、语义记忆维护开关、摘要轮数、正式问答显示、气泡时长等低风险只读配置读取，保留原配置文件结构、配置项名称和写回路径。新增 `desktop_pet/tests/test_config_service.py` 覆盖配置服务行为，并同步更新配置加载与测试说明。
 - 2026-06-11：第五阶段低风险拆分 `DesktopPetWindow` 的用户聊天流程协调逻辑。新增 `desktop_pet/app/chat_flow_controller.py`，协助管理普通/正式问答模式快照、用户与助手消息落盘、本地回复/API 缺配置/API worker 分流、`ChatWorker` 参数准备、成功/失败后的 pending 状态；`DesktopPetWindow` 保留 `_handle_user_message()`、`_start_chat_worker()`、`_on_chat_success()`、`_on_chat_failure()` 等方法名，并继续负责气泡、正式问答面板、动作切换、鼠标/菜单和 `QThread` 生命周期。新增 `desktop_pet/tests/test_chat_flow_controller.py` 覆盖本地回复、缺 API、正式问答、worker 参数和重复聊天任务判断。
 - 2026-06-11：新增本地话术服务接口。`desktop_pet/storage/local_lines_service.py` 提供 `LocalLinesService`，集中处理本地话术随机抽取、首启话术消费、手动追加、生成话术受控替换、去重、长度限制和机械记忆表达过滤；`BehaviorController` 改为通过该服务读取普通话术和 `first_start`，`DesktopPetWindow._handle_knowledge_speak()` 改为从 `knowledge_speak_intro` 随机抽取知识问候前置提示，缺失时回退本地兜底。`local_lines.json` 新增 `knowledge_speak_intro` 话术组，新增 `test_local_lines_service.py` 覆盖旧数组格式、fallback、受控生成更新、去重和首启话术消费。
+- 2026-06-12：新增 `knowledge_speak_intro` 定期刷新。`LocalLinesService` 增加 `should_refresh_generated_lines()` 和 `group_metadata()`，根据 `data/local_lines_generated_meta.json` 判断七天周期和月初刷新；`DesktopPetWindow` 新增 `LocalLinesRefreshWorker`，窗口显示后立即检查一次，并通过 `_local_lines_refresh_timer` 每 6 小时复查，到期且 DeepSeek API 已配置时生成短话术并调用 `replace_generated_lines("knowledge_speak_intro", ...)` 写回本地话术，未到期或缺 API 时静默跳过。`app_config.example.json` 新增 `local_lines_refresh` 配置节，`test_local_lines_service.py` 覆盖七天到期、跨月刷新、未到期跳过、worker 写入和缺 API 跳过。
+- 2026-06-12：新增知识问候气泡本地分段展示。`desktop_pet/app/message_splitter.py` 提供 `split_knowledge_bubble_text()`，按句号、问号、感叹号、分号等句末符号把知识问候回复拆为最多两段，首句过短时合并下一句；`DesktopPetWindow._on_knowledge_speak_success()` 改为第一段立即展示、第二段延迟展示，并在最后一段展示后再弹出右侧 `ReplyBubble` 确认气泡。新增 `test_message_splitter.py` 覆盖句号拆分、短首句合并、单句保留、问号/感叹号和空白归一。
