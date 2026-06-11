@@ -28,6 +28,7 @@ from animation.sprite_player import SpritePlayer
 from app.background_task_registry import BackgroundTaskRegistry
 from app.bubble_position_service import BubblePositionService
 from app.chat_input import ChatInput
+from app.config_service import ConfigService
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
@@ -363,6 +364,7 @@ class DesktopPetWindow(QWidget):
         self.window_state_path = self.data_dir / "window_state.json"
 
         self.app_config = self._load_app_config()
+        self.config_service = ConfigService(self.app_config)
         self.window_position_service = WindowPositionService(
             self.window_state_path,
             QApplication,
@@ -482,7 +484,7 @@ class DesktopPetWindow(QWidget):
             | Qt.WindowType.Tool
             | Qt.WindowType.NoDropShadowWindowHint
         )
-        if self._ui_config().get("always_on_top", True):
+        if self.config_service.get_bool("ui.always_on_top", True):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -569,7 +571,7 @@ class DesktopPetWindow(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.dragging:
                 self._save_window_position()
-            elif self._ui_config().get("click_to_chat", True):
+            elif self.config_service.get_bool("ui.click_to_chat", True):
                 if self._suppress_click:
                     self._suppress_click = False
                 else:
@@ -632,9 +634,9 @@ class DesktopPetWindow(QWidget):
             on_test_poetry=self._test_poetry,
             on_request_exit=self.request_exit,
             current_scale=self._ui_scale(),
-            do_not_disturb=bool(self._behavior_config().get("do_not_disturb", False)),
-            auto_move=bool(self._ui_config().get("enable_free_move", False)),
-            api_chat_enabled=bool(self._api_config().get("enable_chat_api", True)),
+            do_not_disturb=self.config_service.get_bool("behavior.do_not_disturb", False),
+            auto_move=self.config_service.get_bool("ui.enable_free_move", False),
+            api_chat_enabled=self.config_service.get_bool("api.enable_chat_api", True),
             formal_qa_mode=self._formal_qa_enabled(),
             formal_answer_display=self._formal_answer_display_mode(),
             on_set_scale=self._set_scale,
@@ -646,10 +648,10 @@ class DesktopPetWindow(QWidget):
             on_set_formal_answer_display=self._set_formal_answer_display,
             on_toggle_always_on_top=self._toggle_always_on_top,
             on_reload_config=self._reload_config,
-            always_on_top=bool(self._ui_config().get("always_on_top", True)),
-            show_test_menu=bool(self._ui_config().get("show_test_menu", False)),
-            show_clear_menu=bool(self._ui_config().get("show_clear_menu", False)),
-            show_reload_config=bool(self._ui_config().get("show_reload_config", True)),
+            always_on_top=self.config_service.get_bool("ui.always_on_top", True),
+            show_test_menu=self.config_service.get_bool("ui.show_test_menu", False),
+            show_clear_menu=self.config_service.get_bool("ui.show_clear_menu", False),
+            show_reload_config=self.config_service.get_bool("ui.show_reload_config", True),
             on_clear_informal_chat=self._clear_informal_chat_history,
             on_clear_formal_chat=self._clear_formal_chat_history,
         )
@@ -845,7 +847,7 @@ class DesktopPetWindow(QWidget):
             | Qt.WindowType.Tool
             | Qt.WindowType.NoDropShadowWindowHint
         )
-        if self._ui_config().get("always_on_top", True):
+        if self.config_service.get_bool("ui.always_on_top", True):
             flags |= Qt.WindowType.WindowStaysOnTopHint
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -898,7 +900,10 @@ class DesktopPetWindow(QWidget):
             mode=mode,
             summarizer=summarizer,
             chat_store=chat_store,
-            force_summarize=bool(self._chat_config().get("force_summarize_before_clear", True)),
+            force_summarize=self.config_service.get_bool(
+                "chat.force_summarize_before_clear",
+                True,
+            ),
         )
         self.clear_history_worker.moveToThread(self.clear_history_thread)
         self.clear_history_thread.started.connect(self.clear_history_worker.run)
@@ -936,6 +941,7 @@ class DesktopPetWindow(QWidget):
     def _reload_config(self) -> None:
         """重新读取配置文件，并刷新动画和行为控制状态。"""
         self.app_config = self._load_app_config()
+        self.config_service.update(self.app_config)
         self.memory_vector_store.update_config(self.app_config)
         self._start_mem0_initialization(close_existing=True)
         self.summarizer_formal.user_id = self._memory_user_id()
@@ -959,7 +965,7 @@ class DesktopPetWindow(QWidget):
             self._display_message("我还在想上一条呢，等我一下下。", 3200, "system")
             return
         self.behavior_controller.notify_user_interaction()
-        self.chat_input.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
+        self.chat_input.set_always_on_top(self.config_service.get_bool("ui.always_on_top", True))
         self.chat_input.show_near(self.geometry())
         self.sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)
         self._waiting_timer.start(30_000)
@@ -980,8 +986,8 @@ class DesktopPetWindow(QWidget):
             self._is_poetry_request(message)
             and not self._api_chat_enabled()
             and not self._formal_qa_enabled()
-            and not self._ui_config().get("enable_free_move", False)
-            and not self._ui_config().get("always_on_top", True)
+            and not self.config_service.get_bool("ui.enable_free_move", False)
+            and not self.config_service.get_bool("ui.always_on_top", True)
         ):
             poetry_line = self.behavior_controller.pick_poetry_line()
             if poetry_line:
@@ -1164,7 +1170,9 @@ class DesktopPetWindow(QWidget):
 
     def _mem0_init_wait_timeout_ms(self) -> int:
         try:
-            timeout_seconds = float(self._memory_config().get("mem0_init_timeout_seconds", 10))
+            timeout_seconds = float(
+                self.config_service.get("memory.mem0_init_timeout_seconds", 10)
+            )
         except (TypeError, ValueError):
             timeout_seconds = 10.0
         return max(0, int(timeout_seconds * 1000))
@@ -1292,7 +1300,7 @@ class DesktopPetWindow(QWidget):
         if self.background_tasks.is_registered("memory_maintenance"):
             return
         self.memory_vector_store.update_config(self.app_config)
-        if not self._memory_config().get("enable_semantic_memory_merge", True):
+        if not self.config_service.get_bool("memory.enable_semantic_memory_merge", True):
             return
 
         self.memory_maintenance_thread = QThread(self)
@@ -1380,7 +1388,7 @@ class DesktopPetWindow(QWidget):
     def _maybe_summarize(self, formal_qa_mode: bool = False) -> None:
         """在后台线程中尝试触发对应模式的聊天摘要。"""
         try:
-            trigger_rounds = int(self._api_config().get("summary_trigger_rounds", 12))
+            trigger_rounds = self.config_service.get_int("api.summary_trigger_rounds", 12)
             if formal_qa_mode:
                 self.summarizer_formal.maybe_summarize(trigger_rounds)
             else:
@@ -1497,7 +1505,7 @@ class DesktopPetWindow(QWidget):
             memory,
             mem0_memory_service=self.mem0_memory_service,
             user_id=self._memory_user_id(),
-            use_mem0=bool(self._memory_config().get("use_mem0_for_knowledge_speak", False)),
+            use_mem0=self.config_service.get_bool("memory.use_mem0_for_knowledge_speak", False),
             mem0_memory_context=self._pending_knowledge_mem0_context,
         )
         self._pending_knowledge_mem0_context = ""
@@ -1531,7 +1539,9 @@ class DesktopPetWindow(QWidget):
         self._display_message(cleaned_reply, 15000, "proactive")
         ack = self.behavior_controller.pick_reply_ack_line()
         if ack:
-            self.reply_bubble.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
+            self.reply_bubble.set_always_on_top(
+                self.config_service.get_bool("ui.always_on_top", True)
+            )
             self.reply_bubble.show_message(ack, self.geometry(), 8000)
             self._sync_floating_widgets()
 
@@ -1549,7 +1559,7 @@ class DesktopPetWindow(QWidget):
 
     def _display_message(self, text: str, duration_ms: int, source: str = "system") -> None:
         """通过气泡组件显示一条消息。"""
-        self.bubble.set_always_on_top(bool(self._ui_config().get("always_on_top", True)))
+        self.bubble.set_always_on_top(self.config_service.get_bool("ui.always_on_top", True))
         self.bubble.show_message(text, self.geometry(), duration_ms, source)
         self._sync_floating_widgets()
 
@@ -1641,7 +1651,7 @@ class DesktopPetWindow(QWidget):
         position = self.window_position_service.restore_position(
             self.size(),
             self.sprite_player.base_size(),
-            remember_last_position=self._ui_config().get("remember_last_position", True),
+            remember_last_position=self.config_service.get_bool("ui.remember_last_position", True),
         )
         self.move(position)
 
@@ -1658,7 +1668,7 @@ class DesktopPetWindow(QWidget):
 
     def _enforce_topmost(self) -> None:
         """在 Windows API 级别强制置顶主窗口，防止 WS_EX_TOPMOST 被系统清除。"""
-        if not self._ui_config().get("always_on_top", True):
+        if not self.config_service.get_bool("ui.always_on_top", True):
             self._topmost_enforcement_timer.stop()
             return
         try:
@@ -1669,7 +1679,7 @@ class DesktopPetWindow(QWidget):
 
     def _refresh_auto_move_timer(self) -> None:
         """根据配置决定是否开启自主移动定时器。"""
-        if self._ui_config().get("enable_free_move", False):
+        if self.config_service.get_bool("ui.enable_free_move", False):
             self.auto_move_timer.start(random.randint(15_000, 28_000))
         else:
             self.auto_move_timer.stop()
@@ -1813,20 +1823,23 @@ class DesktopPetWindow(QWidget):
 
     def _api_chat_enabled(self) -> bool:
         """判断当前用户聊天是否允许接入外部 API。"""
-        return bool(self._api_config().get("enable_chat_api", True))
+        return self.config_service.get_bool("api.enable_chat_api", True)
 
     def _formal_qa_enabled(self) -> bool:
         """判断当前是否开启正式问答模式。"""
-        return bool(self._chat_config().get("formal_qa_mode", False))
+        return self.config_service.get_bool("chat.formal_qa_mode", False)
 
     def _formal_answer_display_mode(self) -> str:
         """读取正式问答多回答显示方式。"""
-        mode = str(self._chat_config().get("formal_answer_display", "new_panel"))
+        mode = self.config_service.get_str("chat.formal_answer_display", "new_panel")
         return mode if mode in {"new_panel", "append"} else "new_panel"
 
     def _ui_scale(self) -> float:
         """读取并返回当前 UI 缩放比例。"""
-        return float(self._ui_config().get("scale", 1.0) or 1.0)
+        try:
+            return float(self.config_service.get("ui.scale", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            return 1.0
 
     def _ui_config(self) -> dict[str, Any]:
         """返回 UI 配置字典，不存在时自动补默认节点。"""
@@ -1850,11 +1863,11 @@ class DesktopPetWindow(QWidget):
 
     def _memory_user_id(self) -> str:
         """Return the single-user memory id used by Mem0."""
-        return str(self._memory_config().get("mem0_user_id", "default_user"))
+        return self.config_service.get_str("memory.mem0_user_id", "default_user")
 
     def _has_knowledge_memory(self) -> bool | None:
         """Return whether Mem0 has enough memory to try a knowledge greeting."""
-        if not self._memory_config().get("use_mem0_for_knowledge_speak", False):
+        if not self.config_service.get_bool("memory.use_mem0_for_knowledge_speak", False):
             return False
         if self._pending_knowledge_mem0_context:
             return True
@@ -1869,20 +1882,12 @@ class DesktopPetWindow(QWidget):
 
     def _assistant_reply_bubble_duration_ms(self) -> int:
         """Read the regular assistant reply bubble duration from config."""
-        durations = self._ui_config().setdefault("bubble_durations_ms", {})
-        try:
-            value = int(durations.get("assistant_reply", 15000))
-        except (TypeError, ValueError):
-            return 15000
+        value = self.config_service.get_int("ui.bubble_durations_ms.assistant_reply", 15000)
         return value if value > 0 else 15000
 
     def _proactive_greeting_duration_ms(self) -> int:
         """Read the proactive greeting bubble duration from config."""
-        durations = self._ui_config().setdefault("bubble_durations_ms", {})
-        try:
-            value = int(durations.get("proactive_greeting", 6000))
-        except (TypeError, ValueError):
-            return 6000
+        value = self.config_service.get_int("ui.bubble_durations_ms.proactive_greeting", 6000)
         return value if value > 0 else 6000
 
     def _active_chat_store(self) -> ChatStore:

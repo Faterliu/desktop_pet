@@ -66,6 +66,7 @@ wscript.exe .\start_main.vbs
 - 空闲主动问候命中场景化生成时，`BehaviorController` 发出 `scenario_greeting_requested`，主窗口创建 `ScenarioGreetingWorker` 放入独立 `QThread` 调用 DeepSeek 生成一句短问候；API 不可用、线程忙或生成失败时静默回退到本地模板，不向用户显示错误。
 - 清理正式/非正式聊天记录时不再在 UI 线程中强制摘要，而是创建 `ChatHistoryClearWorker` 放到独立 `QThread` 执行摘要、清空和 `last_cleaned_at` 更新；主窗口只接收完成/失败信号并在后台操作结束后决定是否显示结果。
 - `BackgroundTaskRegistry` 统一登记聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护等 `QThread` 后台任务；同名任务登记会被拒绝，避免重复并发。退出时 `closeEvent()` 会统一请求后台线程停止并按任务配置做有界 `wait()`，超时任务记录 warning 后继续关闭，避免无限等待。
+- `ConfigService` 封装主窗口内低风险配置读取、默认值和嵌套字段读取；写回配置仍保留在主窗口现有 `setdefault()` 路径中，避免改变 `app_config.json` 结构或持久化行为。
 - 修改场景：几乎所有用户可见行为的入口都在这里接线。
 - 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`clear_history_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_close_after_workers_finished`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`、`_topmost_enforcement_timer`。
 
@@ -88,6 +89,12 @@ wscript.exe .\start_main.vbs
 - `DesktopPetWindow._sync_floating_widgets()` 使用该服务计算目标坐标后调用气泡 `move()`；气泡创建、显示、隐藏、计时关闭和样式仍保留在 `SpeechBubble` / `ReplyBubble` 与主窗口原显示方法中。
 - 修改场景：调整气泡在桌宠上/下/左/右的优先级、屏幕边缘避让策略、两个气泡互斥规则。
 - 风险：不要在这里引入聊天、主动问候、QThread 或 QWidget 创建逻辑；它应保持为可单元测试的位置计算服务。
+
+`desktop_pet/app/config_service.py`
+
+- 轻量配置读取服务。`ConfigService` 基于内存中的配置字典支持 `get(path, default=None)`、`get_bool()`、`get_int()` 和 `get_str()`，其中 `path` 使用点分嵌套路径，例如 `api.enable_chat_api`、`ui.bubble_durations_ms.assistant_reply`。
+- 修改场景：主窗口或其他模块中重复的只读配置读取、缺省值兜底、嵌套字段读取。
+- 风险：该服务不负责加载、保存或迁移配置，不应在这里改变 `app_config.json` / `app_config.example.json` 结构；需要写回配置时仍使用原有保存路径。
 
 `desktop_pet/app/context_menu.py`
 
@@ -318,6 +325,7 @@ wscript.exe .\start_main.vbs
 
 - `DesktopPetWindow._load_app_config()` 使用 `load_json_prefer_primary(config/app_config.json, config/app_config.example.json, {})`。
 - 如果主配置存在，读取主配置；如果不存在，读取示例配置；如果两者都不存在，才按默认值创建主配置。
+- `DesktopPetWindow` 初始化 `ConfigService(self.app_config)` 用于安全读取点分路径配置；重新加载配置后调用 `config_service.update(self.app_config)` 指向最新内存配置。
 - `DeepSeekClient` 和 `ContextManager` 也使用相同的主配置优先、示例配置兜底策略。
 
 构建流程：
@@ -329,6 +337,7 @@ wscript.exe .\start_main.vbs
 
 - 当前使用 `desktop_pet/tests/` 下的 `unittest` 回归测试，没有 pytest、CI、格式化器配置。
 - 推荐使用项目本地虚拟环境运行：`desktop_pet\.desktop_pet_venv\Scripts\python.exe -m unittest discover -s desktop_pet\tests`。
+- 配置读取服务回归测试为 `test_config_service.py`，覆盖点分路径读取、缺失字段默认值、类型转换和 reload 后更新引用。
 - 记忆系统相关回归测试包括 `test_memory_schema.py`、`test_summarizer_memory_updates.py`、`test_prompt_builder_memory_sections.py` 和 `test_memory_vector_store.py`，分别覆盖 memory schema 兼容、关系记忆提取、Prompt 记忆分区与本地向量索引。场景化主动问候测试包括 `test_proactive_context.py`、`test_scenario_greeting_config.py`、`test_scenario_greeting_worker.py` 和 `test_behavior_controller.py` 中的场景化分流用例。
 - 常用轻量校验方式还包括 Python AST 解析、JSON 合法性检查和手动启动。
 - `py_compile` 在本环境可能因为 `__pycache__` 写入权限失败，不适合作为唯一验证方式。
@@ -629,3 +638,4 @@ Python 依赖见 `desktop_pet/requirements.txt`：
 - 2026-06-08：第一阶段低风险拆分 `DesktopPetWindow `的窗口位置逻辑。新增 `desktop_pet/app/window_position_service.py`，集中负责读取/保存 `window_state.json`、多屏可见性判断和屏幕外坐标回退默认位置；`DesktopPetWindow._restore_position()`、`_save_window_position()`、_position_visible_on_any_screen() 保留原方法名并转调服务，未改变聊天、气泡、主动问候、动画、菜单逻辑和 `window_state.json `结构。新增 `desktop_pet/tests/test_window_position_service.py` 覆盖首次启动、位置保存、下次恢复、多屏可见性和屏幕外回退。
 - 2026-06-09：第二阶段低风险拆分 `DesktopPetWindow` 的气泡位置计算逻辑。新增 `desktop_pet/app/bubble_position_service.py`，集中负责普通气泡和知识问候应答气泡的候选位置、屏幕可用区域避让、避免覆盖桌宠以及气泡间 `exclusion_rects` 互斥；`DesktopPetWindow._sync_floating_widgets()` 保留原方法名和可见性判断，只调用服务计算坐标后移动气泡，未改变气泡样式、显示时机、聊天流程、主动问候流程、输入框和正式问答面板。新增 `desktop_pet/tests/test_bubble_position_service.py` 覆盖屏幕中央、左边缘、右边缘、底部和气泡互斥避让。
 - 2026-06-09：补齐第三阶段后台任务注册表接口。`BackgroundTaskRegistry` 新增 `unregister()`、支持 `request_quit_all(timeout_ms)` 返回仍在运行的任务、并新增 `clear_finished()` 清理已结束线程引用；`DesktopPetWindow` 原线程清理方法名保留，内部改为调用 `unregister()`，`_request_background_workers_quit()` 改为带 1000ms 有界等待。未改变 `ChatWorker`、Mem0 初始化/检索 worker、语义记忆维护 worker 或清理历史 worker 的业务逻辑。扩展 `test_background_task_registry.py` 覆盖新接口。
+- 2026-06-11：第四阶段低风险拆分 `DesktopPetWindow` 的配置读取辅助逻辑。新增 `desktop_pet/app/config_service.py`，提供点分路径 `get()`、`get_bool()`、`get_int()`、`get_str()` 和缺失字段默认值兜底；`DesktopPetWindow` 仅迁移右键菜单状态、窗口置顶/点击聊天/自主移动、清理前摘要、Mem0 超时、语义记忆维护开关、摘要轮数、正式问答显示、气泡时长等低风险只读配置读取，保留原配置文件结构、配置项名称和写回路径。新增 `desktop_pet/tests/test_config_service.py` 覆盖配置服务行为，并同步更新配置加载与测试说明。
