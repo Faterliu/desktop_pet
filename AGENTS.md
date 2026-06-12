@@ -1,32 +1,32 @@
 # AGENTS.md
 
-面向未来 AI 编程智能体的项目接手文档。它不是普通 README，而是为了让第一次进入本仓库的智能体在 5 分钟内知道先读哪里、改哪里、哪些地方不要贸然动。
+Project handoff document for future AI coding agents. This is not a regular README; it is meant to let an agent entering this repository for the first time know, within five minutes, what to read first, where to make changes, and which areas should not be touched casually.
 
-## 5 分钟快速概览
+## 5-Minute Quick Overview
 
-- 一句话概览：这是一个基于 Python 和 PySide6 的 Windows 桌面 AI 宠物原型，角色通过像素 spritesheet 显示在桌面上，可聊天、主动问候、保存本地 JSON 数据，并可调用 DeepSeek API。
-- 实际可运行程序在 `desktop_pet/` 目录内，入口是 `desktop_pet/main.py`。根目录的 `README.md` 是更新日志，`xiaohu_codex_package/xiaohu_codex/` 是早期需求、任务和素材说明。
-- 启动建议第一次先运行 `desktop_pet/setup_env.bat` 创建项目本地虚拟环境并安装依赖，之后日常双击 `desktop_pet/start_main.vbs` 无终端启动。手动启动仍可 `cd desktop_pet` 后执行 `py -m pip install -r requirements.txt` 和 `py main.py`。不要默认信任 `python` 或 `pip`，它们在 Windows 上可能指向应用商店别名或旧解释器。
-- 主协调器是 `desktop_pet/app/desktop_pet_window.py`。多数 UI、聊天、配置、动作、自动移动、正式问答、退出流程都从这里串起来。
-- 运行时个性化数据不应提交：`desktop_pet/config/app_config.json`、`desktop_pet/data/`、日志和缓存都由 `.gitignore` 忽略。默认配置模板是 `desktop_pet/config/app_config.example.json`。
-- 当前没有独立测试框架、构建脚本或打包流程，但 `desktop_pet/tests/` 已有 `unittest` 回归测试。常用校验是项目本地虚拟环境执行 `python -m unittest discover -s desktop_pet/tests`、JSON 合法性、Python AST/语法检查、手动运行桌宠。
-- 每次智能体修改代码后，必须检查本文件是否需要同步更新。涉及目录结构、核心流程、API、数据结构、配置项、依赖、测试方式、构建方式或项目约定时，必须更新本文件底部的“文档同步记录”。
+- One-sentence overview: This is a Windows desktop AI pet prototype built with Python and PySide6. The character is displayed on the desktop through a pixel spritesheet, can chat, proactively greet the user, save local JSON data, and call the DeepSeek API.
+- The runnable application lives under `desktop_pet/`, and the entry point is `desktop_pet/main.py`. The root `README.md` is a changelog, and `xiaohu_codex_package/xiaohu_codex/` contains early requirements, task notes, and asset documentation.
+- For the first launch, run `desktop_pet/setup_env.bat` to create the project-local virtual environment and install dependencies. After that, daily startup should use `desktop_pet/start_main.vbs` for terminal-free launch. Manual startup is still available by running `cd desktop_pet`, then `py -m pip install -r requirements.txt` and `py main.py`. Do not trust `python` or `pip` by default, because on Windows they may point to Microsoft Store aliases or old interpreters.
+- The main coordinator is `desktop_pet/app/desktop_pet_window.py`. Most UI, chat, configuration, animation, auto-movement, formal Q&A, and exit flows are wired together from there.
+- Runtime personalized data should not be committed: `desktop_pet/config/app_config.json`, `desktop_pet/data/`, logs, and caches are ignored by `.gitignore`. The default configuration template is `desktop_pet/config/app_config.example.json`.
+- There is currently no standalone test framework, build script, or packaging flow, but `desktop_pet/tests/` contains `unittest` regression tests. Common checks are running `python -m unittest discover -s desktop_pet/tests` in the project-local virtual environment, validating JSON, checking Python AST/syntax, and manually running the desktop pet.
+- After each code change by an agent, check whether this file needs to be updated. If the change touches directory structure, core flows, APIs, data structures, configuration keys, dependencies, test methods, build methods, or project conventions, update the "Documentation Sync Log" at the bottom of this file.
 
-## 1. 项目一句话概览
+## 1. One-Sentence Project Overview
 
-`desktop_pet` 是一个 Windows 本地桌面 AI 伴随宠物应用：用 PySide6 创建透明、无边框、置顶窗口显示像素角色，并通过本地话术或 DeepSeek Chat Completions API 与用户互动。
+`desktop_pet` is a local Windows desktop AI companion pet application: it uses PySide6 to create a transparent, borderless, always-on-top window that displays a pixel character and interacts with the user through local scripted lines or the DeepSeek Chat Completions API.
 
-## 2. 主要目标和运行方式
+## 2. Main Goals and Run Methods
 
-主要目标来自 `xiaohu_codex_package/xiaohu_codex/PROJECT_REQUIREMENTS.md` 和当前代码实现：
+The main goals come from `xiaohu_codex_package/xiaohu_codex/PROJECT_REQUIREMENTS.md` and the current code implementation:
 
-- 显示透明背景的桌面角色窗口，支持拖拽、位置保存、右键菜单和退出。
-- 从 `assets/spritesheet.webp` 与 `assets/sprite_config.json` 裁切并播放动作帧。
-- 点击角色弹出聊天输入框，支持本地回复或 DeepSeek API 回复。
-- 保存聊天记录、摘要、记忆、每日使用量和窗口位置到 `desktop_pet/data/`。
-- 支持启动问候、空闲主动话术、免打扰模式、自主移动、人物缩放、正式问答模式。
+- Display a transparent desktop character window, with support for dragging, position persistence, a right-click menu, and exit.
+- Crop and play animation frames from `assets/spritesheet.webp` and `assets/sprite_config.json`.
+- Open a chat input box when the character is clicked, supporting either local replies or DeepSeek API replies.
+- Save chat history, summaries, memory, daily usage counters, and window position under `desktop_pet/data/`.
+- Support startup greetings, idle proactive lines, do-not-disturb mode, autonomous movement, character scaling, and formal Q&A mode.
 
-运行方式：
+Run method:
 
 ```powershell
 cd desktop_pet
@@ -34,7 +34,7 @@ py -m pip install -r requirements.txt
 py main.py
 ```
 
-快速启动：
+Quick startup:
 
 ```powershell
 cd desktop_pet
@@ -42,447 +42,448 @@ cd desktop_pet
 wscript.exe .\start_main.vbs
 ```
 
-注意：
+Notes:
 
-- `python main.py` 只有在 `python` 指向真实解释器时才可靠。此前移植排查中，`python` 指到 `Microsoft\WindowsApps\python.exe` 时会出现无输出、无窗口、无 `data/` 的情况。
-- `pip install -r requirements.txt` 可能命中旧版 Python 的坏掉 `pip.exe` 启动器。优先使用 `py -m pip install -r requirements.txt`。
-- `setup_env.bat` 负责环境准备：只接受能运行 `python -m pip --version` 且支持 `venv` 的解释器，优先查找 Miniforge，其次查找 `uv` 安装的 CPython 3.13、`py -3.13`、`py -3`、当前 `python`；如果都不可用，会尝试通过 `winget install --id Python.Python.3.13 -e --source winget --accept-package-agreements --accept-source-agreements` 安装 Python。随后创建项目本地 `desktop_pet/.desktop_pet_venv`，依赖安装进该本地环境，并把 `.desktop_pet_venv/Scripts/python.exe` 无换行保存到 `data/runtime_python.txt`。该脚本不再向全局 Python 安装项目依赖。
-- `start_main.vbs` 是默认无终端启动入口：先在仓库根目录执行 `git pull --ff-only` 尝试拉取当前分支最新代码，再读取并清理 `data/runtime_python.txt` 中的回车、换行、制表符和 BOM，确认对应 Python 路径存在后直接隐藏执行 `main.py`，输出写入 `data/start_main_error.log`；拉取失败只写入 warning 并继续启动，只有缺环境或 `main.py` 非零退出时，才打开错误终端并显示日志。依赖完整性由 `setup_env.bat` 负责校验，日常启动不再额外执行 `import PySide6, requests` smoke check。
-- 程序启动后应创建 `desktop_pet/data/startup_bootstrap.log` 和 `desktop_pet/data/app.log`。前者在导入 PySide6 前写入，用于早期启动排查。
+- `python main.py` is reliable only when `python` points to a real interpreter. During earlier migration debugging, when `python` pointed to `Microsoft\WindowsApps\python.exe`, the result was no output, no window, and no `data/` directory.
+- `pip install -r requirements.txt` may hit a broken `pip.exe` launcher from an old Python version. Prefer `py -m pip install -r requirements.txt`.
+- `setup_env.bat` handles environment preparation: it only accepts interpreters that can run `python -m pip --version` and support `venv`; it first looks for Miniforge, then CPython 3.13 installed by `uv`, then `py -3.13`, `py -3`, and the current `python`. If none are usable, it attempts to install Python through `winget install --id Python.Python.3.13 -e --source winget --accept-package-agreements --accept-source-agreements`. It then creates the project-local `desktop_pet/.desktop_pet_venv`, installs dependencies into that local environment, and writes `.desktop_pet_venv/Scripts/python.exe` without a trailing newline to `data/runtime_python.txt`. This script no longer installs project dependencies into the global Python environment.
+- `start_main.vbs` is the default terminal-free startup entry: it first runs `git pull --ff-only` from the repository root to try to pull the latest code for the current branch, then reads `data/runtime_python.txt`, strips carriage returns, newlines, tabs, and BOM, verifies that the Python path exists, and directly runs `main.py` hidden. Output is written to `data/start_main_error.log`; pull failures only write a warning and continue startup. Only missing environment or a nonzero `main.py` exit opens an error terminal and displays the log. Dependency completeness is validated by `setup_env.bat`; daily startup no longer performs an extra `import PySide6, requests` smoke check.
+- After startup, the program should create `desktop_pet/data/startup_bootstrap.log` and `desktop_pet/data/app.log`. The former is written before importing PySide6 and is used for early startup diagnostics.
 
-## 3. 关键目录和文件说明
+## 3. Key Directories and Files
 
 `desktop_pet/main.py`
 
-- 程序入口。先写 `data/startup_bootstrap.log`，再导入 PySide6、配置日志、创建 `QApplication` 和 `DesktopPetWindow`。
-- 修改场景：启动失败诊断、Qt 应用生命周期、窗口显示和事件循环策略。
-- 风险：过早导入业务模块会削弱早期日志的诊断价值。
+- Program entry point. It first writes `data/startup_bootstrap.log`, then imports PySide6, configures logging, and creates `QApplication` and `DesktopPetWindow`.
+- Change scenarios: startup failure diagnostics, Qt application lifecycle, window display, and event loop strategy.
+- Risk: importing business modules too early weakens the diagnostic value of the early startup log.
 
 `desktop_pet/app/desktop_pet_window.py`
 
-- 核心协调器。负责窗口属性、鼠标事件（单击聊天、双击回复/打招呼、拖拽移动、右键菜单，含置顶开关）、聊天流程、后台线程、正式问答面板、自动移动、位置恢复和退出动画（退出时播放 waving 并显示 `farewell` 道别气泡）。
-- `_enforce_topmost()` 由 `_topmost_enforcement_timer` 每 30 秒驱动，通过 `force_window_topmost()` 在 Windows API 级别强制 `WS_EX_TOPMOST`，防止频繁 `setMask()` 导致置顶样式被系统清除。
-- `_sync_floating_widgets()` 在气泡/输入框跟随角色位置时，仍由主窗口判断哪些浮动控件可见，但气泡目标坐标改由 `BubblePositionService` 计算；主窗口只把对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入服务，并移动 `SpeechBubble` / `ReplyBubble`，使两个气泡互相避让不重叠。聊天输入框仍使用 `ChatInput.reposition()`。
-- 空闲主动问候命中场景化生成时，`BehaviorController` 发出 `scenario_greeting_requested`，主窗口创建 `ScenarioGreetingWorker` 放入独立 `QThread` 调用 DeepSeek 生成一句短问候；API 不可用、线程忙或生成失败时静默回退到本地模板，不向用户显示错误。
-- 用户提交聊天消息后，主窗口仍负责气泡、动作、正式问答面板和 `QThread` 创建，但普通/正式模式快照、用户/助手消息落盘、本地回复/API 缺配置/API worker 分流、成功/失败后的 pending 状态由 `ChatFlowController` 协助管理。
-- 清理正式/非正式聊天记录时不再在 UI 线程中强制摘要，而是创建 `ChatHistoryClearWorker` 放到独立 `QThread` 执行摘要、清空和 `last_cleaned_at` 更新；主窗口只接收完成/失败信号并在后台操作结束后决定是否显示结果。
-- `BackgroundTaskRegistry` 统一登记聊天类任务、清理历史、Mem0 初始化/检索、语义记忆维护和本地话术刷新等 `QThread` 后台任务；同名任务登记会被拒绝，避免重复并发。退出时 `closeEvent()` 会统一请求后台线程停止并按任务配置做有界 `wait()`，超时任务记录 warning 后继续关闭，避免无限等待。
-- `ConfigService` 封装主窗口内低风险配置读取、默认值和嵌套字段读取；写回配置仍保留在主窗口现有 `setdefault()` 路径中，避免改变 `app_config.json` 结构或持久化行为。
-- 修改场景：几乎所有用户可见行为的入口都在这里接线。
-- 风险：文件较大，多个状态互相影响，例如 `chat_thread`、`clear_history_thread`、`move_animation`、`behavior_controller`、`formal_answer_panels`、`exit_animation_in_progress`、`_close_after_workers_finished`、`_click_timer`、`_suppress_click`、`_waiting_timer`、`_pending_was_formal`、`_topmost_enforcement_timer`。
+- Core coordinator. It handles window attributes, mouse events (single-click chat, double-click reply/greeting, drag movement, right-click menu including the always-on-top toggle), chat flow, background threads, formal Q&A panels, auto-movement, position restore, and the exit animation (plays `waving` and shows a `farewell` goodbye bubble on exit).
+- `_enforce_topmost()` is driven every 30 seconds by `_topmost_enforcement_timer`, and uses `force_window_topmost()` at the Windows API level to force `WS_EX_TOPMOST`, preventing frequent `setMask()` calls from causing the system to clear the topmost style.
+- When `_sync_floating_widgets()` makes bubbles/input boxes follow the character position, the main window still determines which floating widgets are visible, but bubble target coordinates are calculated by `BubblePositionService`. The main window only passes the other visible bubble's `geometry()` as `exclusion_rects` into the service and moves `SpeechBubble` / `ReplyBubble`, so the two bubbles avoid overlapping. The chat input box still uses `ChatInput.reposition()`.
+- When an idle proactive greeting hits scenario-based generation, `BehaviorController` emits `scenario_greeting_requested`, and the main window creates a `ScenarioGreetingWorker` in a separate `QThread` to call DeepSeek and generate one short greeting. If the API is unavailable, the thread is busy, or generation fails, it silently falls back to a local template and does not display an error to the user.
+- Clearing formal/informal chat history no longer forces summarization on the UI thread. Instead, it creates a `ChatHistoryClearWorker` in a separate `QThread` to run summarization, clearing, and `last_cleaned_at` updates; the main window only receives completion/failure signals and decides after the background operation whether to display a result.
+- `BackgroundTaskRegistry` centrally registers chat tasks, history clearing, Mem0 initialization/search, semantic memory maintenance, local line refresh, and other `QThread` background tasks. Duplicate registration with the same name is rejected to avoid repeated concurrency. On exit, `closeEvent()` centrally requests background threads to stop and performs bounded `wait()` according to task configuration; timed-out tasks log a warning and shutdown continues, avoiding unbounded waits.
+- `ConfigService` wraps low-risk configuration reads inside the main window, including default values and nested-field reads. Config write-back still stays on the main window's existing `setdefault()` paths to avoid changing the `app_config.json` structure or persistence behavior.
+- Change scenarios: almost all user-visible behavior entry points are wired here.
+- Risk: this file is large and many states interact, including `chat_thread`, `clear_history_thread`, `move_animation`, `behavior_controller`, `formal_answer_panels`, `exit_animation_in_progress`, `_close_after_workers_finished`, `_click_timer`, `_suppress_click`, `_waiting_timer`, `_pending_was_formal`, and `_topmost_enforcement_timer`.
 
 `desktop_pet/app/history_clear_worker.py`
 
-- 后台清理 worker。`ChatHistoryClearWorker.run()` 在非 UI 线程中按配置强制摘要、清空对应 `ChatStore`，并更新 `last_cleaned_at`。
-- 修改场景：清理聊天历史、清空前摘要、清理失败降级。
-- 风险：worker 不应直接操作任何 QWidget 或气泡；UI 展示必须留在 `DesktopPetWindow` 的信号回调中。
+- Background cleanup worker. `ChatHistoryClearWorker.run()` runs off the UI thread, force-summarizes according to config, clears the corresponding `ChatStore`, and updates `last_cleaned_at`.
+- Change scenarios: clearing chat history, summarizing before clearing, cleanup failure fallback.
+- Risk: the worker must not directly operate on any QWidget or bubble; UI display must remain in `DesktopPetWindow` signal callbacks.
 
 `desktop_pet/app/background_task_registry.py`
 
-- 轻量后台任务注册表。统一登记、注销/移除、查询和停止 `QThread`/worker，负责 `quit()`、有界 `wait()`、必要时 `terminate()`、`deleteLater()` 和清理回调。
-- 主要接口包括 `register(name, thread, worker, cleanup=None, wait_timeout_ms=None)`、`unregister(name)`、`is_running(name)`、`request_quit_all(timeout_ms=None)`、`clear_finished()` 和 `stop_all()`；`remove()` 仍作为兼容别名路径保留。
-- 修改场景：新增后台 `QThread` 任务、调整退出等待超时、排查重复任务并发或线程泄漏。
-- 风险：注册表只管理生命周期，不应放入具体业务逻辑；业务 worker 的成功/失败信号仍由 `DesktopPetWindow` 处理。
+- Lightweight background task registry. It centrally registers, unregisters/removes, queries, and stops `QThread`/worker pairs, and handles `quit()`, bounded `wait()`, necessary `terminate()`, `deleteLater()`, and cleanup callbacks.
+- Main interfaces include `register(name, thread, worker, cleanup=None, wait_timeout_ms=None)`, `unregister(name)`, `is_running(name)`, `request_quit_all(timeout_ms=None)`, `clear_finished()`, and `stop_all()`; `remove()` remains as a compatibility alias path.
+- Change scenarios: adding background `QThread` tasks, adjusting exit wait timeouts, debugging duplicate concurrent tasks or thread leaks.
+- Risk: the registry only manages lifecycle and should not contain specific business logic; success/failure signals from business workers are still handled by `DesktopPetWindow`.
 
 `desktop_pet/app/bubble_position_service.py`
 
-- 气泡位置计算服务。集中负责普通气泡和知识问候应答气泡相对桌宠窗口的候选位置、屏幕可用区域 clamp、避免覆盖桌宠、以及根据 `exclusion_rects` 避让另一个可见气泡。
-- `DesktopPetWindow._sync_floating_widgets()` 使用该服务计算目标坐标后调用气泡 `move()`；气泡创建、显示、隐藏、计时关闭和样式仍保留在 `SpeechBubble` / `ReplyBubble` 与主窗口原显示方法中。
-- 修改场景：调整气泡在桌宠上/下/左/右的优先级、屏幕边缘避让策略、两个气泡互斥规则。
-- 风险：不要在这里引入聊天、主动问候、QThread 或 QWidget 创建逻辑；它应保持为可单元测试的位置计算服务。
+- Bubble position calculation service. It centralizes candidate positions for normal bubbles and knowledge-greeting reply bubbles relative to the desktop pet window, clamps to available screen area, avoids covering the desktop pet, and uses `exclusion_rects` to avoid another visible bubble.
+- `DesktopPetWindow._sync_floating_widgets()` uses this service to calculate target coordinates and then calls bubble `move()`. Bubble creation, display, hiding, timed close, and style remain in `SpeechBubble` / `ReplyBubble` and the original display methods on the main window.
+- Change scenarios: adjusting bubble priority above/below/left/right of the desktop pet, screen-edge avoidance strategy, or mutual exclusion rules between two bubbles.
+- Risk: do not introduce chat, proactive greeting, QThread, or QWidget creation logic here; it should remain a position calculation service that is easy to unit test.
 
 `desktop_pet/app/config_service.py`
 
-- 轻量配置读取服务。`ConfigService` 基于内存中的配置字典支持 `get(path, default=None)`、`get_bool()`、`get_int()` 和 `get_str()`，其中 `path` 使用点分嵌套路径，例如 `api.enable_chat_api`、`ui.bubble_durations_ms.assistant_reply`。
-- 修改场景：主窗口或其他模块中重复的只读配置读取、缺省值兜底、嵌套字段读取。
-- 风险：该服务不负责加载、保存或迁移配置，不应在这里改变 `app_config.json` / `app_config.example.json` 结构；需要写回配置时仍使用原有保存路径。
+- Lightweight configuration read service. `ConfigService` is based on the in-memory configuration dictionary and supports `get(path, default=None)`, `get_bool()`, `get_int()`, and `get_str()`, where `path` uses dot-separated nested paths such as `api.enable_chat_api` or `ui.bubble_durations_ms.assistant_reply`.
+- Change scenarios: repeated read-only configuration access in the main window or other modules, default fallbacks, and nested-field reads.
+- Risk: this service is not responsible for loading, saving, or migrating configuration, and should not change the structure of `app_config.json` / `app_config.example.json`; configuration writes should still use the existing save paths.
 
 `desktop_pet/app/chat_flow_controller.py`
 
-- 轻量聊天流程协调器。`ChatFlowController` 不创建 QWidget、不切换动作、不启动 `QThread`，只协助 `DesktopPetWindow` 管理普通/正式问答模式快照、当前用户消息落盘、本地回复或 API 缺配置分流、`ChatWorker` 参数字典、成功/失败后的助手消息落盘和 pending 状态。
-- 修改场景：调整用户聊天流程的非 UI 状态、正式/非正式聊天记录路由、本地回复/API 请求分流、防止重复发起同名聊天任务。
-- 风险：不要在这里引入 `DeepSeekClient.chat()` 调用、`PromptBuilder` 改造、`ContextManager` 改造、气泡/正式问答面板展示或线程生命周期管理；这些仍由 `ChatWorker` 和 `DesktopPetWindow` 负责。
+- Lightweight chat-flow coordinator. `ChatFlowController` does not create QWidget objects, switch actions, or start `QThread`; it only helps `DesktopPetWindow` manage normal/formal Q&A mode snapshots, current user-message persistence, local-reply or missing-API-config branching, `ChatWorker` argument dictionaries, assistant-message persistence after success/failure, and pending state.
+- Change scenarios: adjusting non-UI state in the user chat flow, formal/informal chat-history routing, local-reply/API request branching, and preventing duplicate chat tasks with the same name.
+- Risk: do not introduce `DeepSeekClient.chat()` calls, `PromptBuilder` changes, `ContextManager` changes, bubble/formal-answer-panel display, or thread lifecycle management here; those remain the responsibility of `ChatWorker` and `DesktopPetWindow`.
 
 `desktop_pet/app/message_splitter.py`
 
-- 本地消息展示拆分工具。`split_knowledge_bubble_text()` 会把知识问候模型返回的一整段文本按中文句号、问号、感叹号、分号等句末符号拆为最多两段；首段过短时会合并下一句，单句或无法安全拆分时保持原文。
-- 修改场景：调整知识问候气泡展示节奏、拆分符号、最短首段长度或最多展示段数。
-- 风险：这里只处理纯文本拆分，不应引入 QWidget、QTimer、API 调用或聊天记录落盘逻辑。
+- Local message display splitting helper. `split_knowledge_bubble_text()` splits a full knowledge-greeting model reply into at most two segments using Chinese sentence-ending punctuation such as full stops, question marks, exclamation marks, and semicolons; if the first segment is too short, it merges the next sentence, and single-sentence text or text that cannot be split safely is kept unchanged.
+- Change scenarios: adjusting knowledge-greeting bubble display rhythm, split punctuation, minimum first-segment length, or maximum displayed segments.
+- Risk: this module only handles plain-text splitting and should not introduce QWidget, QTimer, API calls, or chat-record persistence logic.
 
 `desktop_pet/app/context_menu.py`
 
-- 构建右键菜单，包括测试菜单（由 `ui.show_test_menu` 控制，默认关闭）、清理菜单（由 `ui.show_clear_menu` 控制，默认关闭，可分别清除非正式和正式聊天记录）、重新加载配置（由 `ui.show_reload_config` 控制，默认开启）、人物缩放、免打扰、窗口置顶、自主移动、聊天 API 开关、正式问答模式和退出。
-- 修改场景：新增菜单项或调整菜单可见入口。
-- 注意：菜单回调由 `DesktopPetWindow._show_context_menu()` 注入，新增菜单通常要同步改两处。
+- Builds the right-click menu, including the test menu (controlled by `ui.show_test_menu`, default off), the cleanup menu (controlled by `ui.show_clear_menu`, default off, can separately clear informal and formal chat history), reload configuration (controlled by `ui.show_reload_config`, default on), character scaling, do-not-disturb, window always-on-top, autonomous movement, chat API toggle, formal Q&A mode, and exit.
+- Change scenarios: adding menu items or changing menu visibility entry points.
+- Note: menu callbacks are injected by `DesktopPetWindow._show_context_menu()`. New menu items usually need changes in both places.
 
 `desktop_pet/app/chat_input.py`
 
-- 悬浮聊天输入框，跟随角色位置，Enter 或发送按钮提交，关闭按钮隐藏。
-- 修改场景：输入框布局、提交行为、关闭行为、跟随位置。
+- Floating chat input box that follows the character position; Enter or the send button submits, and the close button hides it.
+- Change scenarios: input box layout, submit behavior, close behavior, follow-position logic.
 
 `desktop_pet/app/speech_bubble.py`
 
-- 短消息气泡，自动关闭，跟随角色位置。`show_message()` 前由主窗口调用 `set_always_on_top()` 同步置顶状态。
-- 气泡样式、自动关闭、点击信号、透明窗口修正和窗口 mask 仍在本模块内；主窗口同步两个可见气泡位置时，目标坐标由 `BubblePositionService` 计算。
-- `SpeechBubble.reposition()` 和 `ReplyBubble.reposition()` 仍保留为气泡组件自身的跟随接口，避免破坏现有显示调用和外部调用约定。
-- `ReplyBubble`：知识问候右侧独立应答气泡，可点击、无尾巴、绿色配色，点击发出 `clicked` 信号供主窗口处理用户回应。
-- 修改场景：本地提示、普通聊天回复、系统提示的展示样式和定位；新增气泡方位或避让规则。
+- Short message bubble that auto-closes and follows the character position. Before `show_message()`, the main window calls `set_always_on_top()` to synchronize the topmost state.
+- Bubble style, auto-close, click signal, transparent-window fixes, and window mask remain in this module; when the main window synchronizes positions for two visible bubbles, target coordinates are calculated by `BubblePositionService`.
+- `SpeechBubble.reposition()` and `ReplyBubble.reposition()` remain as each bubble component's own follow-position interface, to avoid breaking existing display calls and external call conventions.
+- `ReplyBubble`: an independent right-side reply bubble for knowledge greetings. It is clickable, has no tail, uses a green color scheme, and emits a `clicked` signal for the main window to handle user responses.
+- Change scenarios: display style and positioning for local prompts, normal chat replies, and system prompts; adding new bubble directions or avoidance rules.
 
 `desktop_pet/app/formal_answer_panel.py`
 
-- 正式问答模式使用的可拖动、可复制、可关闭文本面板。
-- 修改场景：完整回答展示、多回答追加、面板生命周期和复制体验。
-- 风险：关闭后应完全释放对象。当前通过 `WA_DeleteOnClose` 和 `destroyed` 回调让主窗口移除引用。
+- Draggable, copyable, closable text panel used by formal Q&A mode.
+- Change scenarios: full-answer display, appending multiple answers, panel lifecycle, and copy experience.
+- Risk: objects should be fully released after closing. Currently `WA_DeleteOnClose` and a `destroyed` callback let the main window remove references.
 
 `desktop_pet/animation/sprite_player.py`
 
-- 读取 sprite 配置和图集，裁切动作帧，用 `QTimer` 推进帧并发出 `frame_changed`。
-- 修改场景：动作播放、帧率、缩放、素材缺失兜底。
-- 当前动作帧间隔最小为 `400ms`。
+- Reads sprite configuration and the atlas, crops action frames, advances frames with `QTimer`, and emits `frame_changed`.
+- Change scenarios: action playback, frame rate, scaling, and missing-asset fallback.
+- The current minimum action frame interval is `400ms`.
 
 `desktop_pet/assets/sprite_config.json`
 
-- 定义 `spritesheet.webp` 的裁切参数和动作行：`idle`、`running_right`、`running_left`、`waving`、`jumping`、`failed`、`waiting`、`running`、`review`。
-- 修改场景：新增动作、改帧数、改行列、换素材。
-- 风险：必须与实际 spritesheet 排布一致。
+- Defines crop parameters and action rows for `spritesheet.webp`: `idle`, `running_right`, `running_left`, `waving`, `jumping`, `failed`, `waiting`, `running`, and `review`.
+- Change scenarios: adding actions, changing frame counts, changing rows/columns, replacing assets.
+- Risk: it must match the actual spritesheet layout.
 
 `desktop_pet/ai/deepseek_client.py`
 
-- 使用 `requests.post()` 调用 OpenAI-compatible `base_url + /chat/completions`。
-- 修改场景：模型服务参数、超时、错误提示、响应结构兼容。
-- 依赖配置：`api.base_url`、`api.model`、`api.api_key`、`api.timeout_seconds`。
+- Uses `requests.post()` to call the OpenAI-compatible `base_url + /chat/completions`.
+- Change scenarios: model service parameters, timeout, error messages, response-structure compatibility.
+- Config dependencies: `api.base_url`, `api.model`, `api.api_key`, `api.timeout_seconds`.
 
 `desktop_pet/ai/mem0_memory_service.py`
 
-- 可选 Mem0 长期语义记忆封装层。负责初始化 Mem0、写入摘要提取出的长期记忆、根据当前用户输入检索相关记忆，并格式化为 Prompt 可注入文本。
-- 由 `config/app_config.json` / `app_config.example.json` 中的 `memory.enable_mem0`、`memory.inject_mem0_to_prompt`、`memory.use_mem0_for_knowledge_speak`、`memory.mem0_search_top_k`、`memory.write_sensitive_memory` 等配置控制；默认关闭。
-- 若 `memory.enable_mem0` 为 true 但 DashScope embedding key 为空，服务会记录 info 后直接降级为不可用，不导入 `mem0`，也不创建 Qdrant/history 目录，避免启动 warning、额外目录创建和初始化延迟。只有存在 `memory.dashscope_api_key` 或 `memory.dashscope_api_key_env` 指向的环境变量时，才继续 `Memory.from_config()` 初始化。主窗口不再在 UI 线程中直接构造或重建 Mem0；启动和重新加载配置时通过 `Mem0InitializationWorker` 放入独立 `QThread` 执行，完成后再回到主线程替换 `mem0_memory_service` 并同步给两个 `Summarizer`。
-- 初始化使用 `Memory.from_config(config)`，LLM provider 固定走 Mem0 官方支持的 `deepseek` provider。默认复用项目现有 `api.api_key`、`api.base_url`、`api.model`；若 `memory.mem0_deepseek_model` 或 `memory.mem0_deepseek_base_url` 非空，则优先使用 memory 节点下的覆盖值。
-- Mem0 embedder 使用 DashScope / 阿里云百炼 OpenAI-compatible embeddings 接口，内部通过 Mem0 的 OpenAI embedder 传入 `openai_base_url` 和 `embedding_dims`。默认 base URL 为 `https://dashscope.aliyuncs.com/compatible-mode/v1`，模型为 `text-embedding-v4`，维度为 1024。
-- DashScope API Key 优先从 `memory.dashscope_api_key` 读取，若为空则读取 `memory.dashscope_api_key_env` 指定的环境变量，默认 `DASHSCOPE_API_KEY`。示例配置和文档不得写入真实 key。
-- 默认 Qdrant 向量库路径为 `desktop_pet/data/mem0_qdrant`，history sqlite 路径为 `desktop_pet/data/mem0_history.db`，并显式使用 1024 维，避免与 Mem0 默认 1536 维不匹配。
-- 修改场景：更换记忆后端、调整检索 top_k、配置 LLM/embedder/vector store、增加记忆删除或导出功能。
-- 风险：Mem0 可能依赖外部 LLM 或 embedding 服务，异常必须降级，不得阻断聊天、摘要、启动或退出主流程。
+- Optional Mem0 long-term semantic memory wrapper. It initializes Mem0, writes long-term memories extracted from summaries, retrieves relevant memories based on the current user input, and formats them as injectable prompt text.
+- Controlled by configuration keys in `config/app_config.json` / `app_config.example.json`, including `memory.enable_mem0`, `memory.inject_mem0_to_prompt`, `memory.use_mem0_for_knowledge_speak`, `memory.mem0_search_top_k`, and `memory.write_sensitive_memory`; default is off.
+- If `memory.enable_mem0` is true but the DashScope embedding key is empty, the service logs info and directly degrades to unavailable without importing `mem0` or creating Qdrant/history directories, avoiding startup warnings, extra directory creation, and initialization delay. Only when `memory.dashscope_api_key` exists or the environment variable named by `memory.dashscope_api_key_env` exists will it continue to initialize with `Memory.from_config()`. The main window no longer constructs or rebuilds Mem0 directly on the UI thread; startup and config reload use `Mem0InitializationWorker` in a separate `QThread`, then return to the main thread to replace `mem0_memory_service` and synchronize it to both `Summarizer` instances.
+- Initialization uses `Memory.from_config(config)`, with the LLM provider fixed to Mem0's officially supported `deepseek` provider. By default it reuses the project's existing `api.api_key`, `api.base_url`, and `api.model`; if `memory.mem0_deepseek_model` or `memory.mem0_deepseek_base_url` is non-empty, values under the memory node take priority.
+- The Mem0 embedder uses the DashScope / Alibaba Cloud Bailian OpenAI-compatible embeddings API, internally passing `openai_base_url` and `embedding_dims` through Mem0's OpenAI embedder. The default base URL is `https://dashscope.aliyuncs.com/compatible-mode/v1`, the model is `text-embedding-v4`, and the dimension is 1024.
+- DashScope API key priority: read `memory.dashscope_api_key` first; if empty, read the environment variable specified by `memory.dashscope_api_key_env`, defaulting to `DASHSCOPE_API_KEY`. Example configuration and documentation must not contain real keys.
+- The default Qdrant vector-store path is `desktop_pet/data/mem0_qdrant`, and the history SQLite path is `desktop_pet/data/mem0_history.db`; it explicitly uses 1024 dimensions to avoid mismatch with Mem0's default 1536 dimensions.
+- Change scenarios: replacing the memory backend, adjusting retrieval top_k, configuring LLM/embedder/vector store, adding memory deletion or export features.
+- Risk: Mem0 may depend on external LLM or embedding services. Exceptions must degrade gracefully and must not block chat, summarization, startup, or exit flows.
 
 `desktop_pet/ai/prompt_builder.py`
 
-- 组装系统提示、角色设定、安全规则、正式/非正式模式说明、`memory.json` 记忆、可选 Mem0 检索记忆、摘要（按正式/非正式模式选择对应文件）和上下文消息。`build_messages()` 支持 `relevant_memories` 可选参数，用于在系统提示中注入与当前用户输入相关的长期语义记忆。
-- 本地 `memory.json` 注入已拆成三个明确区块：`【用户事实记忆】` 用于项目、偏好、背景和当前任务；`【相处方式记忆】` 用于语气、详细程度、确认频率、陪伴边界等关系/风格记忆，并明确要求不要直接复述给用户；`【当前问题相关的长期语义记忆】` 用于 Mem0 检索结果，只在与当前问题直接相关时参考。随后追加 `【表达约束】`，要求不要频繁使用“你之前说过”、不要暴露 memory.json/Mem0/数据库等实现细节、旧记忆与当前表达冲突时以当前表达为准。
-- 正式问答模式下，事实记忆可用于理解项目背景，关系记忆只用于回答结构、详细程度和确认频率，减少闲聊和陪伴式铺垫；普通陪伴聊天模式下，关系记忆可以自然影响语气和建议，但不应表现为读取档案。
-- 修改场景：人格、回复风格、安全规则优先级、正式问答回答策略。
-- 风险：安全规则必须优先于角色 `custom_prompt`。
+- Assembles system prompts, character settings, safety rules, formal/informal mode instructions, `memory.json` memory, optional Mem0 retrieved memory, summaries (choosing the corresponding file based on formal/informal mode), and context messages. `build_messages()` supports an optional `relevant_memories` parameter for injecting long-term semantic memories related to the current user input into the system prompt.
+- Local `memory.json` injection has been split into three explicit blocks: `[User Fact Memory]` for projects, preferences, background, and current tasks; `[Interaction Style Memory]` for tone, level of detail, confirmation frequency, companionship boundaries, and other relationship/style memories, with an explicit instruction not to repeat them directly to the user; and `[Long-Term Semantic Memory Relevant to the Current Question]` for Mem0 retrieval results, to be referenced only when directly relevant to the current question. It then appends `[Expression Constraints]`, requiring the assistant not to frequently say "you previously said", not to expose implementation details such as memory.json/Mem0/databases, and to prefer the current expression if old memories conflict with the current wording.
+- In formal Q&A mode, fact memory can help understand project background, while relationship memory is only used for answer structure, level of detail, and confirmation frequency, reducing small talk and companion-style padding. In normal companion chat mode, relationship memory may naturally influence tone and suggestions, but should not appear as if reading a profile.
+- Change scenarios: personality, reply style, safety rule priority, formal Q&A answer strategy.
+- Risk: safety rules must take priority over character `custom_prompt`.
 
 `desktop_pet/ai/context_manager.py`
 
-- 根据配置读取最近聊天上下文（按正式/非正式模式选择对应 store），并判断是否达到摘要触发条件。
-- 修改场景：上下文长度、摘要轮数策略。
+- Reads recent chat context according to configuration (choosing the corresponding store based on formal/informal mode) and determines whether the summarization trigger threshold has been reached.
+- Change scenarios: context length and summary-round strategy.
 
 `desktop_pet/ai/summarizer.py`
 
-- 在聊天后尝试摘要历史。若 API 可用，会要求模型输出 JSON；失败时退回本地简化摘要，并合并记忆。`maybe_summarize()` 支持 `force` 参数，为 True 时跳过轮数检查，供手动清空聊天记录前使用；但若历史中没有非空用户消息，会直接跳过，避免空聊天记录生成错误记忆。
-- 当前模型摘要与模型记忆提取已拆分：摘要仍基于最近完整对话生成，但 `memory_updates` 只基于用户发言单独提取，避免把人物/助手回答混入 `memory.json`；摘要文件本身不再落盘 `memory_updates`。模型记忆提取 schema 兼容旧的 `user_profile`/`work_study` 输出，也支持新增 `relationship_memory` 输出，用于记录沟通偏好、相处方式和近期互动模式。关系记忆规则强调只记录互动偏好和相处方式，不输出心理诊断、医学判断或人格标签。
-- 若模型记忆提取返回合法但没有任何实际文本的空结构，`Summarizer` 会继续回退到本地规则提取；正式问答模式下，本地规则会把用户的非空问题作为 `work_study.current_learning_topics` 兜底保存。非正式/正式模式判断需先判 `informal` 再判 `formal`，避免 `conversation_summary_informal.json` 因文件名包含 `formal` 子串被误判。当前本地 `current_learning_topics` 关键词包括：`学习`、`复习`、`知识`、`课程`、`算法`、`请问`、`怎么做`、`如何实现`、`如何`、`怎么`、`是什么`、`为什么`、`区别`。关系记忆本地兜底只覆盖少量明确表达：不要/别/不用确认会写入 `confirmation_preference=avoid_unnecessary_confirmation`；“直接给”“可执行方案”会写入 `preferred_response_style=direct_actionable`；“详细一点”等会写入 `detail_level=high`；“数据库/数据存储器/机械化记忆/像工具”等会写入避免机械化记忆表达。只有包含非空记忆文本时才合并 `memory.json` 并旁路写入 Mem0，避免清理聊天时只刷新空记忆时间戳。
-- 若启用 Mem0，`Summarizer` 在保留原 `memory.json` 合并逻辑的同时，会将提取出的 `memory_updates` 旁路写入 Mem0，作为长期语义检索数据源；Mem0 写入失败只记录 warning，不得影响摘要或聊天主流程。摘要触发以新增用户消息批次为准：首次达到 `api.summary_trigger_rounds` 后触发，之后需自上次 `covered_message_count` 以来再新增同等数量的用户消息才会再次摘要，避免达到阈值后每轮聊天都重摘要。
-- 修改场景：摘要结构、记忆提取、失败兜底。
-- 风险：摘要在线程中触发，异常不能影响正常聊天。
+- Attempts to summarize history after chat. If the API is available, it asks the model to output JSON; on failure, it falls back to a local simplified summary and merges memory. `maybe_summarize()` supports a `force` parameter; when true, it skips the round-count check for use before manual chat-history clearing. However, if there are no non-empty user messages in history, it skips directly to avoid generating erroneous memory from empty chat history.
+- Model summarization and model memory extraction are currently split: the summary is still generated from recent full conversation, but `memory_updates` are extracted only from user messages, preventing character/assistant replies from being mixed into `memory.json`; the summary file itself no longer persists `memory_updates`. The model memory extraction schema is compatible with older `user_profile` / `work_study` outputs and also supports the new `relationship_memory` output for recording communication preferences, interaction style, and recent interaction patterns. Relationship memory rules emphasize recording only interaction preferences and ways of relating, not psychological diagnoses, medical judgments, or personality labels.
+- If model memory extraction returns a valid but empty structure with no actual text, `Summarizer` continues falling back to local rule extraction. In formal Q&A mode, local rules use the user's non-empty question as a fallback saved under `work_study.current_learning_topics`. Informal/formal mode detection must check `informal` before `formal` to avoid misclassifying `conversation_summary_informal.json` because its filename contains the substring `formal`. Current local `current_learning_topics` keywords include: study, review, knowledge, course, algorithm, question/request phrasing, how to do, how to implement, how, what is, why, and difference. Local relationship-memory fallbacks cover only a few explicit expressions: do not/no need to confirm writes `confirmation_preference=avoid_unnecessary_confirmation`; "give directly" or "actionable plan" writes `preferred_response_style=direct_actionable`; "more detailed" writes `detail_level=high`; and mentions of database/data store/mechanical memory/like a tool write an avoidance of mechanical memory expression. `memory.json` is merged and Mem0 side-write is triggered only when non-empty memory text exists, avoiding refreshes of only empty memory timestamps during chat cleanup.
+- If Mem0 is enabled, `Summarizer` keeps the original `memory.json` merge logic while side-writing extracted `memory_updates` into Mem0 as a long-term semantic retrieval data source. Mem0 write failures only log warnings and must not affect summarization or the main chat flow. Summary triggering is based on batches of newly added user messages: after the first time `api.summary_trigger_rounds` is reached, the same number of additional user messages must be added since the previous `covered_message_count` before summarization triggers again, avoiding re-summarization after every round once the threshold is reached.
+- Change scenarios: summary structure, memory extraction, failure fallback.
+- Risk: summarization is triggered in a thread, and exceptions must not affect normal chat.
 
 `desktop_pet/ai/safety_filter.py`
 
-- 简单关键词高风险检测函数。当前未在主聊天流程中直接使用。
-- 修改场景：接入本地安全预过滤。
-- 待确认：是否计划把它接到 `_handle_user_message()` 或 `PromptBuilder` 前置流程。
+- Simple keyword-based high-risk detection function. It is not currently used directly in the main chat flow.
+- Change scenarios: adding local safety pre-filtering.
+- To confirm: whether it should be wired before `_handle_user_message()` or `PromptBuilder`.
 
 `desktop_pet/character/proactive_context.py`
 
-- 场景化主动问候的纯逻辑模块。`build_proactive_context()` 从 `memory.json` 中挑选少量近期任务、沟通偏好、陪伴边界和互动模式，避免把完整记忆原样塞给模型；`build_local_scenario_greeting()` 使用 `scenario_greeting_templates` 或 `low_interrupt` 本地模板回退；`build_scenario_greeting_messages()` 构造 API prompt，要求只输出一句短中文，不说“根据记忆”“你之前说过”，不暴露 memory.json、Mem0、数据库或配置细节。
-- 修改场景：主动问候上下文选择、本地模板回退、场景化问候 Prompt 规则。
-- 风险：不要在这里引入 UI、QThread 或网络请求；它应保持可单元测试的纯逻辑。
+- Pure-logic module for scenario-based proactive greetings. `build_proactive_context()` selects a small amount of recent tasks, communication preferences, companionship boundaries, and interaction patterns from `memory.json`, avoiding passing complete memory directly to the model. `build_local_scenario_greeting()` uses `scenario_greeting_templates` or `low_interrupt` as local fallback templates. `build_scenario_greeting_messages()` builds the API prompt, requiring a single short Chinese sentence, no "according to memory" or "you previously said", and no exposure of memory.json, Mem0, database, or configuration details.
+- Change scenarios: proactive-greeting context selection, local template fallback, scenario-greeting prompt rules.
+- Risk: do not introduce UI, QThread, or network requests here; it should remain pure logic that is easy to unit test.
 
 `desktop_pet/storage/*.py`
 
-- `json_store.py`：JSON 读写基础设施，缺文件时自动创建父目录和默认文件；保存时先写同目录 `.tmp`，`flush` + `os.fsync` 后用 `os.replace` 原子替换目标文件，并在目标文件非空时保留 `.bak`；读取遇到损坏 JSON 时会先把主文件重命名为 `.corrupt.<timestamp>`，再优先读取 `.bak`，备份也不可用时返回默认值深拷贝。`cleanup_tmp_json_files()` 用于清理中断写入留下的 `.tmp` 文件。
-- `local_lines_service.py`：本地话术读取和受控更新接口。`LocalLinesService` 支持 `pick_line()`、`get_lines()`、`append_manual_line()`、`replace_generated_lines()`、`validate_lines()`、`consume_first_start_line()`、`should_refresh_generated_lines()` 和 `group_metadata()`；更新仍保持 `local_lines.json` 现有数组结构，使用 `json_store.save_json()` 原子写入，并可把生成话术来源、更新时间、最近刷新时间、月度刷新标记和条数记录到 `data/local_lines_generated_meta.json`。用于 API 定期刷新本地话术时做去重、长度限制、七天周期/月初到期判断和机械记忆表达过滤。
-- `chat_store.py`：保存和读取正式/非正式聊天记录（`chat_history_formal.json` / `chat_history_informal.json`），记录 `last_cleaned_at` 时间戳供手动清空时标记。
-- `memory_store.py`：保存和合并 `data/memory.json`。读取、保存和合并时会通过 `normalize_memory_schema()` 兼容旧结构并补齐 v2 默认字段：`relationship_memory.communication_style`、`relationship_memory.companionship_style`、`relationship_memory.interaction_patterns` 和 `memory_meta.schema_version=2`；补齐时保留未知旧字段，不会清空用户已有记忆。保存/合并仍写入 UTF-8 JSON，并同步更新顶层 `last_updated` 与 `memory_meta.last_updated`；合并关系记忆时会为被更新的关系子区块写入 `last_updated` 或 `last_observed_at`。
+- `json_store.py`: JSON read/write infrastructure. Missing files automatically create parent directories and default files. Saves write a same-directory `.tmp` first, then `flush` + `os.fsync`, then atomically replace the target with `os.replace`; when the target file is non-empty, a `.bak` is preserved first. When reading damaged JSON, the main file is first renamed to `.corrupt.<timestamp>`, then `.bak` is preferred; if the backup is also unusable, it returns a deep copy of the default value. `cleanup_tmp_json_files()` cleans up `.tmp` files left by interrupted writes.
+- `local_lines_service.py`: local line reading and controlled update interface. `LocalLinesService` supports `pick_line()`, `get_lines()`, `append_manual_line()`, `replace_generated_lines()`, `validate_lines()`, `consume_first_start_line()`, `should_refresh_generated_lines()`, and `group_metadata()`. Updates preserve the existing array structure in `local_lines.json`, use `json_store.save_json()` for atomic writes, and can record generated-line source, update time, latest refresh time, monthly refresh marker, and item count in `data/local_lines_generated_meta.json`. It is used for API-based periodic local line refresh, deduplication, length limits, seven-day/month-start refresh checks, and filtering mechanical memory expressions.
+- `chat_store.py`: saves and reads formal/informal chat history (`chat_history_formal.json` / `chat_history_informal.json`) and records a `last_cleaned_at` timestamp for manual clearing.
+- `memory_store.py`: saves and merges `data/memory.json`. Reads, saves, and merges pass through `normalize_memory_schema()` to maintain compatibility with older structures and fill v2 defaults: `relationship_memory.communication_style`, `relationship_memory.companionship_style`, `relationship_memory.interaction_patterns`, and `memory_meta.schema_version=2`; filling defaults preserves unknown old fields and does not clear existing user memory. Saves/merges still write UTF-8 JSON and update both top-level `last_updated` and `memory_meta.last_updated`; when merging relationship memory, updated relationship sub-blocks receive `last_updated` or `last_observed_at`.
 - `memory_vector_store.py`: maintains compact machine-written `data/memory_vectors.json` for eligible `memory.json` text leaves. It uses the existing DashScope OpenAI-compatible embedding config, rounds embeddings according to `memory.memory_vector_precision`, skips texts shorter than `memory.memory_vector_min_text_length`, limits stored entries with `memory.memory_vector_max_items`, includes precision in `embedding_signature`, skips cleanly when no key or `requests` is unavailable, and supports same-field semantic duplicate merging on a two-month cadence.
-- `usage_store.py`：每日主动话术和 API 主动次数计数。
-- 修改场景：数据结构、持久化策略、运行时数据兼容。
+- `usage_store.py`: daily proactive-line and API-proactive usage counters.
+- Change scenarios: data structures, persistence strategy, runtime data compatibility.
 
 `desktop_pet/character/behavior_controller.py`
 
-- 管理启动问候、空闲主动话术和时段变化检测。用 `QTimer` 每 60 秒检查空闲和时段，受免打扰、每日上限、空闲时间和等待用户回复状态约束。
-- `_startup_greeting()` 会先读取 `local_lines.json` 的 `first_start.enable`；为 true 时从 `first_start.data` 随机取一句启动问候，并在成功取到后立刻写回 `enable=false`，使其只触发一次。若未命中，则保留原优先级：每 5 天周期首日优先季节问候（`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`），其次当前时段问候（`greeting_morning`/`greeting_noon`/`greeting_afternoon`/`greeting_evening`/`sleepy`），最后回退到 `startup`。启动问候受免打扰和 `startup_greeting` 开关控制，但不受每日主动话术上限拦截，也不递增 `local_proactive_lines_used`。
-- `_maybe_idle_prompt()` 和 `trigger_test_speak()` 的话术池会混入当前时段分组。`trigger_test_idle_prompt()` 绕过时间限制测试完整空闲逻辑，返回触发类型和比例字符串。
-- `_check_period_change()` 由 `period_check_timer` 每 60 秒驱动，检测时段或季节是否变化，变化时立即弹出新时段问候。
-- `pick_farewell_line()` 从 `farewell` 分组随机抽取道别语，供退出流程使用。
-- `pick_reply_line()` 从 `break_reminder`/`comfort`/`encourage` 三组随机选取回应话术，供普通双击回复使用。
-- `pick_feedback_line()` 从 `feedback` 分组随机选取，用于用户在主动问候窗口内双击回应。
-- `is_within_proactive_reply_window(window_seconds=60)` 判断当前是否在上次主动问候后 60 秒内。
-- `pick_ignored_line()` 从 `ignored` 分组随机选取话术，供关闭置顶时使用。
-- `pick_return_after_idle_line()` 从 `return_after_idle` 分组随机选取话术，供开启置顶时使用。
-- `pick_waiting_line()` 从 `waiting` 分组随机选取等待提示话术，供聊天输入框长时间无输入时使用。
-- `pick_reply_ack_line()` 从 `reply` 分组随机选取简短应答话术，供知识问候展示后确认。
-- `_consecutive_unanswered` 计数器驱动动态问候间隔：首次 15min → 第二次 15min → 第三次 30min → 第四次起 30-60min 随机（最高 60min），并受 `behavior.min_proactive_interval_minutes` 作为下限约束。`notify_user_interaction()` 和每次 `_maybe_idle_prompt()` 成功触发问候后均重置计数。
-- `_has_memory_content()` 检查 `memory.json` 是否有可用记忆信息。`_proactive_ratio()` / `_adjust_ratio()` 管理主动问候内容类型比例。`notify_proactive_response()` 在用户回应时调用比例调整：回应类型 +0.005，互斥类型 -0.001，并继续受 0.3-0.7 钳制；主窗口传入 `config_saver` 时会把调整后的 `proactive_content_ratio` 持久化回 `app_config.json`。
-- `behavior.max_local_lines_per_day` 通过安全整数解析读取，非法、空值或非正数会回退到 10，避免本地配置错误导致 QTimer 回调异常。
-- 当 `memory.use_mem0_for_knowledge_speak` 为 true 时，`_has_memory_content()` 会在知识问候概率命中后，优先通过主窗口传入的 Mem0 检索回调判断是否存在长期语义记忆；主窗口会用 `Mem0SearchWorker` 在独立 `QThread` 中一次性取回 `top_k=3` 的 Mem0 上下文并暂存给 `KnowledgeSpeakWorker` 复用，避免判断和生成阶段重复检索，也避免主动问候计时器回调阻塞 UI。检索进行中时返回 `None`，`BehaviorController._maybe_idle_prompt()` 会跳过本轮普通问候兜底，待检索成功后由主窗口触发知识问候；Mem0 不可用或无结果时回退到原 `memory.json` 检查。
-- 场景化主动问候由 `behavior.enable_scenario_greeting` 控制，默认开启但带 60 分钟冷却。基础守卫（免打扰、主动聊天开关、每日上限、动态间隔）通过后，若连续未回应达到 `scenario_greeting_low_interrupt_after_ignored`，优先使用 `low_interrupt` 低打扰话术；否则在冷却结束且 `memory.json` 中有足够近期任务或关系记忆时，构造场景上下文。`scenario_greeting_api_enabled` 为 true 且 API 主动额度可用时发出 `scenario_greeting_requested` 交给主窗口后台 worker，否则使用本地模板。
-- 主动问候气泡停留时间改为读取 `ui.bubble_durations_ms`：启动问候取 `startup_greeting`，时段变化问候取 `period_greeting`，普通空闲/测试问候取 `proactive_greeting`。
-- 修改场景：主动行为频率、话术分组、免打扰逻辑、时段判断规则、知识问候与内容比例。
+- Manages startup greetings, idle proactive lines, and time-period change detection. A `QTimer` checks idle state and time period every 60 seconds, constrained by do-not-disturb, daily limits, idle time, and waiting-for-user-reply state.
+- `_startup_greeting()` first reads `first_start.enable` from `local_lines.json`; when true, it randomly selects one line from `first_start.data` and immediately writes `enable=false` after a successful selection, making it trigger only once. If it does not hit, it keeps the original priority: seasonal greeting on the first day of each 5-day cycle (`greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter`), then current time-period greeting (`greeting_morning`/`greeting_noon`/`greeting_afternoon`/`greeting_evening`/`sleepy`), then fallback to `startup`. Startup greetings are controlled by do-not-disturb and the `startup_greeting` switch, but are not blocked by the daily proactive-line limit and do not increment `local_proactive_lines_used`.
+- `_maybe_idle_prompt()` and `trigger_test_speak()` mix current time-period groups into the line pool. `trigger_test_idle_prompt()` bypasses timing constraints to test the full idle logic and returns the trigger type plus a ratio string.
+- `_check_period_change()` is driven every 60 seconds by `period_check_timer`; it detects time-period or season changes and immediately pops a new time-period greeting when a change occurs.
+- `pick_farewell_line()` randomly selects from the `farewell` group for the exit flow.
+- `pick_reply_line()` randomly selects from `break_reminder` / `comfort` / `encourage` for normal double-click replies.
+- `pick_feedback_line()` randomly selects from `feedback` for user responses inside the proactive-greeting window.
+- `is_within_proactive_reply_window(window_seconds=60)` checks whether the current time is within 60 seconds after the previous proactive greeting.
+- `pick_ignored_line()` randomly selects from `ignored` for use when always-on-top is disabled.
+- `pick_return_after_idle_line()` randomly selects from `return_after_idle` for use when always-on-top is enabled.
+- `pick_waiting_line()` randomly selects from `waiting` for long-idle prompts while the chat input box is open.
+- `pick_reply_ack_line()` randomly selects a short acknowledgement from `reply` after a knowledge greeting is displayed.
+- `_consecutive_unanswered` drives dynamic greeting intervals: first 15min -> second 15min -> third 30min -> fourth and later random 30-60min (maximum 60min), while respecting `behavior.min_proactive_interval_minutes` as a lower bound. `notify_user_interaction()` and every successful `_maybe_idle_prompt()` greeting both reset the counter.
+- `_has_memory_content()` checks whether `memory.json` contains usable memory. `_proactive_ratio()` / `_adjust_ratio()` manage the ratio of proactive-greeting content types. `notify_proactive_response()` adjusts the ratio when the user responds: response type +0.005, mutually exclusive type -0.001, still clamped to 0.3-0.7; when the main window passes `config_saver`, the adjusted `proactive_content_ratio` is persisted back to `app_config.json`.
+- `behavior.max_local_lines_per_day` is read through safe integer parsing; invalid, empty, or non-positive values fall back to 10, preventing local configuration errors from causing QTimer callback exceptions.
+- When `memory.use_mem0_for_knowledge_speak` is true, after the knowledge-greeting probability branch hits, `_has_memory_content()` first uses the Mem0 retrieval callback passed by the main window to determine whether long-term semantic memory exists. The main window uses `Mem0SearchWorker` in a separate `QThread` to retrieve `top_k=3` Mem0 context once and temporarily stores it for `KnowledgeSpeakWorker` reuse, avoiding duplicate retrieval between the check and generation phases and preventing the proactive-greeting timer callback from blocking the UI. While retrieval is in progress, it returns `None`, and `BehaviorController._maybe_idle_prompt()` skips this round's normal greeting fallback; after retrieval succeeds, the main window triggers the knowledge greeting. If Mem0 is unavailable or returns no results, it falls back to the original `memory.json` check.
+- Scenario-based proactive greetings are controlled by `behavior.enable_scenario_greeting`, enabled by default but with a 60-minute cooldown. After basic guards pass (do-not-disturb, proactive chat switch, daily limit, dynamic interval), if consecutive unanswered greetings reach `scenario_greeting_low_interrupt_after_ignored`, it first uses a low-interruption line from `low_interrupt`; otherwise, when cooldown is over and `memory.json` contains enough recent tasks or relationship memory, it builds scenario context. If `scenario_greeting_api_enabled` is true and API proactive quota is available, it emits `scenario_greeting_requested` for the main window background worker; otherwise it uses local templates.
+- Proactive-greeting bubble duration now reads `ui.bubble_durations_ms`: startup greetings use `startup_greeting`, time-period change greetings use `period_greeting`, and normal idle/test greetings use `proactive_greeting`.
+- Change scenarios: proactive behavior frequency, line groups, do-not-disturb logic, time-period rules, knowledge greetings, and content ratio.
 
 `desktop_pet/config/app_config.example.json`
 
-- 默认配置模板。运行时优先加载 `config/app_config.json`，没有时加载此示例。包含 `ui.show_test_menu` 控制测试菜单显隐（默认 `false`）、`ui.show_clear_menu` 控制清理菜单显隐（默认 `false`）、`ui.show_reload_config` 控制“重新加载配置”菜单项显隐（默认 `true`）、`chat.force_summarize_before_clear`（默认 `true`）控制手动清空前是否强制摘要。
-- `ui.bubble_durations_ms` 用于配置主要气泡停留时长：`startup_greeting`、`period_greeting`、`proactive_greeting`、`assistant_reply`。
-- `behavior.enable_scenario_greeting`、`behavior.scenario_greeting_api_enabled`、`behavior.scenario_greeting_max_chars`、`behavior.scenario_greeting_min_memory_items`、`behavior.scenario_greeting_cooldown_minutes`、`behavior.scenario_greeting_low_interrupt_after_ignored` 控制场景化主动问候；默认保守启用，限制为 80 字、至少 1 条可用记忆、60 分钟冷却，连续 2 次未回应后走低打扰话术。
-- `local_lines_refresh` 控制 API 定期刷新本地生成话术：`enabled` 默认开启，`interval_days` 默认 7 天，`monthly_refresh` 默认开启并在进入新月份后固定刷新一次，`knowledge_intro_group` 默认 `knowledge_speak_intro`，`max_items` / `max_chars` 控制每次生成条数和单条长度。主窗口显示后立即检查一次，并由 `_local_lines_refresh_timer` 每 6 小时再次检查是否到期；API 未配置或未到期时静默跳过。
-- `memory.enable_mem0` 控制是否启用 Mem0 长期语义记忆；`memory.inject_mem0_to_prompt` 控制是否将 Mem0 检索结果注入聊天 Prompt；`memory.use_mem0_for_knowledge_speak` 控制知识问候是否优先使用 Mem0；`memory.mem0_search_top_k` 控制每轮检索数量；`memory.mem0_llm_provider` 默认 `deepseek`，`memory.mem0_use_app_deepseek_config` 默认复用项目 DeepSeek 配置，`memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 可覆盖模型和 base URL；`memory.mem0_embedder_provider` 默认 `dashscope_openai_compatible`，通过 DashScope / 阿里云百炼 OpenAI-compatible embeddings 接口使用 `text-embedding-v4` 和 1024 维向量；`memory.dashscope_api_key` / `memory.dashscope_api_key_env` 控制 DashScope key 来源；`memory.write_sensitive_memory` 默认 false，用于避免情绪陪伴场景下自动保存敏感长期记忆。
+- Default configuration template. Runtime first loads `config/app_config.json`; if absent, it loads this example. It includes `ui.show_test_menu` to control test-menu visibility (default `false`), `ui.show_clear_menu` to control cleanup-menu visibility (default `false`), `ui.show_reload_config` to control whether the "reload configuration" menu item is shown (default `true`), and `chat.force_summarize_before_clear` (default `true`) to control whether to force summarization before manual clearing.
+- `ui.bubble_durations_ms` configures main bubble display durations: `startup_greeting`, `period_greeting`, `proactive_greeting`, and `assistant_reply`.
+- `behavior.enable_scenario_greeting`, `behavior.scenario_greeting_api_enabled`, `behavior.scenario_greeting_max_chars`, `behavior.scenario_greeting_min_memory_items`, `behavior.scenario_greeting_cooldown_minutes`, and `behavior.scenario_greeting_low_interrupt_after_ignored` control scenario-based proactive greetings; defaults are conservative: enabled, limited to 80 characters, requiring at least one usable memory item, 60-minute cooldown, and low-interruption lines after 2 consecutive unanswered greetings.
+- `local_lines_refresh` controls API-based periodic refresh of locally generated lines: `enabled` defaults to on, `interval_days` defaults to 7 days, `monthly_refresh` defaults to on and forces one refresh after entering a new month, `knowledge_intro_group` defaults to `knowledge_speak_intro`, and `max_items` / `max_chars` control generated item count and per-item length. The main window checks once immediately after display and `_local_lines_refresh_timer` checks again every 6 hours to see whether refresh is due; when the API is not configured or refresh is not due, it silently skips.
+- `memory.enable_mem0` controls whether Mem0 long-term semantic memory is enabled; `memory.inject_mem0_to_prompt` controls whether Mem0 retrieval results are injected into chat prompts; `memory.use_mem0_for_knowledge_speak` controls whether knowledge greetings prefer Mem0; `memory.mem0_search_top_k` controls retrieval count per round; `memory.mem0_llm_provider` defaults to `deepseek`; `memory.mem0_use_app_deepseek_config` defaults to reusing the project DeepSeek config; `memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` can override model and base URL; `memory.mem0_embedder_provider` defaults to `dashscope_openai_compatible`, using the DashScope / Alibaba Cloud Bailian OpenAI-compatible embeddings API with `text-embedding-v4` and 1024-dimensional vectors; `memory.dashscope_api_key` / `memory.dashscope_api_key_env` control the DashScope key source; `memory.write_sensitive_memory` defaults to false to avoid automatically saving sensitive long-term memories in emotional companionship scenarios.
 - `memory.enable_memory_vectors` controls local vector indexing for `memory.json`; `memory.memory_vector_precision`, `memory.memory_vector_min_text_length`, and `memory.memory_vector_max_items` control vector file size; `memory.enable_semantic_memory_merge`, `memory.semantic_merge_interval_days`, and `memory.semantic_duplicate_similarity_threshold` control the post-startup background semantic duplicate merge.
-- `proactive_content_ratio.extra_knowledge` / `regular_greeting` 控制空闲主动问候中知识问候与普通问候的初始比例，当前默认 0.35 / 0.65；运行中用户回应会按 `_adjust_ratio()` 轻微调整，并持续钳制在 0.3-0.7 范围内。
-- 修改场景：新增可配置项时必须同步更新此文件，并确认读取路径。
+- `proactive_content_ratio.extra_knowledge` / `regular_greeting` control the initial ratio of knowledge greetings to normal greetings during idle proactive greetings. The current default is 0.35 / 0.65; runtime user responses slightly adjust it through `_adjust_ratio()`, and it remains clamped to the 0.3-0.7 range.
+- Change scenarios: when adding configurable items, update this file and confirm the read path.
 
 `desktop_pet/config/app_config.json`
 
-- 用户本地个性化配置，可能含 API key。被 `.gitignore` 忽略，不应作为共享默认事实来源。
+- User-local personalized configuration, which may contain API keys. It is ignored by `.gitignore` and should not be used as a shared default source of truth.
 
 `desktop_pet/config/character_default.json`
 
-- 默认角色人格、说话风格、口头禅和安全开关。
+- Default character personality, speaking style, catchphrases, and safety switches.
 
 `desktop_pet/config/local_lines.json`
 
-- 本地主动话术和提示文案。`BehaviorController` 启动问候先看 `first_start.enable`，开启时优先使用 `first_start.data`，成功取用后自动写回 `enable=false`，未命中时继续回退到季节/时段问候和 `startup`；空闲/测试问候主要使用 `idle`、`quiet`、`encourage`，并混入时段分组 `greeting_morning`、`greeting_noon`、`greeting_afternoon`、`greeting_evening`、`sleepy`；季节分组 `greeting_spring`、`greeting_summer`、`greeting_autumn`、`greeting_winter` 用于启动周期问候和时段/季节变化检测。退出时使用 `farewell`。双击回复使用 `break_reminder`/`comfort`/`encourage`，主动问候后双击使用 `feedback`。聊天输入等待超时使用 `waiting`。测试念诗使用 `poetry`。知识问候前置提示使用 `knowledge_speak_intro`，知识问候确认使用 `reply`。场景化问候本地回退使用 `scenario_greeting_templates`，其中 `{task}` 会被近期任务替换；连续未回应后的低打扰回退使用 `low_interrupt`。
+- Local proactive lines and prompt copy. `BehaviorController` checks `first_start.enable` first for startup greetings; when enabled, it prefers `first_start.data`, then writes `enable=false` back automatically after successful use. If not hit, it continues falling back to seasonal/time-period greetings and `startup`. Idle/test greetings mainly use `idle`, `quiet`, and `encourage`, and mix in time-period groups `greeting_morning`, `greeting_noon`, `greeting_afternoon`, `greeting_evening`, and `sleepy`. Seasonal groups `greeting_spring`, `greeting_summer`, `greeting_autumn`, and `greeting_winter` are used for startup cycle greetings and time-period/season change detection. Exit uses `farewell`. Double-click replies use `break_reminder` / `comfort` / `encourage`. Double-click after proactive greetings uses `feedback`. Chat-input waiting timeout uses `waiting`. Test poetry uses `poetry`. Knowledge-greeting lead-in prompts use `knowledge_speak_intro`, and knowledge-greeting confirmation uses `reply`. Scenario greeting local fallback uses `scenario_greeting_templates`, where `{task}` is replaced with a recent task; low-interruption fallback after consecutive unanswered greetings uses `low_interrupt`.
 
 `desktop_pet/tools/import_memory_json_to_mem0.py`
 
-- 可选一次性导入工具。读取当前 `data/memory.json` 中的旧结构化记忆，去重后通过 `Mem0MemoryService.add_memory_text()` 写入 Mem0。
-- 运行方式：`cd desktop_pet` 后执行 `py tools/import_memory_json_to_mem0.py`。Mem0 未启用、依赖未安装或初始化失败时只打印提示并退出，不影响主程序。
+- Optional one-time import tool. It reads legacy structured memories from the current `data/memory.json`, deduplicates them, and writes them into Mem0 through `Mem0MemoryService.add_memory_text()`.
+- Run method: after `cd desktop_pet`, execute `py tools/import_memory_json_to_mem0.py`. If Mem0 is not enabled, dependencies are not installed, or initialization fails, it only prints a message and exits without affecting the main program.
 
 `desktop_pet/tools/test_dashscope_embedding.py`
 
-- 可选 DashScope embedding 连通性测试脚本。优先从 `memory.dashscope_api_key` 读取 key，若为空再读取 `DASHSCOPE_API_KEY`，成功时只打印模型名和向量维度，不打印完整向量。
-- 运行方式：`cd desktop_pet` 后执行 `.\.desktop_pet_venv\Scripts\python.exe tools\test_dashscope_embedding.py`。
+- Optional DashScope embedding connectivity test script. It first reads the key from `memory.dashscope_api_key`; if empty, it reads `DASHSCOPE_API_KEY`. On success it prints only the model name and vector dimension, not the full vector.
+- Run method: after `cd desktop_pet`, execute `.\.desktop_pet_venv\Scripts\python.exe tools\test_dashscope_embedding.py`.
 
 `desktop_pet/config/safety_rules.json`
 
-- 注入模型提示的安全规则。
+- Safety rules injected into model prompts.
 
 `desktop_pet/utils/dwm_border.py`
 
-- `suppress_dwm_border()`：在 `nativeEvent` 中拦截 `WM_NCCALCSIZE` 消除 DWM 为无边框窗口添加的细线边框。
-- `apply_transparent_window_fixes()`：对窗口 HWND 移除扩展边缘样式、禁用 DWM 圆角和系统背景渲染。
-- `force_window_topmost(hwnd, enabled)`：通过 `SetWindowPos(HWND_TOPMOST)` 直接在 Windows API 级别设置/取消窗口置顶。Qt 的 `WindowStaysOnTopHint` 在频繁 `setMask()`/`resize()` 的透明分层窗口上可能被系统清除，此函数供 `DesktopPetWindow._enforce_topmost()` 每 30 秒周期性调用以确保置顶持久生效。
-- 修改场景：窗口透明/边框/置顶在 Windows 侧的底层行为调整。
+- `suppress_dwm_border()`: intercepts `WM_NCCALCSIZE` in `nativeEvent` to remove the thin DWM border added to borderless windows.
+- `apply_transparent_window_fixes()`: removes extended edge styles for a window HWND, disables DWM rounded corners, and disables system background rendering.
+- `force_window_topmost(hwnd, enabled)`: uses `SetWindowPos(HWND_TOPMOST)` to set or unset always-on-top directly at the Windows API level. Qt's `WindowStaysOnTopHint` may be cleared by the system on transparent layered windows that frequently call `setMask()` / `resize()`; this function is used by `DesktopPetWindow._enforce_topmost()` every 30 seconds to keep the topmost state persistent.
+- Change scenarios: adjusting low-level Windows behavior for window transparency, borders, and topmost state.
 
 `desktop_pet/utils/logger.py`
 
-- 配置全局日志，写入控制台和 `desktop_pet/data/app.log`。文件日志使用 `RotatingFileHandler`，默认单个 `app.log` 最多约 1MB，并保留 5 份备份，避免长期运行时日志无限增长。
+- Configures global logging, writing to the console and `desktop_pet/data/app.log`. File logging uses `RotatingFileHandler`; by default each `app.log` is capped at about 1MB and 5 backups are kept, avoiding unbounded log growth during long-running use.
 
 `desktop_pet/utils/log_sanitizer.py`
 
-- 日志隐私辅助工具。提供 API key 掩码、常见 `Bearer` / `api_key=` 形态脱敏、长文本截断、异常摘要、请求 messages 结构统计和响应结构摘要；AI 模块日志应记录 message_count、chars_count、status_code、响应 keys 等结构信息，不应记录完整 prompt、完整用户输入、完整模型回复、完整 memory 或完整 API response。
+- Log privacy helper. Provides API key masking, common `Bearer` / `api_key=` pattern sanitization, long-text truncation, exception summaries, request message structure statistics, and response structure summaries. AI module logs should record structural information such as message_count, chars_count, status_code, and response keys; they should not log full prompts, full user inputs, full model replies, full memory, or full API responses.
 
 `xiaohu_codex_package/xiaohu_codex/`
 
-- 早期需求和实现路线图来源，不是运行时代码。读它可以理解产品意图，但当前行为以 `desktop_pet/` 代码为准。
+- Source of early requirements and implementation roadmap, not runtime code. Reading it can help understand product intent, but current behavior should be based on the code under `desktop_pet/`.
 
-## 4. 核心执行流程
+## 4. Core Execution Flows
 
-启动流程：
+Startup flow:
 
-1. `desktop_pet/main.py` 计算 `project_root`，写入 `data/startup_bootstrap.log`。
-2. 导入 `QApplication`、`DesktopPetWindow`、`configure_logging()`。
-3. `configure_logging()` 创建 `data/app.log`。
-4. 创建 `QApplication`，设置 `setQuitOnLastWindowClosed(False)`。
-5. 创建 `DesktopPetWindow(project_root)`。
-6. 主窗口初始化配置路径、数据路径、正式/非正式双存储与双摘要器、AI 客户端、提示词构建器、动画播放器、气泡、输入框、主动行为控制器、自主移动计时器。
-7. 设置透明无边框置顶窗口，恢复上次位置或放到屏幕右下角。
-8. `window.show()` 后进入 `app.exec()`。
-9. `showEvent()` 首次触发 `BehaviorController.start()`，约 1.2 秒后尝试启动问候。
+1. `desktop_pet/main.py` calculates `project_root` and writes `data/startup_bootstrap.log`.
+2. Imports `QApplication`, `DesktopPetWindow`, and `configure_logging()`.
+3. `configure_logging()` creates `data/app.log`.
+4. Creates `QApplication` and sets `setQuitOnLastWindowClosed(False)`.
+5. Creates `DesktopPetWindow(project_root)`.
+6. The main window initializes config paths, data paths, formal/informal dual stores and dual summarizers, AI client, prompt builder, animation player, bubbles, input box, proactive behavior controller, and autonomous movement timer.
+7. Sets up a transparent, borderless, always-on-top window and restores the previous position or places it at the bottom-right of the screen.
+8. After `window.show()`, enters `app.exec()`.
+9. On first `showEvent()`, starts `BehaviorController.start()`, then attempts a startup greeting after about 1.2 seconds.
 
-用户聊天请求流：
+User chat request flow:
 
-1. 用户左键点击角色，`_open_chat_input()` 显示输入框。
-2. `ChatInput` 提交 `message_submitted` 信号。
-3. `_handle_user_message()` 记录用户交互，按当前 `formal_qa_mode` 路由写入 `chat_history_formal.json` 或 `chat_history_informal.json`，显示”思考中”气泡，并切到 `running` 或 `review` 动作。
-4. 如果 `api.enable_chat_api` 为 false，走 `_generate_local_reply()`，直接显示和保存本地回复。
-5. 如果 API 开启但未配置 key，显示失败提示并切到 `failed`。
-6. 如果 API 可用，创建 `QThread` 和 `ChatWorker`。
-7. `ChatWorker.run()` 读取最近上下文；若启用 Mem0 且 `memory.inject_mem0_to_prompt` 为 true，会在后台线程中按当前用户输入检索长期语义记忆，并传入 `PromptBuilder.build_messages()`；检索失败回退为空结果，不影响原 JSON 记忆流程。
-8. `ChatWorker.run()` 调用 `PromptBuilder.build_messages()`，再调用 `DeepSeekClient.chat()`。
-9. 成功时 `_on_chat_success()` 保存助手回复，切回 `idle`，按模式显示气泡或正式问答面板，并启动后台摘要线程。
-10. 失败时 `_on_chat_failure()` 切到 `failed` 并显示错误。
+1. The user left-clicks the character; `_open_chat_input()` shows the input box.
+2. `ChatInput` emits the `message_submitted` signal.
+3. `_handle_user_message()` records user interaction, writes to `chat_history_formal.json` or `chat_history_informal.json` according to the current `formal_qa_mode`, shows a "thinking" bubble, and switches to the `running` or `review` action.
+4. If `api.enable_chat_api` is false, it uses `_generate_local_reply()` and directly displays and saves the local reply.
+5. If the API is enabled but no key is configured, it shows a failure prompt and switches to `failed`.
+6. If the API is available, it creates a `QThread` and `ChatWorker`.
+7. `ChatWorker.run()` reads recent context. If Mem0 is enabled and `memory.inject_mem0_to_prompt` is true, it retrieves long-term semantic memories in the background thread based on the current user input and passes them into `PromptBuilder.build_messages()`; retrieval failure falls back to an empty result and does not affect the original JSON memory flow.
+8. `ChatWorker.run()` calls `PromptBuilder.build_messages()`, then calls `DeepSeekClient.chat()`.
+9. On success, `_on_chat_success()` saves the assistant reply, switches back to `idle`, displays a bubble or formal Q&A panel depending on mode, and starts the background summarization thread.
+10. On failure, `_on_chat_failure()` switches to `failed` and shows the error.
 
-正式问答显示流：
+Formal Q&A display flow:
 
-- `chat.formal_qa_mode` 为 true 时，助手回复不走普通气泡，而走 `_show_formal_answer_panel()`。
-- `chat.formal_answer_display` 为 `new_panel` 时，每题新建面板。
-- `chat.formal_answer_display` 为 `append` 时，追加到当前可见面板。
-- 面板文本是纯文本 `QTextEdit`，可选择复制，关闭后主窗口引用列表会移除。
+- When `chat.formal_qa_mode` is true, assistant replies do not use the normal bubble and instead go through `_show_formal_answer_panel()`.
+- When `chat.formal_answer_display` is `new_panel`, each question creates a new panel.
+- When `chat.formal_answer_display` is `append`, replies append to the currently visible panel.
+- Panel text is plain-text `QTextEdit`, can be selected and copied, and the main-window reference list removes the panel after it closes.
 
-主动行为流：
+Proactive behavior flow:
 
-1. `BehaviorController` 启动后设置空闲检查计时器，每 60 秒检查一次。
-2. 启动问候受 `do_not_disturb` 和 `startup_greeting` 约束，不受每日主动话术上限约束；优先级为 `first_start.data`（仅当 `first_start.enable` 为 true）→ 每 5 天周期首日季节问候 → 当前时段问候 → `startup`；成功展示后不计入本地主动话术次数。
-3. 空闲主动话术受 `proactive_chat`、`min_proactive_interval_minutes`、`last_proactive_at`、动态未回应间隔和每日上限约束。若连续未回应达到低打扰阈值，优先从 `low_interrupt` 取一句低打扰问候；若场景化问候开启、冷却结束且记忆上下文足够，则从 `memory.json` 构造近期任务/相处方式上下文，API 可用时发出 `scenario_greeting_requested` 交给后台 worker，API 不可用或失败时回退 `scenario_greeting_templates`。
-4. 若未触发场景化问候，继续按 `proactive_content_ratio` 决定知识问候或普通问候；普通问候话术池从 `idle`/`quiet`/`encourage`/`break_reminder` 加当前时段分组中随机选取。
-5. 本地问候触发后发出 `speak_requested(text, duration_ms, action_name)`；场景化 API 问候由 `ScenarioGreetingWorker` 成功后回到主线程显示。
-6. `DesktopPetWindow._handle_behavior_speak()` / `_handle_scenario_greeting()` 在未聊天且输入框不可见时显示气泡并切动作。
+1. After `BehaviorController` starts, it sets an idle check timer that runs every 60 seconds.
+2. Startup greetings are constrained by `do_not_disturb` and `startup_greeting`, not by the daily proactive-line limit. Priority is `first_start.data` (only when `first_start.enable` is true) -> seasonal greeting on the first day of each 5-day cycle -> current time-period greeting -> `startup`; successful display is not counted as local proactive-line usage.
+3. Idle proactive lines are constrained by `proactive_chat`, `min_proactive_interval_minutes`, `last_proactive_at`, dynamic unanswered interval, and daily limits. If consecutive unanswered greetings reach the low-interruption threshold, one low-interruption greeting is selected from `low_interrupt` first. If scenario greetings are enabled, cooldown is over, and memory context is sufficient, recent task / interaction-style context is built from `memory.json`; when the API is available, `scenario_greeting_requested` is emitted for the background worker; if the API is unavailable or fails, it falls back to `scenario_greeting_templates`.
+4. If no scenario greeting is triggered, it continues using `proactive_content_ratio` to choose between knowledge greeting and normal greeting; the normal greeting line pool randomly selects from `idle` / `quiet` / `encourage` / `break_reminder` plus the current time-period group.
+5. After a local greeting triggers, it emits `speak_requested(text, duration_ms, action_name)`; scenario API greetings return to the main thread and display after `ScenarioGreetingWorker` succeeds.
+6. `DesktopPetWindow._handle_behavior_speak()` / `_handle_scenario_greeting()` display the bubble and switch action when not chatting and the input box is not visible.
 
-自动移动和测试动作流：
+Auto-movement and test action flow:
 
-- `ui.enable_free_move` 为 true 时，`auto_move_timer` 每 15 到 28 秒随机触发一次。
-- 自动移动按左跑、右跑、跳跃约 4:4:2 的比例随机触发。
-- 测试菜单可触发动作播放、左移、右移、跳跃、本地主动说话和 API 主动说话。
-- 当前代码中自动移动仍会在 `_chat_in_progress()` 或拖拽时跳过。测试左移、右移、跳跃使用 `_movement_locked()` 判断，避免退出或拖拽时移动。
+- When `ui.enable_free_move` is true, `auto_move_timer` randomly triggers every 15 to 28 seconds.
+- Auto-movement randomly triggers left-run, right-run, and jump at roughly a 4:4:2 ratio.
+- The test menu can trigger action playback, move left, move right, jump, local proactive speaking, and API proactive speaking.
+- Current auto-movement still skips when `_chat_in_progress()` is true or during dragging. Test left, right, and jump use `_movement_locked()` to avoid movement during exit or dragging.
 
-配置加载流程：
+Configuration loading flow:
 
-- `DesktopPetWindow._load_app_config()` 使用 `load_json_prefer_primary(config/app_config.json, config/app_config.example.json, {})`。
-- 如果主配置存在，读取主配置；如果不存在，读取示例配置；如果两者都不存在，才按默认值创建主配置。
-- `DesktopPetWindow` 初始化 `ConfigService(self.app_config)` 用于安全读取点分路径配置；重新加载配置后调用 `config_service.update(self.app_config)` 指向最新内存配置。
-- `DeepSeekClient` 和 `ContextManager` 也使用相同的主配置优先、示例配置兜底策略。
+- `DesktopPetWindow._load_app_config()` uses `load_json_prefer_primary(config/app_config.json, config/app_config.example.json, {})`.
+- If the primary config exists, it reads the primary config; if not, it reads the example config; if neither exists, it creates the primary config with default values.
+- `DesktopPetWindow` initializes `ConfigService(self.app_config)` for safe dot-path configuration reads; after reloading configuration, it calls `config_service.update(self.app_config)` so the service points to the latest in-memory configuration.
+- `DeepSeekClient` and `ContextManager` use the same primary-first, example-fallback strategy.
 
-构建流程：
+Build flow:
 
-- 当前没有构建或打包脚本。第一版目标是本机运行，不要求打包。
-- 推测：未来若要发布 Windows 可执行文件，可考虑 PyInstaller，但项目中尚无相关配置。
+- There is currently no build or packaging script. The first-version goal is local machine execution, with no packaging requirement.
+- Assumption: if a Windows executable is needed in the future, PyInstaller could be considered, but the project currently has no related configuration.
 
-测试流程：
+Test flow:
 
-- 当前使用 `desktop_pet/tests/` 下的 `unittest` 回归测试，没有 pytest、CI、格式化器配置。
-- 推荐使用项目本地虚拟环境运行：`desktop_pet\.desktop_pet_venv\Scripts\python.exe -m unittest discover -s desktop_pet\tests`。
-- 配置读取服务回归测试为 `test_config_service.py`，覆盖点分路径读取、缺失字段默认值、类型转换和 reload 后更新引用。
-- 聊天流程协调器回归测试为 `test_chat_flow_controller.py`，覆盖本地回复、API 缺配置、正式问答成功落盘、`ChatWorker` 参数快照和重复聊天任务拦截判断。
-- 记忆系统相关回归测试包括 `test_memory_schema.py`、`test_summarizer_memory_updates.py`、`test_prompt_builder_memory_sections.py` 和 `test_memory_vector_store.py`，分别覆盖 memory schema 兼容、关系记忆提取、Prompt 记忆分区与本地向量索引。场景化主动问候测试包括 `test_proactive_context.py`、`test_scenario_greeting_config.py`、`test_scenario_greeting_worker.py` 和 `test_behavior_controller.py` 中的场景化分流用例。
-- 常用轻量校验方式还包括 Python AST 解析、JSON 合法性检查和手动启动。
-- `py_compile` 在本环境可能因为 `__pycache__` 写入权限失败，不适合作为唯一验证方式。
+- The project currently uses `unittest` regression tests under `desktop_pet/tests/`; there is no pytest, CI, or formatter configuration.
+- Recommended command with the project-local virtual environment: `desktop_pet\.desktop_pet_venv\Scripts\python.exe -m unittest discover -s desktop_pet\tests`.
+- Configuration read service regression tests live in `test_config_service.py`, covering dot-path reads, missing-field defaults, type conversion, and reference updates after reload.
+- Chat-flow controller regression tests live in `test_chat_flow_controller.py`, covering local replies, missing API config, formal Q&A, worker arguments, and duplicate chat-task decisions.
+- Local line service and refresh tests live in `test_local_lines_service.py`, covering legacy array format, fallback, controlled generated updates, deduplication, first-start line consumption, seven-day due checks, cross-month refresh, not-due skips, worker writes, and missing-API skips.
+- Message splitting tests live in `test_message_splitter.py`, covering full-stop splitting, short-first-sentence merging, single-sentence preservation, question/exclamation marks, and whitespace normalization.
+- Memory-system regression tests include `test_memory_schema.py`, `test_summarizer_memory_updates.py`, `test_prompt_builder_memory_sections.py`, and `test_memory_vector_store.py`, covering memory schema compatibility, relationship-memory extraction, prompt memory sections, and local vector indexing. Scenario-based proactive greeting tests include `test_proactive_context.py`, `test_scenario_greeting_config.py`, `test_scenario_greeting_worker.py`, and scenario-routing cases in `test_behavior_controller.py`.
+- Common lightweight checks also include Python AST parsing, JSON validity checks, and manual startup.
+- In this environment, `py_compile` may fail because writing `__pycache__` is not permitted, so it should not be the only verification method.
 
-## 5. 重要模块之间的关系
+## 5. Important Module Relationships
 
-- `main.py` 只负责启动和早期诊断，业务集中在 `DesktopPetWindow`。
-- `DesktopPetWindow` 持有并连接 `SpritePlayer`、`SpeechBubble`、`ChatInput`、`FormalAnswerPanel`、`BehaviorController`、`ChatStore`、`UsageStore`、`MemoryStore`、`DeepSeekClient`、`PromptBuilder`、`ContextManager` 和 `Summarizer`。
-- `SpritePlayer` 只负责动作帧和 pixmap，不直接移动窗口。窗口位移由 `DesktopPetWindow` 的 `QPropertyAnimation` 处理。
-- `PromptBuilder` 不直接调用 API；它只组装 messages。`DeepSeekClient` 只发送请求。
-- `ChatStore` 是上下文、摘要和聊天记录的共同来源。
-- `Summarizer` 依赖 `ChatStore`、`MemoryStore` 和 `DeepSeekClient`，但摘要失败会记录日志并退出，不应阻断聊天。
-- `BehaviorController` 不直接操作 UI，只发信号给主窗口。
+- `main.py` is only responsible for startup and early diagnostics; business logic is concentrated in `DesktopPetWindow`.
+- `DesktopPetWindow` owns and connects `SpritePlayer`, `SpeechBubble`, `ChatInput`, `FormalAnswerPanel`, `BehaviorController`, `ChatStore`, `UsageStore`, `MemoryStore`, `DeepSeekClient`, `PromptBuilder`, `ContextManager`, and `Summarizer`.
+- `SpritePlayer` only handles action frames and pixmaps; it does not move the window directly. Window movement is handled by `DesktopPetWindow` with `QPropertyAnimation`.
+- `PromptBuilder` does not call the API directly; it only assembles messages. `DeepSeekClient` only sends requests.
+- `ChatStore` is the shared source for context, summaries, and chat records.
+- `Summarizer` depends on `ChatStore`, `MemoryStore`, and `DeepSeekClient`, but summary failures should log and exit without blocking chat.
+- `BehaviorController` does not operate on UI directly; it only emits signals to the main window.
 
-## 6. 常见开发任务的推荐阅读路径和修改路径
+## 6. Recommended Reading and Edit Paths for Common Development Tasks
 
-新增右键菜单项：
+Adding a right-click menu item:
 
-1. 读 `app/context_menu.py` 的 `build_context_menu()`。
-2. 读 `DesktopPetWindow._show_context_menu()` 的回调注入。
-3. 在主窗口添加处理函数，并确认是否需要保存到 `app_config`。
-4. 如果新增配置项，同步更新 `config/app_config.example.json` 和本文件。
+1. Read `app/context_menu.py` and its `build_context_menu()`.
+2. Read callback injection in `DesktopPetWindow._show_context_menu()`.
+3. Add a handler function in the main window and confirm whether it needs to be saved to `app_config`.
+4. If a new config key is added, update `config/app_config.example.json` and this file.
 
-修改聊天或 API 行为：
+Modifying chat or API behavior:
 
-1. 读 `DesktopPetWindow._handle_user_message()`。
-2. 读 `ChatWorker.run()`、`ai/prompt_builder.py`、`ai/deepseek_client.py`。
-3. 如果影响上下文或摘要，再读 `ai/context_manager.py` 和 `ai/summarizer.py`。
-4. 修改后至少验证本地回复、未配置 API key、配置 API key 三种分支。
+1. Read `DesktopPetWindow._handle_user_message()`.
+2. Read `ChatWorker.run()`, `ai/prompt_builder.py`, and `ai/deepseek_client.py`.
+3. If context or summarization is affected, also read `ai/context_manager.py` and `ai/summarizer.py`.
+4. After changes, verify at least three branches: local reply, missing API key, and configured API key.
 
-修改正式问答模式：
+Modifying formal Q&A mode:
 
-1. 读 `DesktopPetWindow._show_answer_output()` 和 `_show_formal_answer_panel()`。
-2. 读 `app/formal_answer_panel.py`。
-3. 检查关闭面板后的引用清理，避免残留对象。
-4. 若新增显示模式，同步更新 `chat.formal_answer_display` 配置和右键菜单。
+1. Read `DesktopPetWindow._show_answer_output()` and `_show_formal_answer_panel()`.
+2. Read `app/formal_answer_panel.py`.
+3. Check reference cleanup after panel close to avoid leftover objects.
+4. If adding a display mode, update `chat.formal_answer_display` config and the right-click menu.
 
-修改动作或素材：
+Modifying actions or assets:
 
-1. 读 `assets/sprite_config.json` 和 `xiaohu_codex_package/xiaohu_codex/SPRITE_SHEET_SPEC.md`。
-2. 读 `animation/sprite_player.py`。
-3. 读主窗口中所有 `set_action()` 调用。
-4. 确认动作名与配置、素材行、菜单测试项一致。
+1. Read `assets/sprite_config.json` and `xiaohu_codex_package/xiaohu_codex/SPRITE_SHEET_SPEC.md`.
+2. Read `animation/sprite_player.py`.
+3. Read all `set_action()` calls in the main window.
+4. Confirm action names are consistent across config, asset rows, menu test items, and call sites.
 
-修改窗口显示、透明背景、位置、移动：
+Modifying window display, transparent background, position, or movement:
 
-1. 读 `DesktopPetWindow._setup_window()`、鼠标事件、`_restore_position()`、`_trigger_auto_move()`、`_start_horizontal_move_test()`、`_start_jump_auto_move()`。
-2. 多屏和屏幕外恢复要特别小心，先保留 `window_state.json` 可见性检查。
-3. 修改后手动测试拖拽、保存位置、右下角初始位置、左移、右移、跳跃、退出。
+1. Read `DesktopPetWindow._setup_window()`, mouse events, `_restore_position()`, `_trigger_auto_move()`, `_start_horizontal_move_test()`, and `_start_jump_auto_move()`.
+2. Be especially careful with multi-monitor and off-screen recovery; preserve the `window_state.json` visibility check first.
+3. After changes, manually test dragging, position persistence, initial bottom-right position, left movement, right movement, jump, and exit.
 
-修改主动话术：
+Modifying proactive lines:
 
-1. 读 `character/behavior_controller.py`。
-2. 读 `config/local_lines.json`。
-3. 读 `storage/usage_store.py`。
-4. 确认免打扰、每日上限和等待用户回复逻辑没有被绕过。
+1. Read `character/behavior_controller.py`.
+2. Read `config/local_lines.json`.
+3. Read `storage/usage_store.py`.
+4. Confirm do-not-disturb, daily limits, and waiting-for-user-reply logic are not bypassed.
 
-修改持久化数据结构：
+Modifying persistent data structures:
 
-1. 读 `storage/json_store.py`。
-2. 读对应 store 文件。
-3. 读所有引用该 JSON 的模块。
-4. 必须考虑旧数据文件兼容，因为 `data/` 是用户本地运行时数据。
+1. Read `storage/json_store.py`.
+2. Read the corresponding store file.
+3. Read all modules that reference that JSON.
+4. You must consider compatibility with old data files, because `data/` is user-local runtime data.
 
-## 7. 代码风格和项目约定
+## 7. Code Style and Project Conventions
 
-- Python 代码普遍使用 `from __future__ import annotations`。
-- 类名使用 PascalCase，函数和方法使用 snake_case。
-- Qt 事件方法保留 Qt 命名，如 `mousePressEvent`，并用 `# noqa: N802`。
-- JSON 文件使用 UTF-8，`save_json()` 使用 `ensure_ascii=False` 和 `indent=2`。
-- 运行时缺失 JSON 文件应自动创建，优先使用 `storage/json_store.py`。
-- API key 不得写死在代码或示例外的共享文件中。真实 key 放在被忽略的 `config/app_config.json`。
-- UI 和业务目前没有明显分层到 MVC，主窗口承担协调职责。小功能可以沿用现有模式，较大功能再考虑拆模块。
-- 后台 API 请求使用 `QThread + QObject worker`，不要在 UI 线程中直接请求网络。
-- 摘要使用普通 `threading.Thread` 后台运行，异常需吞掉并记录日志。
-- 当前代码里有大量中文文案和注释。新增面向用户的文案应使用中文，并注意文件编码。
+- Python code generally uses `from __future__ import annotations`.
+- Class names use PascalCase; functions and methods use snake_case.
+- Qt event methods keep Qt naming, such as `mousePressEvent`, and use `# noqa: N802`.
+- JSON files use UTF-8; `save_json()` uses `ensure_ascii=False` and `indent=2`.
+- Missing runtime JSON files should be created automatically, preferably through `storage/json_store.py`.
+- API keys must not be hard-coded in code or shared files outside examples. Real keys belong in ignored `config/app_config.json`.
+- UI and business logic are not clearly separated into MVC right now; the main window carries coordination responsibilities. Small features can follow the existing pattern; larger features should consider module extraction.
+- Background API requests use `QThread + QObject worker`; do not request the network directly on the UI thread.
+- Summaries run in a normal `threading.Thread` in the background; exceptions should be swallowed and logged.
+- The current code has many Chinese user-facing strings and comments. New user-facing copy should use Chinese and pay attention to file encoding.
 
-## 8. 高风险修改区域
+## 8. High-Risk Modification Areas
 
 `DesktopPetWindow`
 
-- 风险最高。聊天、窗口、动作、状态、菜单和后台线程都集中在这里。
-- 修改前先定位信号和状态变量，不要只改一个分支。
+- Highest risk. Chat, window, actions, state, menu, and background threads are all concentrated here.
+- Before modifying it, locate related signals and state variables; do not change only one branch.
 
-`main.py` 早期启动日志
+`main.py` early startup logging
 
-- 用于排查 PySide6 导入前后的静默退出。不要轻易移除 `_write_boot_log()`。
+- Used to diagnose silent exits before and after PySide6 import. Do not casually remove `_write_boot_log()`.
 
 `json_store.py`
 
-- 影响所有配置和运行时数据。修改默认创建、解析失败、备份恢复、临时文件清理或保存行为时，要考虑用户旧数据、Windows 文件句柄、权限和崩溃中断场景。
+- Affects all configuration and runtime data. When modifying default creation, parse-failure handling, backup restore, temp-file cleanup, or save behavior, consider old user data, Windows file handles, permissions, and crash/interruption scenarios.
 
 `app_config.example.json`
 
-- 是无 `app_config.json` 时的兜底配置。新增配置项如果只写代码不写示例，会导致新设备行为不一致。
+- Fallback configuration when `app_config.json` is absent. If a new config key is only added in code and not in the example, behavior will differ on new devices.
 
-`DeepSeekClient` 和 `PromptBuilder`
+`DeepSeekClient` and `PromptBuilder`
 
-- 影响外部请求、模型输出、安全规则和上下文。修改时要兼顾无 key、本地回复、API 错误、正式问答模式。
+- Affect external requests, model output, safety rules, and context. When modifying them, handle no-key, local-reply, API-error, and formal-Q&A branches.
 
-`SpritePlayer` 和 `sprite_config.json`
+`SpritePlayer` and `sprite_config.json`
 
-- 动作名、帧数、行列、帧率和缩放互相绑定。新增动作时必须同步菜单、调用点和素材。
+- Action names, frame counts, rows/columns, frame rate, and scaling are coupled. When adding actions, synchronize menu items, call sites, and assets.
 
 `FormalAnswerPanel`
 
-- 关闭销毁和引用清理是内存安全重点。不要让已关闭 panel 继续留在 `formal_answer_panels`。
+- Close/destroy and reference cleanup are the memory-safety focus. Do not let a closed panel remain in `formal_answer_panels`.
 
 `.gitignore`
 
-- 用于只上传程序本体。不要把 `desktop_pet/data/`、日志、缓存、真实 `app_config.json` 放开。
+- Used to upload only the program body. Do not unignore `desktop_pet/data/`, logs, caches, or real `app_config.json`.
 
-## 9. 常用命令
+## 9. Common Commands
 
-安装依赖：
+Install dependencies:
 
 ```powershell
 cd desktop_pet
 py -m pip install -r requirements.txt
 ```
 
-启动程序：
+Start the program:
 
 ```powershell
 cd desktop_pet
 py main.py
 ```
 
-快速启动脚本：
+Quick startup script:
 
 ```powershell
 cd desktop_pet
@@ -490,19 +491,19 @@ cd desktop_pet
 wscript.exe .\start_main.vbs
 ```
 
-查看早期启动日志：
+View early startup log:
 
 ```powershell
 Get-Content .\data\startup_bootstrap.log -Tail 80
 ```
 
-查看应用日志：
+View application log:
 
 ```powershell
 Get-Content .\data\app.log -Tail 80
 ```
 
-检查 Python 命令指向：
+Check where Python commands point:
 
 ```powershell
 py -V
@@ -510,7 +511,7 @@ Get-Command python | Format-List Name,Source,Path,CommandType
 where.exe python
 ```
 
-语法和 AST 轻量检查，不写 `__pycache__`：
+Lightweight syntax and AST check without writing `__pycache__`:
 
 ```powershell
 @'
@@ -522,7 +523,7 @@ for path in Path("desktop_pet").rglob("*.py"):
 '@ | py -3 -B -
 ```
 
-JSON 合法性检查：
+JSON validity check:
 
 ```powershell
 @'
@@ -534,128 +535,128 @@ for path in Path("desktop_pet").rglob("*.json"):
 '@ | py -3 -B -
 ```
 
-查看当前修改：
+View current changes:
 
 ```powershell
 git status --short
 ```
 
-当前没有以下命令或配置：
+The following commands or configurations do not currently exist:
 
-- 无 pytest 配置。
-- 无格式化器配置。
-- 无 lint 配置。
-- 无打包脚本。
-- 无 CI 配置。
+- No pytest configuration.
+- No formatter configuration.
+- No lint configuration.
+- No packaging script.
+- No CI configuration.
 
-## 10. 重要依赖和外部服务
+## 10. Important Dependencies and External Services
 
-Python 依赖见 `desktop_pet/requirements.txt`：
+Python dependencies are listed in `desktop_pet/requirements.txt`:
 
-- `PySide6-Essentials`：提供运行所需的 `PySide6.QtCore`、`PySide6.QtGui`、`PySide6.QtWidgets`，用于桌面窗口、Qt 控件、定时器、信号、动画和图像显示；不要默认安装完整 `PySide6` / `PySide6_Addons`，避免引入未使用的 WebEngine、QML、Quick、Charts、3D 等大型 Qt 组件。
-- `requests`：调用 DeepSeek API，以及独立 DashScope embedding 测试脚本。
-- `mem0ai==2.0.2`：可选 Mem0 长期语义记忆层基础 SDK。代码必须使用可选导入和失败降级，不能假设一定安装或初始化成功；不要默认安装 `mem0ai[nlp]`、CLI、Server、OpenMemory、Docker、自托管服务或 spaCy 模型等额外扩展。
+- `PySide6-Essentials`: provides the required `PySide6.QtCore`, `PySide6.QtGui`, and `PySide6.QtWidgets` modules for desktop windows, Qt widgets, timers, signals, animations, and image display. Do not install full `PySide6` / `PySide6_Addons` by default, to avoid pulling in large unused Qt components such as WebEngine, QML, Quick, Charts, and 3D.
+- `requests`: calls the DeepSeek API and is used by the standalone DashScope embedding test script.
+- `mem0ai==2.0.2`: optional base SDK for the Mem0 long-term semantic memory layer. Code must use optional imports and failure fallback; do not assume it is installed or initializes successfully. Do not install `mem0ai[nlp]`, CLI, Server, OpenMemory, Docker, self-hosted services, spaCy models, or other extras by default.
 
-外部服务：
+External services:
 
-- DeepSeek API，默认 `base_url` 为 `https://api.deepseek.com`。
-- 请求路径为 `/chat/completions`，请求体包含 `model`、`messages`、`temperature`。
-- API key 从 `config/app_config.json` 或示例配置的 `api.api_key` 读取。示例配置默认空 key。
-- DashScope / 阿里云百炼 OpenAI-compatible embeddings API，默认 base URL 为 `https://dashscope.aliyuncs.com/compatible-mode/v1`，Mem0 embedder 会调用 `/embeddings`，默认模型 `text-embedding-v4`、维度 1024。DashScope API key 从 `memory.dashscope_api_key` 或 `DASHSCOPE_API_KEY` 读取。
+- DeepSeek API, default `base_url` is `https://api.deepseek.com`.
+- Request path is `/chat/completions`, and the request body includes `model`, `messages`, and `temperature`.
+- API key is read from `config/app_config.json` or the example config's `api.api_key`. The example config defaults to an empty key.
+- DashScope / Alibaba Cloud Bailian OpenAI-compatible embeddings API, default base URL is `https://dashscope.aliyuncs.com/compatible-mode/v1`. The Mem0 embedder calls `/embeddings`, with default model `text-embedding-v4` and dimension 1024. The DashScope API key is read from `memory.dashscope_api_key` or `DASHSCOPE_API_KEY`.
 
-## 11. 待确认问题
+## 11. Open Questions
 
-- 当前没有自动化测试。需要人工确认是否引入 pytest、Qt 测试工具或最小 smoke test。
-- 当前没有构建和打包方案。推测第一版只要求源码运行，是否需要 PyInstaller 或安装包仍待确认。
-- `ai/safety_filter.py` 已存在但未接入主流程。是否需要本地高风险请求预过滤待确认。
-- `UsageStore` 支持 API 主动次数统计，但当前 API 主动说话测试流程未看到每日 API 主动上限的完整接入。是否需要限制待确认。
-- `character/character_profile.py`、`character/emotion_state.py` 当前像是预留结构，主流程未明显依赖。后续是否发展角色状态系统待确认。
-- 当前项目里大量中文注释和字符串在 PowerShell 输出中显示为乱码。需要人工确认这是终端编码显示问题，还是源码文本已经发生 mojibake。若实际 UI 文案乱码，应优先修复编码和文案。
-- `README.md` 和 `xiaohu_codex_package/` 中部分早期任务提到”清空聊天记录”菜单。当前右键菜单通过 `show_clear_menu` 配置控制，提供了”清除非正式聊天记录”和”清理正式问答记录”两个独立入口。
-- 自动移动逻辑当前仍在聊天进行中跳过，测试移动逻辑只避开拖拽和退出。这个差异是否符合产品预期待确认。
+- There is currently no automated testing. Human confirmation is needed on whether to introduce pytest, Qt testing tools, or a minimal smoke test.
+- There is currently no build and packaging plan. The first version is presumed to require only source-code execution; whether PyInstaller or an installer is needed remains to be confirmed.
+- `ai/safety_filter.py` exists but is not wired into the main flow. Whether local high-risk request pre-filtering is needed remains to be confirmed.
+- `UsageStore` supports API proactive usage counting, but the current API proactive speaking test flow does not show complete integration of a daily API proactive limit. Whether a limit is needed remains to be confirmed.
+- `character/character_profile.py` and `character/emotion_state.py` currently look like reserved structures, and the main flow does not clearly depend on them. Whether to develop a character-state system later remains to be confirmed.
+- Many Chinese comments and strings in the current project display as mojibake in PowerShell output. Human confirmation is needed on whether this is only terminal encoding display, or the source text itself has become mojibake. If actual UI text is garbled, fix encoding and copy first.
+- Some early tasks in `README.md` and `xiaohu_codex_package/` mention a "clear chat history" menu. The current right-click menu is controlled by the `show_clear_menu` config and provides two separate entries: "clear informal chat history" and "clear formal Q&A history".
+- Auto-movement currently still skips while chat is in progress, while test movement only avoids dragging and exit. Whether this difference matches product expectations remains to be confirmed.
 
-## 12. 文档维护规则
+## 12. Documentation Maintenance Rules
 
-- 每次智能体修改代码后，必须检查是否需要同步更新 `AGENTS.md`。
-- 如果修改涉及目录结构、核心流程、API、数据结构、配置项、依赖、测试方式、构建方式或项目约定，必须同步更新 `AGENTS.md`。
-- 更新文档时，要基于实际代码、配置、测试和注释；不能把未实现的需求写成已实现事实。
-- 如果只能推断设计意图，必须写明“推测”。
-- 如果无法确认，放入“待确认问题”章节。
-- 每次更新都要在下方“文档同步记录”追加一条，说明代码变更摘要和文档更新内容。
+- After each code change by an agent, check whether `AGENTS.md` needs to be updated.
+- If a change touches directory structure, core flows, APIs, data structures, configuration keys, dependencies, test methods, build methods, or project conventions, update `AGENTS.md`.
+- Documentation updates must be based on actual code, configuration, tests, and comments; do not write unimplemented requirements as implemented facts.
+- If design intent can only be inferred, explicitly write "assumption".
+- If something cannot be confirmed, put it in the "Open Questions" section.
+- Every update must append an entry to the "Documentation Sync Log" below, describing the code-change summary and the documentation update.
 
-## 文档同步记录
+## Documentation Sync Log
 
-- 2026-05-11：新建 `AGENTS.md`。基于当前项目入口、配置、依赖、需求文档、核心业务目录和现有代码梳理项目结构、运行流程、模块关系、常见修改路径、风险区域、常用命令、依赖服务和待确认问题；同时在 `.gitignore` 中放行根目录 `AGENTS.md`，确保该智能体文档可随程序本体提交。本次未改变程序代码。
-- 2026-05-11：`BehaviorController` 新增 `_time_greeting_key()` 根据本地时间返回时段问候分组（早/午/晚/深夜），启动问候优先时段话术、空闲和测试话术池混入时段分组；新增 `pick_farewell_line()` 退出时从 `farewell` 组抽取道别语。`DesktopPetWindow.request_exit()` 退出时播放 waving 并显示道别气泡。同步更新 `AGENTS.md` 中 behavior_controller、local_lines、主动行为流、DesktopPetWindow 描述。
-- 2026-05-11：新增双击识别功能。`DesktopPetWindow` 新增 `mouseDoubleClickEvent`，双击人物触发 `pick_reply_line()` 从 `break_reminder`/`comfort`/`encourage` 随机抽取话术并播放 waving；`mouseReleaseEvent` 改用 `_click_timer` 延迟区分单击与双击，避免双击时误开聊天输入框。`BehaviorController` 新增 `pick_reply_line()`。
-- 2026-05-11：新增季节周期问候。`BehaviorController` 新增 `_season_key()` 按月份划分四季、`_is_cycle_start()` 按每年第几天判断 5 天周期首日。`_startup_greeting()` 在周期首日优先季节问候，其次时段问候，最后回退 `startup`。`local_lines.json` 新增 `greeting_spring`/`greeting_summer`/`greeting_autumn`/`greeting_winter` 四组季节话术。
-- 2026-05-11：新增窗口置顶开关。右键菜单增加"窗口置顶"可勾选项，`_toggle_always_on_top()` 控制 `WindowStaysOnTopHint` 并持久化到 `ui.always_on_top`。关闭置顶时从 `return_after_idle` 分组随机抽取话术展示。`BehaviorController` 新增 `pick_ignored_line()`。
-- 2026-05-11：新增聊天输入等待提示。`DesktopPetWindow` 新增 `_waiting_timer`，打开输入框 30 秒后无提交则从 `waiting` 分组抽取话术展示，之后每 25 秒重复提醒；用户提交时停止计时器。`BehaviorController` 新增 `pick_waiting_line()`。
-- 2026-05-11：新增测试菜单显隐配置。`app_config.example.json` 的 `ui` 节新增 `show_test_menu` 项（默认 `false`）。`context_menu.py` 的 `build_context_menu()` 新增同名参数，整个测试子菜单在条件不满足时跳过构建。`DesktopPetWindow._show_context_menu()` 从配置读取并传入。
-- 2026-05-11：修复窗口置顶两个问题。(1) `SpeechBubble` 新增 `set_always_on_top()`，`_display_message()` 每次显示前同步主窗口置顶状态，消除气泡不受置顶开关控制的问题。(2) 纠正话术对应关系：`_toggle_always_on_top()` 开启置顶时调用 `pick_return_after_idle_line()` 回复 `return_after_idle`，关闭时调用 `pick_ignored_line()` 回复 `ignored`。
-- 2026-05-11：新增时段变化自动问候。`BehaviorController` 新增 `period_check_timer`（每 60 秒）和 `_check_period_change()`，跟踪 `_last_time_key` 和 `_last_season_key`。当时段（早/午/晚/深夜）或季节发生变化时，立即弹出新时段对应的话术问候。
-- 2026-05-11：新增主动问候后双击反馈。`BehaviorController` 新增 `is_within_proactive_reply_window()` 判断 60 秒回复窗口、`pick_feedback_line()` 从 `feedback` 分组抽取。`mouseDoubleClickEvent` 在窗口内双点击时优先用 `feedback` 话术，否则回退普通双击回复。`local_lines.json` 新增 `feedback` 分组。
-- 2026-05-11：新增念诗测试功能。右键测试菜单增加"念一首诗"，`_test_poetry()` 从 `poetry` 分组随机抽取并播放 waving 展示。`local_lines.json` 新增 `poetry` 分组。`BehaviorController` 新增 `pick_poetry_line()`。
-- 2026-05-11：聊天输入念诗关键词检测。`_handle_user_message()` 在特定条件下（API 关闭、正式问答关闭、自主移动关闭、窗口置顶关闭）检测念诗相关关键词，命中时直接从本地 `poetry` 话术回复并播放 `running` 动作。
-- 2026-05-11：聊天输入框置顶跟随。`ChatInput` 新增 `set_always_on_top()`，`_open_chat_input()` 和 `_toggle_always_on_top()` 中同步输入框置顶状态与主窗口一致。
-- 2026-05-11：聊天历史分裂为正式/非正式双轨。`ChatStore` 新增 `last_cleaned_at` 字段和 `update_last_cleaned_at()` 方法；`ContextManager` 改为接收两个 store 并按模式选择；`PromptBuilder` 改为接收两个 summary 路径按模式选择；`Summarizer.maybe_summarize()` 新增 `force` 参数；`DesktopPetWindow` 新增双 store/双 summary 实例、`_pending_was_formal` 快照防止路由错乱、`_active_chat_store()` 辅助方法。`app_config.example.json` 新增 `formal_cleanup_months`、`informal_cleanup_months`（已于 2026-05-11 后续移除）。
-- 2026-05-11：新增清理聊天记录右键菜单。`app_config.example.json` 新增 `ui.show_clear_menu` 配置（默认 `false`）；`context_menu.py` 新增"清除非正式聊天记录""清理正式问答记录"两个菜单项；`DesktopPetWindow` 新增 `_clear_informal_chat_history()`、`_clear_formal_chat_history()` 方法。
-- 2026-05-11：清理记录前先总结。`_clear_informal_chat_history()` 和 `_clear_formal_chat_history()` 在清空前先调用 `maybe_summarize(force=True)` 生成摘要，再清空消息并更新 `last_cleaned_at`。`app_config.example.json` 新增 `chat.force_summarize_before_clear` 配置（默认 `true`）控制是否强制总结。
-- 2026-05-11：移除时间清理功能。删除 `DesktopPetWindow._check_time_based_cleanup()` 和 `_cleanup_timer`、`ChatStore.should_trigger_time_cleanup()` 和 `last_cleaned_at()`、`app_config.example.json` 中 `chat.formal_cleanup_months` 和 `chat.informal_cleanup_months` 配置项。原清理策略冗余（每小时检查 90/180 天阈值）、与摘要增量处理重叠。保留 `update_last_cleaned_at()` 供手动清空时标记。同步更新 `AGENTS.md`。
-- 2026-05-11：主动问候频率动态调整。`BehaviorController` 新增 `_consecutive_unanswered` 计数器，根据连续未回应次数调整问候间隔（首次 15min → 第二次 15min → 第三次 30min → 第四次 30-60min 随机 → 最高 60min）。用户交互时 `notify_user_interaction()` 重置计数。`_maybe_idle_prompt()` 移除 `awaiting_user_reply` 硬阻断，改为依赖动态间隔。
-- 2026-05-11：新增知识问候与内容比例系统。`BehaviorController` 新增 `knowledge_speak_requested` 信号、`_has_memory_content()` 检查记忆、`_proactive_ratio()` / `_adjust_ratio()` 管理问候类型比例。`_maybe_idle_prompt()` 按 `proactive_content_ratio` 随机选择普通问候或知识问候。`DesktopPetWindow` 新增 `KnowledgeSpeakWorker`（基于 memory.json 调用 API 生成内容）和 `_handle_knowledge_speak()` 处理展示及 `pick_reply_ack_line()` 回复确认。`mouseDoubleClickEvent` 在回复窗口内调用 `notify_proactive_response()` 调整比例。`local_lines.json` 新增 `reply` 分组（10 条简短应答话术）。`app_config.example.json` 新增 `proactive_content_ratio`（初始 1:1）。
-- 2026-05-11：新增测试知识问候按钮。右键测试菜单增加"测试主动问候知识内容"，`DesktopPetWindow._test_knowledge_speak_once()` 直接调用 `_handle_knowledge_speak()` 触发记忆增强问候。`context_menu.py` 新增 `on_test_knowledge_speak` 回调参数。
-- 2026-05-11：新增测试空闲问候逻辑按钮。`BehaviorController` 新增 `trigger_test_idle_prompt()` 绕过时间间隔限制直接调用 `_maybe_idle_prompt()`，保留免打扰/主动聊天/每日上限守卫，便于测试内容比例分流。右键测试菜单增加"测试空闲问候逻辑"，`DesktopPetWindow._test_idle_prompt_once()` 处理。`context_menu.py` 新增 `on_test_idle_prompt` 回调参数。
-- 2026-05-11：知识问候右侧应答气泡改造。`speech_bubble.py` 新增 `ReplyBubble` 类：独立圆角矩形气泡，无尾巴、绿色配色、`PointingHandCursor`，位于角色右侧，点击时发出 `clicked` 信号。`_on_knowledge_speak_success()` 改用 `reply_bubble` 展示 `reply` 应答话术。`_handle_reply_bubble_clicked()` 调用 `notify_user_interaction()` 和 `notify_proactive_response()` 将用户回应计入问候间隔机制。`closeEvent`、`_toggle_always_on_top`、`_sync_floating_widgets` 同步适配。
-- 2026-05-12：内容比例钳制 3:7。`_adjust_ratio()` 上界从 1.0 改为 0.7，下界从 0.0 改为 0.3，知识问候与普通问候比例始终在 3:7 到 7:3 之间。
-- 2026-05-12：`trigger_test_idle_prompt()` 返回类型改为 str，返回当前比例和触发的问候类型（知识/普通/未触发）。`_test_idle_prompt_once()` 仅在未触发时显示结果气泡，避免覆盖已弹出的普通问候话术。
-- 2026-05-12：知识问候提示词优化。`KnowledgeSpeakWorker.run()` 改为 `random.choice(preferences)` 随机选取一个偏好方向聚焦生成 3-4 句针对性内容，以「你知道吗」「说起来」等口语化开头。
-- 2026-05-12：`_maybe_idle_prompt()` 每次成功触发问候后重置 `_consecutive_unanswered = 0`，使下一轮间隔回到 15 分钟。
-- 2026-05-12：`ReplyBubble` 定位修复。`show_message()` 中 `show()` 提前到 `_reposition()` 之前，避免 `height()` 未就绪导致 y 坐标落入角色正中。新增公开 `reposition(anchor_rect)` 方法，`_sync_floating_widgets` 改用此方法传入最新锚点坐标。
-- 2026-05-12：窗口置顶修复。`_toggle_always_on_top` 改为调用 `_reapply_window_flags()` 一次性重建所有 flags 并重新设置透明属性，`show()` 后调用 `raise_()` + `apply_transparent_window_fixes()` 恢复 Z-order。`_reload_config` 在 `_setup_window()` 后补充 `self.show()` + `raise_()` + `apply_transparent_window_fixes()`，修复重新加载配置后人物消失问题。
-- 2026-05-13：单击人物打开聊天输入框后播放一遍 `waiting` 动作。`DesktopPetWindow._open_chat_input()` 在 `chat_input.show_near()` 后调用 `sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)`，动作结束后回到 `idle`，后续提交消息时仍由聊天流程切换到 `running` / `review` 等动作。
-- 2026-05-13：启动问候不再计入本地主动话术次数。`BehaviorController._startup_greeting()` 移除成功展示前的 `usage_store.increment_local_line()`，保留免打扰、`startup_greeting` 开关和每日上限检查；空闲主动话术和时段变化问候仍按原逻辑计入 `local_proactive_lines_used`。
-- 2026-05-13：主动问候回应后的内容比例微调幅度降低。`BehaviorController._adjust_ratio()` 改为回应类型 +0.005、互斥类型 -0.001，仍保持知识问候与普通问候比例在 0.3-0.7 范围内。
-- 2026-05-13：摘要和记忆更新增加空聊天保护。`Summarizer.maybe_summarize()` 新增 `_has_summarizable_history()` 检查，只有存在非空用户消息时才继续生成摘要和合并 `memory_updates`；即使 `force=True`，空历史或仅有空内容/助手消息也会跳过，避免模型基于空 transcript 写入“用户不希望被总结或记录”等错误记忆。
-- 2026-05-13：拆分快速启动与环境准备脚本。`desktop_pet/setup_env.bat` 负责查找或安装带 `pip` 的 Python（优先 Miniforge，避免无 pip 的 MSYS Python 被误选）、安装并校验 `PySide6-Essentials` 提供的 `PySide6` 模块和 `requests`，再把最终解释器路径写入 `data/runtime_python.txt`；`desktop_pet/start_main.vbs` 作为默认无终端启动入口，读取该路径隐藏运行 `main.py`，错误时打开终端显示 `data/start_main_error.log`，避免日常启动阶段隐式改动依赖环境。
-- 2026-05-13：修复无终端启动读取 Python 路径失败。`setup_env.bat` 改为将 `runtime_python.txt` 写成无换行的纯路径；`start_main.vbs` 新增路径规范化，读取后移除回车、换行、制表符和 BOM，避免 `FileExists()` 因路径尾部换行误判 Python 不存在。
-- 2026-05-13：增强快速启动脚本的新环境兼容性。`start_main.bat --console` 读取 `runtime_python.txt` 时也通过 PowerShell 清理 BOM、回车、换行、制表符和空格；`setup_env.bat` 在 `winget` 安装 Python 后若当前终端还找不到可用解释器，会提示重新运行脚本，仍失败再重开终端或重启系统。
-- 2026-05-14：窗口置顶持久化修复。`utils/dwm_border.py` 新增 `force_window_topmost(hwnd, enabled)`，通过 `SetWindowPos(HWND_TOPMOST)` 在 Windows API 级别直接设置置顶样式。`DesktopPetWindow` 新增 `_topmost_enforcement_timer`（每 30 秒）和 `_enforce_topmost()` 方法，在 `showEvent` 中启动并在 `_toggle_always_on_top` 中管理启停，防止频繁 `setMask()` 导致 `WS_EX_TOPMOST` 被系统清除。同步更新 `AGENTS.md` 中 `desktop_pet_window.py` 描述和新增 `dwm_border.py` 章节。
-- 2026-05-14：气泡智能定位与互斥避让。`speech_bubble.py` 新增模块级 `_find_bubble_position(bubble_width, bubble_height, anchor_rect, candidates, exclusion_rects)` 屏幕感知定位函数，支持额外避让区域。`SpeechBubble.reposition()` 和 `ReplyBubble._reposition()` 改用此函数，候选方位覆盖上/下/左/右。`DesktopPetWindow._sync_floating_widgets()` 在重定位时将对方可见气泡的 `geometry()` 作为 `exclusion_rects` 传入，使两个气泡互相避让不重叠。`_on_knowledge_speak_success()` 在两个气泡均显示后调用 `_sync_floating_widgets()` 触发互相避让。同步更新 `AGENTS.md` 中 `speech_bubble.py` 和 `desktop_pet_window.py` 描述。
-- 2026-05-15：启动脚本增加代码更新步骤。`desktop_pet/start_main.vbs` 在启动 `main.py` 前切到仓库根目录执行 `git pull --ff-only`，将输出写入 `data/start_main_error.log`；若 Git 不可用、当前分支无上游、拉取冲突或网络失败，仅写入 warning 并继续启动，避免开机自启时因网络尚未连接而阻止桌宠运行。
-- 2026-05-15：环境配置脚本改为项目本地虚拟环境策略。`setup_env.bat` 不再对全局/Miniforge base 环境执行项目依赖安装，而是创建 `desktop_pet/.desktop_pet_venv`，将依赖安装到本地虚拟环境，并把 `.desktop_pet_venv/Scripts/python.exe` 写入 `data/runtime_python.txt` 供 `start_main.vbs` 使用；为兼容当前机器的临时目录/代理问题，脚本会清理 pip 相关环境变量并使用项目内 `.pip_tmp`，但安装依赖时禁用 pip 缓存，并会清理旧版脚本遗留的 `.pip_cache`。
-- 2026-05-15：`重新加载配置` 菜单项增加配置开关。`context_menu.py` 的 `build_context_menu()` 新增 `show_reload_config` 参数，`DesktopPetWindow._show_context_menu()` 从 `ui.show_reload_config` 读取并传入；`app_config.example.json` 新增同名配置项，默认 `true`，用于控制右键菜单中的“重新加载配置”按钮是否显示。
-- 2026-05-15：时段问候新增“下午”分组。`BehaviorController._time_greeting_key()` 改为按 24 小时划分为 `7-11` 早晨、`11-14` 中午、`14-18` 下午、`18-22` 晚上、其余时间 `sleepy`；`local_lines.json` 新增 `greeting_afternoon` 本地问候话术，并同步更新 `AGENTS.md` 中 behavior_controller、local_lines 和主动行为流说明。
-- 2026-05-18：修复模型记忆混入人物回答的问题。`Summarizer` 将“对话摘要”和“记忆提取”拆为两次独立流程：摘要继续基于最近完整对话生成，但模型 `memory_updates` 改为只喂用户发言单独提取，失败时退回仅看用户消息的本地规则提取；同时 `conversation_summary_*.json` 不再落盘 `memory_updates`。同步更新 `AGENTS.md` 中 `summarizer.py` 描述。
-- 2026-05-19：新增可选 Mem0 长期语义记忆层。新增 `ai/mem0_memory_service.py` 封装 Mem0 初始化、写入、检索和 Prompt 格式化；新增 `tools/import_memory_json_to_mem0.py` 可将旧 `memory.json` 一次性导入 Mem0；`Summarizer` 在保留 `memory.json` 合并逻辑的同时旁路写入 Mem0；`ChatWorker` 可在后台线程中按当前用户输入检索 Mem0 记忆并传入 `PromptBuilder`；知识问候可通过 `memory.use_mem0_for_knowledge_speak` 优先使用 Mem0；`app_config.example.json` 新增 `memory.*` 配置项；`requirements.txt` 新增 `mem0ai`。Mem0 默认关闭，异常降级，不阻断桌宠主流程。
-- 2026-05-19：将 Mem0 依赖固定为最小基础 SDK 版本 `mem0ai==2.0.2`，并在项目本地虚拟环境中安装该基础包；未安装 CLI、Server、OpenMemory、Docker、自托管服务、`mem0ai[nlp]`、spaCy 模型或其他 extras。同步更新 `AGENTS.md` 依赖说明。
-- 2026-05-19：调整 Mem0 初始化为 `Memory.from_config(config)`，LLM provider 使用 Mem0 官方 DeepSeek provider，默认复用项目 `api.api_key`、`api.base_url`、`api.model`，并允许 `memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` 覆盖；`app_config.example.json` 和本地 `app_config.json` 新增 `mem0_llm_provider`、`mem0_use_app_deepseek_config`、`mem0_deepseek_model`、`mem0_deepseek_base_url`、`mem0_temperature`、`mem0_max_tokens`、`mem0_top_p`、`mem0_embedder_provider`。embedding 未默认改为 DeepSeek，后续仍需按 Mem0 要求配置 OpenAI、Ollama 或其他 embedder。
-- 2026-05-19：将普通问候与普通聊天回答的气泡停留时间改为配置项。`app_config.example.json` 和本地 `app_config.json` 新增 `ui.bubble_durations_ms`，包含 `startup_greeting`、`period_greeting`、`proactive_greeting`、`assistant_reply`；`BehaviorController` 改为按配置发出启动/时段/普通问候的气泡时长，`DesktopPetWindow._show_answer_output()` 改为按配置控制普通聊天回答气泡停留时间。同步更新 `AGENTS.md` 中 `behavior_controller.py` 与 `app_config.example.json` 描述。
-- 2026-05-20：Mem0 embedder 接入 DashScope / 阿里云百炼 OpenAI-compatible embeddings。`mem0_memory_service.py` 构造 `Memory.from_config()` 时同时配置 DeepSeek LLM、DashScope embedding、1024 维本地 Qdrant 和项目内 `data/mem0_history.db`；`app_config.example.json` 和本地 `app_config.json` 新增 `dashscope_embedding_*` 与 key 来源配置；新增 `tools/test_dashscope_embedding.py`，并修正 `test.py` 不再使用字面量 `Bearer API_KEY` 或打印完整向量。Mem0 仍默认关闭，缺少 API key 或初始化失败时仅记录 warning 并降级。
-- 2026-05-21：调整自主移动随机比例。`DesktopPetWindow._trigger_auto_move()` 改为按左跑、右跑、跳跃 4:4:2 抽取动作，并同步更新主动移动流程说明。
-- 2026-05-22：新增 `local_lines.first_start` 启动问候配置。`local_lines.json` 新增 `{ "enable": false, "data": [...] }` 结构；`BehaviorController._startup_greeting()` 启动问候优先级调整为 `first_start.data`（仅当开启）→ 季节问候 → 时段问候 → `startup`；`first_start` 成功取用后会立即写回 `enable=false`，实现一次性首启问候；启动问候不再受每日主动话术上限拦截，只受免打扰和 `startup_greeting` 开关控制；同步更新启动问候流程说明。
-- 2026-05-25：修复清理聊天记录前强制摘要时空记忆不落地的问题。`Summarizer._model_memory_updates()` 在模型返回合法但无任何非空记忆文本时，改为继续回退到本地规则提取；`maybe_summarize()` 只有在 `memory_updates` 含实际文本时才合并 `memory.json` 并旁路写入 Mem0，避免空结构导致 `memory.json.last_updated` 刷新但没有记忆内容、且 Mem0 无文本可写。新增 `desktop_pet/tests/test_summarizer_memory_updates.py` 覆盖空模型记忆回退本地提取并触发 Mem0 写入路径；同步更新 `AGENTS.md` 中 `summarizer.py` 描述。
-- 2026-05-25：优化 Mem0 触发频率。`Summarizer` 改为首次达到 `summary_trigger_rounds` 后，需自上次摘要覆盖点以来再新增同等数量用户消息才再次摘要，避免 37 轮后每轮聊天都触发摘要和 Mem0 写入；`BehaviorController._maybe_idle_prompt()` 改为先按 `proactive_content_ratio.extra_knowledge` 抽签，命中后才检查 Mem0/本地记忆，并让 `behavior.min_proactive_interval_minutes` 成为动态问候间隔下限；`DesktopPetWindow._has_knowledge_memory()` 改为一次性检索并暂存知识问候所需 Mem0 上下文，`KnowledgeSpeakWorker` 复用该上下文，减少重复检索；`proactive_content_ratio` 默认/当前配置改为 `extra_knowledge=0.35`、`regular_greeting=0.65`；新增 `desktop_pet/tests/test_mem0_trigger_rules.py` 验证摘要节流和概率未命中时不查 Mem0。同步更新 `AGENTS.md` 中 summarizer、behavior_controller、app_config 配置说明。
-- 2026-05-28：修复 Mem0、清理线程、退出等待和主动比例持久化相关流程。`Mem0MemoryService` 在启用但缺少 DashScope embedding key 时直接 info 降级，跳过 `mem0` 导入和 Qdrant/history 初始化；新增 `app/history_clear_worker.py`，将清理聊天记录前的强制摘要、清空和 `last_cleaned_at` 更新放到独立后台线程；`DesktopPetWindow.closeEvent()` 在聊天或清理线程仍运行时延迟真正关闭，等待后台线程收口后再退出；`BehaviorController` 新增 `config_saver` 回调以持久化 `proactive_content_ratio`，并对 `max_local_lines_per_day` 做安全整数解析。新增 `test_mem0_memory_service.py`、`test_behavior_controller.py`、`test_history_clear_worker.py` 回归测试，并同步更新相关模块、测试流程和风险说明。
-- 2026-05-29：精简运行环境占用。`requirements.txt` 将 `PySide6` 替换为 `PySide6-Essentials`，当前项目虚拟环境卸载完整 `PySide6` / `PySide6_Addons` 后重装 Essentials，仅保留 `QtCore`、`QtGui`、`QtWidgets` 等实际使用模块；`setup_env.bat` 不再创建项目内 `.pip_cache`，安装依赖时设置 `PIP_NO_CACHE_DIR=1`，并在环境校验成功后清理旧版 `.pip_cache`。同步更新依赖说明和环境脚本缓存策略说明。
-- 2026-05-30：整理 `AGENTS.md` 底部文档同步记录的展示顺序，改为自上而下按日期由先到后排列；本次仅调整文档记录顺序，不改变程序代码。
-- 2026-05-30：精简 `start_main.vbs` 日常启动路径，移除启动前额外执行的 `python -c "import PySide6, requests"` 依赖 smoke check，避免重复启动 Python 并重复导入 PySide6；保留 `runtime_python.txt` 路径存在性检查，缺依赖时由 `main.py` 的真实启动失败路径写入日志并触发错误提示。新增 `test_start_main_script.py` 回归测试，并同步更新启动流程说明。
-- 2026-05-30：修复正式问答记录清理时摘要更新但 `memory.json` 可能不更新的问题。`Summarizer._extract_memory()` 在正式问答模式下会把非空用户问题作为 `work_study.current_learning_topics` 的本地兜底记忆，避免模型记忆提取返回空结构时只有 `conversation_summary_formal.json` 更新、长期记忆没有任何新增文本可合并。新增正式问答清理场景回归测试，并同步更新 `summarizer.py` 说明。
-- 2026-05-30：扩展 `work_study.current_learning_topics` 本地触发关键词，新增 `请问`、`怎么做`、`如何实现`、`如何`、`怎么`、`是什么`、`为什么`、`区别` 等问题式表达；同时修正 `Summarizer._summary_mode()` 先判 `informal` 再判 `formal`，避免非正式摘要文件名中的 `formal` 子串触发正式问答兜底逻辑。新增对应回归测试并同步更新 `summarizer.py` 说明。
-- 2026-05-30：将 Mem0 初始化、重新加载配置时的 Mem0 重建、主动知识问候前的 Mem0 检索移出 Qt 主线程。新增 `Mem0InitializationWorker` 和 `Mem0SearchWorker`，分别在独立 `QThread` 中执行 `Mem0MemoryService` 构造/旧服务关闭和 `format_for_prompt()` 检索；`DesktopPetWindow` 通过完成信号替换服务引用并同步给两个摘要器，主动问候检索中返回 `None` 让 `BehaviorController` 跳过本轮普通问候兜底，检索成功后再触发知识问候。新增 `test_mem0_threading_boundaries.py` 防止 Mem0 初始化和主动问候检索回到主线程。
+- 2026-05-11: Created `AGENTS.md`. Based on the current project entry point, configuration, dependencies, requirements documents, core business directories, and existing code, documented the project structure, run flow, module relationships, common edit paths, risk areas, common commands, dependent services, and open questions. Also allowed root `AGENTS.md` through `.gitignore` so this agent document can be committed with the program body. No program code was changed.
+- 2026-05-11: `BehaviorController` added `_time_greeting_key()` to return time-period greeting groups based on local time (morning/noon/evening/late night). Startup greetings now prefer time-period lines, and idle/test line pools mix in time-period groups. Added `pick_farewell_line()` to select from the `farewell` group on exit. `DesktopPetWindow.request_exit()` now plays `waving` and displays a goodbye bubble on exit. Updated `AGENTS.md` descriptions for behavior_controller, local_lines, proactive behavior flow, and DesktopPetWindow.
+- 2026-05-11: Added double-click recognition. `DesktopPetWindow` added `mouseDoubleClickEvent`; double-clicking the character triggers `pick_reply_line()` to randomly select a line from `break_reminder` / `comfort` / `encourage` and play `waving`. `mouseReleaseEvent` now uses `_click_timer` to delay and distinguish single-click from double-click, avoiding accidentally opening the chat input on double-click. `BehaviorController` added `pick_reply_line()`.
+- 2026-05-11: Added seasonal cycle greetings. `BehaviorController` added `_season_key()` to divide seasons by month and `_is_cycle_start()` to detect the first day of each 5-day cycle by day-of-year. `_startup_greeting()` now prefers seasonal greetings on cycle-start days, then time-period greetings, then `startup`. `local_lines.json` added the four seasonal line groups `greeting_spring` / `greeting_summer` / `greeting_autumn` / `greeting_winter`.
+- 2026-05-11: Added window always-on-top toggle. The right-click menu added a checkable "window always on top" item, and `_toggle_always_on_top()` controls `WindowStaysOnTopHint` and persists it to `ui.always_on_top`. When disabling topmost, a line is randomly selected from `return_after_idle` and displayed. `BehaviorController` added `pick_ignored_line()`.
+- 2026-05-11: Added chat-input waiting prompts. `DesktopPetWindow` added `_waiting_timer`; if the input box is open for 30 seconds without submission, it selects and displays a line from `waiting`, then repeats every 25 seconds. The timer stops when the user submits. `BehaviorController` added `pick_waiting_line()`.
+- 2026-05-11: Added test-menu visibility configuration. Added `show_test_menu` under `ui` in `app_config.example.json` (default `false`). `context_menu.py`'s `build_context_menu()` added a parameter with the same name, and the entire test submenu is skipped when the condition is not met. `DesktopPetWindow._show_context_menu()` reads and passes the config value.
+- 2026-05-11: Fixed two window topmost issues. (1) `SpeechBubble` added `set_always_on_top()`, and `_display_message()` synchronizes the main-window topmost state before every display, eliminating the issue where bubbles were not controlled by the topmost toggle. (2) Corrected line mapping: `_toggle_always_on_top()` now calls `pick_return_after_idle_line()` for `return_after_idle` when enabling topmost and `pick_ignored_line()` for `ignored` when disabling topmost.
+- 2026-05-11: Added automatic greetings when time period changes. `BehaviorController` added `period_check_timer` (every 60 seconds) and `_check_period_change()`, tracking `_last_time_key` and `_last_season_key`. When time period (morning/noon/evening/late night) or season changes, it immediately pops the corresponding new time-period line.
+- 2026-05-11: Added feedback after proactive greetings via double-click. `BehaviorController` added `is_within_proactive_reply_window()` to check a 60-second response window, and `pick_feedback_line()` to select from the `feedback` group. `mouseDoubleClickEvent` prioritizes `feedback` lines when double-clicked inside the response window, otherwise it falls back to normal double-click reply. `local_lines.json` added the `feedback` group.
+- 2026-05-11: Added poetry test feature. The right-click test menu added "recite a poem"; `_test_poetry()` randomly selects from the `poetry` group, plays `waving`, and displays it. `local_lines.json` added the `poetry` group. `BehaviorController` added `pick_poetry_line()`.
+- 2026-05-11: Added poetry keyword detection in chat input. `_handle_user_message()` detects poetry-related keywords under specific conditions (API off, formal Q&A off, autonomous movement off, window topmost off); when matched, it directly replies with a local `poetry` line and plays the `running` action.
+- 2026-05-11: Chat input box now follows topmost state. `ChatInput` added `set_always_on_top()`, and `_open_chat_input()` plus `_toggle_always_on_top()` synchronize the input box topmost state with the main window.
+- 2026-05-11: Split chat history into formal/informal tracks. `ChatStore` added a `last_cleaned_at` field and `update_last_cleaned_at()` method; `ContextManager` now receives two stores and selects based on mode; `PromptBuilder` now receives two summary paths and selects based on mode; `Summarizer.maybe_summarize()` added a `force` parameter; `DesktopPetWindow` added dual stores / dual summary instances, a `_pending_was_formal` snapshot to prevent routing errors, and an `_active_chat_store()` helper. `app_config.example.json` added `formal_cleanup_months` and `informal_cleanup_months` (later removed after 2026-05-11).
+- 2026-05-11: Added right-click menu for clearing chat history. `app_config.example.json` added `ui.show_clear_menu` (default `false`); `context_menu.py` added two menu entries, "clear informal chat history" and "clear formal Q&A history"; `DesktopPetWindow` added `_clear_informal_chat_history()` and `_clear_formal_chat_history()`.
+- 2026-05-11: Summarize before clearing history. `_clear_informal_chat_history()` and `_clear_formal_chat_history()` call `maybe_summarize(force=True)` before clearing, then clear messages and update `last_cleaned_at`. `app_config.example.json` added `chat.force_summarize_before_clear` (default `true`) to control whether to force summarization.
+- 2026-05-11: Removed time-based cleanup. Deleted `DesktopPetWindow._check_time_based_cleanup()` and `_cleanup_timer`, `ChatStore.should_trigger_time_cleanup()` and `last_cleaned_at()`, and `chat.formal_cleanup_months` / `chat.informal_cleanup_months` from `app_config.example.json`. The old cleanup strategy was redundant (hourly check for 90/180-day thresholds) and overlapped with incremental summarization. Kept `update_last_cleaned_at()` for marking manual clearing. Updated `AGENTS.md`.
+- 2026-05-11: Added dynamic proactive-greeting frequency adjustment. `BehaviorController` added `_consecutive_unanswered`; the greeting interval adjusts based on consecutive unanswered count (first 15min -> second 15min -> third 30min -> fourth 30-60min random -> max 60min). `notify_user_interaction()` resets the counter on user interaction. `_maybe_idle_prompt()` removed the hard `awaiting_user_reply` block and now relies on the dynamic interval.
+- 2026-05-11: Added knowledge greetings and content-ratio system. `BehaviorController` added the `knowledge_speak_requested` signal, `_has_memory_content()` memory check, and `_proactive_ratio()` / `_adjust_ratio()` for greeting-type ratios. `_maybe_idle_prompt()` randomly chooses normal greeting or knowledge greeting based on `proactive_content_ratio`. `DesktopPetWindow` added `KnowledgeSpeakWorker` (calls API based on memory.json to generate content) and `_handle_knowledge_speak()` for display and `pick_reply_ack_line()` confirmation replies. `mouseDoubleClickEvent` calls `notify_proactive_response()` inside the response window to adjust ratios. `local_lines.json` added the `reply` group (10 short acknowledgement lines). `app_config.example.json` added `proactive_content_ratio` (initially 1:1).
+- 2026-05-11: Added test button for knowledge greetings. The right-click test menu added "test proactive greeting knowledge content", and `DesktopPetWindow._test_knowledge_speak_once()` directly calls `_handle_knowledge_speak()` to trigger a memory-enhanced greeting. `context_menu.py` added the `on_test_knowledge_speak` callback parameter.
+- 2026-05-11: Added test button for idle greeting logic. `BehaviorController` added `trigger_test_idle_prompt()` to bypass time interval limits and directly call `_maybe_idle_prompt()`, while preserving do-not-disturb, proactive-chat, and daily-limit guards, making content-ratio routing easy to test. The right-click test menu added "test idle greeting logic", and `DesktopPetWindow._test_idle_prompt_once()` handles it. `context_menu.py` added the `on_test_idle_prompt` callback parameter.
+- 2026-05-11: Reworked the right-side reply bubble for knowledge greetings. `speech_bubble.py` added the `ReplyBubble` class: an independent rounded rectangle bubble, no tail, green color scheme, `PointingHandCursor`, positioned on the right side of the character, and emits a `clicked` signal. `_on_knowledge_speak_success()` now uses `reply_bubble` to display the `reply` acknowledgement line. `_handle_reply_bubble_clicked()` calls `notify_user_interaction()` and `notify_proactive_response()` to count the user's response into the greeting-interval mechanism. `closeEvent`, `_toggle_always_on_top`, and `_sync_floating_widgets` were adapted.
+- 2026-05-12: Clamped content ratio to 3:7. `_adjust_ratio()` upper bound changed from 1.0 to 0.7 and lower bound from 0.0 to 0.3, so the knowledge-greeting and normal-greeting ratio always remains between 3:7 and 7:3.
+- 2026-05-12: `trigger_test_idle_prompt()` return type changed to str, returning the current ratio and the triggered greeting type (knowledge/normal/not triggered). `_test_idle_prompt_once()` only displays the result bubble when not triggered, avoiding overwriting already popped normal greeting lines.
+- 2026-05-12: Optimized the knowledge-greeting prompt. `KnowledgeSpeakWorker.run()` now uses `random.choice(preferences)` to randomly select one preference direction and generate 3-4 focused sentences, starting conversationally with phrases such as "did you know" or "speaking of which".
+- 2026-05-12: `_maybe_idle_prompt()` now resets `_consecutive_unanswered = 0` after every successful greeting, so the next interval returns to 15 minutes.
+- 2026-05-12: Fixed `ReplyBubble` positioning. In `show_message()`, `show()` now runs before `_reposition()` to avoid `height()` not being ready and causing y coordinates to fall into the middle of the character. Added public `reposition(anchor_rect)`, and `_sync_floating_widgets` now uses it with the latest anchor coordinates.
+- 2026-05-12: Fixed window topmost handling. `_toggle_always_on_top` now calls `_reapply_window_flags()` to rebuild all flags at once and reset transparency attributes, then calls `raise_()` + `apply_transparent_window_fixes()` after `show()` to restore Z-order. `_reload_config` adds `self.show()` + `raise_()` + `apply_transparent_window_fixes()` after `_setup_window()`, fixing the issue where the character disappeared after reloading configuration.
+- 2026-05-13: After single-clicking the character to open the chat input box, play one cycle of the `waiting` action. `DesktopPetWindow._open_chat_input()` now calls `sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)` after `chat_input.show_near()`. The action returns to `idle` after finishing; later message submission is still handled by the chat flow switching to `running` / `review` and other actions.
+- 2026-05-13: Startup greetings no longer count toward local proactive-line usage. `BehaviorController._startup_greeting()` removed `usage_store.increment_local_line()` before successful display, while preserving do-not-disturb, the `startup_greeting` switch, and daily-limit checks. Idle proactive lines and time-period change greetings still count as before.
+- 2026-05-13: Reduced the proactive content-ratio adjustment magnitude after user responses. `BehaviorController._adjust_ratio()` now changes response type by +0.005 and mutually exclusive type by -0.001, while still keeping the knowledge/normal greeting ratio within 0.3-0.7.
+- 2026-05-13: Added empty-chat protection for summaries and memory updates. `Summarizer.maybe_summarize()` added `_has_summarizable_history()` and only continues generating summaries and merging `memory_updates` when non-empty user messages exist. Even with `force=True`, empty history or history containing only empty content/assistant messages is skipped, preventing the model from writing erroneous memories such as "the user does not want to be summarized or recorded" based on an empty transcript.
+- 2026-05-13: Split quick startup and environment preparation scripts. `desktop_pet/setup_env.bat` is responsible for finding or installing Python with `pip` (preferring Miniforge and avoiding MSYS Python without pip), installing and verifying that `PySide6-Essentials` provides the `PySide6` module and `requests`, then writing the final interpreter path to `data/runtime_python.txt`. `desktop_pet/start_main.vbs` is the default terminal-free startup entry; it reads that path and runs `main.py` hidden, opening a terminal to show `data/start_main_error.log` on error, avoiding implicit dependency-environment changes during daily startup.
+- 2026-05-13: Fixed terminal-free startup failing to read the Python path. `setup_env.bat` now writes `runtime_python.txt` as a plain path without a trailing newline; `start_main.vbs` added path normalization that removes carriage returns, newlines, tabs, and BOM after reading, avoiding `FileExists()` misclassifying Python as missing because of a trailing newline.
+- 2026-05-13: Improved compatibility of quick startup scripts with new environments. `start_main.bat --console` also cleans BOM, carriage returns, newlines, tabs, and spaces via PowerShell when reading `runtime_python.txt`; after `setup_env.bat` installs Python through `winget`, if the current terminal still cannot find a usable interpreter, it prompts to rerun the script, and if it still fails, to reopen the terminal or restart the system.
+- 2026-05-14: Fixed persistent window topmost behavior. `utils/dwm_border.py` added `force_window_topmost(hwnd, enabled)`, which directly sets the topmost style at the Windows API level through `SetWindowPos(HWND_TOPMOST)`. `DesktopPetWindow` added `_topmost_enforcement_timer` (every 30 seconds) and `_enforce_topmost()`, starting it in `showEvent` and managing start/stop in `_toggle_always_on_top`, preventing frequent `setMask()` calls from causing the system to clear `WS_EX_TOPMOST`. Updated `AGENTS.md` with the `desktop_pet_window.py` description and a new `dwm_border.py` section.
+- 2026-05-14: Added smart bubble positioning and mutual avoidance. `speech_bubble.py` added module-level `_find_bubble_position(bubble_width, bubble_height, anchor_rect, candidates, exclusion_rects)`, a screen-aware positioning function that supports extra avoidance areas. `SpeechBubble.reposition()` and `ReplyBubble._reposition()` now use this function, with candidate directions covering up/down/left/right. `DesktopPetWindow._sync_floating_widgets()` passes the other visible bubble's `geometry()` as `exclusion_rects` when repositioning, so the two bubbles avoid overlapping. `_on_knowledge_speak_success()` calls `_sync_floating_widgets()` after both bubbles are shown to trigger mutual avoidance. Updated `AGENTS.md` descriptions for `speech_bubble.py` and `desktop_pet_window.py`.
+- 2026-05-15: Startup script added a code update step. `desktop_pet/start_main.vbs` switches to the repository root and runs `git pull --ff-only` before starting `main.py`, writing output to `data/start_main_error.log`; if Git is unavailable, the current branch has no upstream, pull conflicts occur, or the network fails, it only writes a warning and continues startup, avoiding blocking the desktop pet at boot when the network is not yet connected.
+- 2026-05-15: Environment setup script moved to a project-local virtual environment strategy. `setup_env.bat` no longer installs project dependencies into the global/Miniforge base environment. Instead, it creates `desktop_pet/.desktop_pet_venv`, installs dependencies into that local virtual environment, and writes `.desktop_pet_venv/Scripts/python.exe` to `data/runtime_python.txt` for `start_main.vbs`. To handle the current machine's temporary directory/proxy issues, the script clears pip-related environment variables and uses project-local `.pip_tmp`; dependency installation disables pip cache and cleans old `.pip_cache` left by earlier scripts.
+- 2026-05-15: Added a configuration switch for the "reload configuration" menu item. `context_menu.py`'s `build_context_menu()` added `show_reload_config`; `DesktopPetWindow._show_context_menu()` reads `ui.show_reload_config` and passes it in; `app_config.example.json` added the same key, default `true`, to control whether the right-click menu shows the "reload configuration" button.
+- 2026-05-15: Added an "afternoon" group for time-period greetings. `BehaviorController._time_greeting_key()` now divides 24 hours into `7-11` morning, `11-14` noon, `14-18` afternoon, `18-22` evening, and all other times `sleepy`; `local_lines.json` added local `greeting_afternoon` lines. Updated `AGENTS.md` descriptions for behavior_controller, local_lines, and proactive behavior flow.
+- 2026-05-18: Fixed model memory mixing in character replies. `Summarizer` split "conversation summary" and "memory extraction" into two independent flows: summaries still use the recent full conversation, but model `memory_updates` only receive user messages for extraction; on failure, they fall back to local rules that also only inspect user messages. `conversation_summary_*.json` no longer persists `memory_updates`. Updated `AGENTS.md` description for `summarizer.py`.
+- 2026-05-19: Added optional Mem0 long-term semantic memory layer. Added `ai/mem0_memory_service.py` to wrap Mem0 initialization, write, retrieval, and prompt formatting. Added `tools/import_memory_json_to_mem0.py` to import old `memory.json` into Mem0 once. `Summarizer` side-writes to Mem0 while preserving the `memory.json` merge logic. `ChatWorker` can retrieve Mem0 memories in a background thread based on the current user input and pass them into `PromptBuilder`. Knowledge greetings can prefer Mem0 through `memory.use_mem0_for_knowledge_speak`. `app_config.example.json` added `memory.*` config keys. `requirements.txt` added `mem0ai`. Mem0 defaults to off, degrades on exceptions, and does not block the desktop pet main flow.
+- 2026-05-19: Pinned the Mem0 dependency to the minimal base SDK version `mem0ai==2.0.2` and installed that base package in the project-local virtual environment. CLI, Server, OpenMemory, Docker, self-hosted services, `mem0ai[nlp]`, spaCy models, and other extras were not installed. Updated the `AGENTS.md` dependency description.
+- 2026-05-19: Adjusted Mem0 initialization to `Memory.from_config(config)`. The LLM provider uses Mem0's official DeepSeek provider, defaults to reusing project `api.api_key`, `api.base_url`, and `api.model`, and allows `memory.mem0_deepseek_model` / `memory.mem0_deepseek_base_url` overrides. `app_config.example.json` and local `app_config.json` added `mem0_llm_provider`, `mem0_use_app_deepseek_config`, `mem0_deepseek_model`, `mem0_deepseek_base_url`, `mem0_temperature`, `mem0_max_tokens`, `mem0_top_p`, and `mem0_embedder_provider`. Embeddings were not changed to DeepSeek by default; follow-up still needs OpenAI, Ollama, or another embedder configured according to Mem0 requirements.
+- 2026-05-19: Moved normal greeting and normal chat-reply bubble durations into configuration. `app_config.example.json` and local `app_config.json` added `ui.bubble_durations_ms`, including `startup_greeting`, `period_greeting`, `proactive_greeting`, and `assistant_reply`. `BehaviorController` now emits bubble durations for startup/time-period/normal greetings based on config, and `DesktopPetWindow._show_answer_output()` controls normal chat-reply bubble duration based on config. Updated `AGENTS.md` descriptions for `behavior_controller.py` and `app_config.example.json`.
+- 2026-05-20: Connected the Mem0 embedder to DashScope / Alibaba Cloud Bailian OpenAI-compatible embeddings. `mem0_memory_service.py` now configures DeepSeek LLM, DashScope embedding, 1024-dimensional local Qdrant, and project-local `data/mem0_history.db` when constructing `Memory.from_config()`. `app_config.example.json` and local `app_config.json` added `dashscope_embedding_*` and key-source configuration. Added `tools/test_dashscope_embedding.py`, and fixed `test.py` so it no longer uses the literal `Bearer API_KEY` or prints the full vector. Mem0 remains off by default; missing API keys or initialization failures only log warning and degrade.
+- 2026-05-21: Adjusted autonomous movement random ratio. `DesktopPetWindow._trigger_auto_move()` now samples actions at a 4:4:2 ratio for left-run, right-run, and jump, and the proactive movement flow documentation was updated.
+- 2026-05-22: Added `local_lines.first_start` startup greeting configuration. `local_lines.json` added the `{ "enable": false, "data": [...] }` structure. `BehaviorController._startup_greeting()` startup greeting priority changed to `first_start.data` (only when enabled) -> seasonal greeting -> time-period greeting -> `startup`. After successful use, `first_start` immediately writes back `enable=false`, implementing a one-time first-start greeting. Startup greetings are no longer blocked by the daily proactive-line limit, only by do-not-disturb and the `startup_greeting` switch. Updated startup greeting flow documentation.
+- 2026-05-25: Fixed empty memory not landing during forced summarization before clearing chat history. `Summarizer._model_memory_updates()` now continues falling back to local rule extraction when the model returns a valid structure but no non-empty memory text. `maybe_summarize()` only merges `memory.json` and side-writes to Mem0 when `memory_updates` contain actual text, avoiding empty structures refreshing `memory.json.last_updated` without memory content and leaving Mem0 with no text to write. Added `desktop_pet/tests/test_summarizer_memory_updates.py` to cover empty model memory fallback to local extraction and the Mem0 write path. Updated `AGENTS.md` description for `summarizer.py`.
+- 2026-05-25: Optimized Mem0 trigger frequency. `Summarizer` now triggers summarization after first reaching `summary_trigger_rounds`, then requires the same number of additional user messages since the previous covered point before summarizing again, avoiding summary and Mem0 writes on every chat turn after round 37. `BehaviorController._maybe_idle_prompt()` now first samples by `proactive_content_ratio.extra_knowledge`; only on hit does it check Mem0/local memory, and `behavior.min_proactive_interval_minutes` is now the lower bound of the dynamic greeting interval. `DesktopPetWindow._has_knowledge_memory()` now performs one retrieval and caches the Mem0 context needed for the knowledge greeting; `KnowledgeSpeakWorker` reuses that context, reducing duplicate retrieval. Default/current `proactive_content_ratio` changed to `extra_knowledge=0.35`, `regular_greeting=0.65`. Added `desktop_pet/tests/test_mem0_trigger_rules.py` to verify summary throttling and no Mem0 lookup when probability misses. Updated `AGENTS.md` descriptions for summarizer, behavior_controller, and app_config settings.
+- 2026-05-28: Fixed flows related to Mem0, cleanup threads, exit waiting, and proactive-ratio persistence. `Mem0MemoryService` now directly degrades with info logging when enabled but missing the DashScope embedding key, skipping `mem0` import and Qdrant/history initialization. Added `app/history_clear_worker.py`, moving forced summarization, clearing, and `last_cleaned_at` updates before clearing chat history into a separate background thread. `DesktopPetWindow.closeEvent()` now delays true closing while chat or cleanup threads are still running, waiting for background threads to close before exiting. `BehaviorController` added a `config_saver` callback to persist `proactive_content_ratio` and performs safe integer parsing for `max_local_lines_per_day`. Added regression tests `test_mem0_memory_service.py`, `test_behavior_controller.py`, and `test_history_clear_worker.py`, and updated related module, test-flow, and risk documentation.
+- 2026-05-29: Reduced runtime environment footprint. `requirements.txt` replaced `PySide6` with `PySide6-Essentials`; the current project virtual environment uninstalled full `PySide6` / `PySide6_Addons` and reinstalled Essentials, keeping only actually used modules such as `QtCore`, `QtGui`, and `QtWidgets`. `setup_env.bat` no longer creates project-local `.pip_cache`, sets `PIP_NO_CACHE_DIR=1` during dependency installation, and cleans old `.pip_cache` after successful environment validation. Updated dependency description and environment-script cache strategy documentation.
+- 2026-05-30: Reordered the display order of the documentation sync log at the bottom of `AGENTS.md`, making it chronological from top to bottom. This change only adjusted documentation record order and did not change program code.
+- 2026-05-30: Simplified the daily startup path in `start_main.vbs`, removing the extra startup-time dependency smoke check `python -c "import PySide6, requests"` to avoid starting Python and importing PySide6 twice. Preserved `runtime_python.txt` path existence checks; when dependencies are missing, the true startup failure path in `main.py` writes logs and triggers error display. Added `test_start_main_script.py` regression test and updated startup flow documentation.
+- 2026-05-30: Fixed an issue where clearing formal Q&A history could update the summary but not `memory.json`. In formal Q&A mode, `Summarizer._extract_memory()` now uses non-empty user questions as a local fallback memory under `work_study.current_learning_topics`, avoiding a case where model memory extraction returns an empty structure and only `conversation_summary_formal.json` updates while long-term memory has no new text to merge. Added a regression test for formal Q&A cleanup and updated `summarizer.py` documentation.
+- 2026-05-30: Expanded local trigger keywords for `work_study.current_learning_topics`, adding question-style expressions such as "question", "how to do", "how to implement", "how", "what is", "why", and "difference"; also fixed `Summarizer._summary_mode()` to check `informal` before `formal`, preventing the `formal` substring in informal summary filenames from triggering formal Q&A fallback logic. Added corresponding regression tests and updated `summarizer.py` documentation.
+- 2026-05-30: Moved Mem0 initialization, Mem0 rebuild during config reload, and Mem0 retrieval before proactive knowledge greetings out of the Qt main thread. Added `Mem0InitializationWorker` and `Mem0SearchWorker`, which run `Mem0MemoryService` construction/old service close and `format_for_prompt()` retrieval in separate `QThread`s. `DesktopPetWindow` replaces service references through completion signals and synchronizes them to both summarizers. During proactive greeting retrieval, it returns `None` so `BehaviorController` skips normal greeting fallback for that round; after retrieval succeeds, it triggers the knowledge greeting. Added `test_mem0_threading_boundaries.py` to prevent Mem0 initialization and proactive greeting retrieval from returning to the main thread.
 - 2026-05-30: Added local semantic vector indexing for `memory.json`. `MemoryStore` now best-effort syncs `data/memory_vectors.json` after saves/merges, using the existing DashScope embedding config. `DesktopPetWindow` starts a `MemorySemanticMergeWorker` after the window is shown; it runs in a separate `QThread`, checks the two-month cadence, and merges only same-field high-similarity duplicates so UI display and normal Q&A are not blocked.
-- 2026-05-30：增强第一轮记忆系统。`MemoryStore` 新增 `normalize_memory_schema()`，兼容旧 `memory.json` 并补齐 `relationship_memory` 与 `memory_meta.schema_version=2`；`Summarizer` 的模型/本地记忆提取支持关系记忆，只基于用户发言记录沟通偏好、相处方式和近期互动模式；`PromptBuilder` 将本地事实记忆、相处方式记忆和 Mem0 相关语义记忆拆分为独立 Prompt 区块，并加入表达约束，避免机械复述记忆或暴露 memory.json/Mem0 等实现细节。新增 `test_memory_schema.py` 和 `test_prompt_builder_memory_sections.py`，扩展 `test_summarizer_memory_updates.py` 覆盖关系记忆提取与不使用助手回答推断用户偏好。
-- 2026-05-30：增强第二轮场景化主动问候。新增 `character/proactive_context.py` 负责从 `memory.json` 构造精简场景上下文、本地模板回退和 API prompt；`BehaviorController._maybe_idle_prompt()` 在基础守卫后优先处理连续未回应的低打扰问候，其次在冷却结束且记忆足够时触发 `memory_context_greeting`，API 启用且额度可用时发出 `scenario_greeting_requested`，否则使用本地模板；`DesktopPetWindow` 新增 `ScenarioGreetingWorker`，在独立 `QThread` 中生成短问候，失败或输出机械记忆表达时静默回退本地模板。`app_config.example.json` 新增 `behavior.scenario_greeting_*` 配置，`local_lines.json` 新增 `scenario_greeting_templates` 和 `low_interrupt`，并新增对应回归测试。
-- 2026-06-08：增强 `storage/json_store.py` 的 JSON 存储可靠性。`save_json()` 改为同目录 `.tmp` 原子写入，写入前为非空目标文件保留 `.bak`，完成 `flush` + `os.fsync` 后使用 `os.replace` 替换；`load_json()` 遇到主文件损坏时将其隔离为 `.corrupt.<timestamp>` 并优先从 `.bak` 恢复，备份也损坏时才回退默认值深拷贝；新增 `cleanup_tmp_json_files()` 清理遗留临时文件。新增 `test_json_store.py` 覆盖缺文件创建、正常读写、备份恢复、双损坏回退和失败写入不留下半截 JSON。
-- 2026-06-08：优化日志系统长期运行稳定性和隐私安全。`utils/logger.py` 将 `app.log` 文件输出改为 `RotatingFileHandler`，限制单文件大小并保留有限备份；新增 `utils/log_sanitizer.py`，提供 API key 脱敏、常见密钥形态清理、长文本截断、异常摘要、messages 统计和响应结构摘要；`DeepSeekClient`、`Summarizer`、`Mem0MemoryService` 的错误日志改为记录状态码、消息数量、字符数、响应 keys 和截断异常，不再输出完整 payload、prompt、memory、模型回复或 API 响应。新增 `test_logging_privacy.py` 覆盖日志创建、轮转配置、API key 脱敏和超长文本截断。
-- 2026-06-08：压缩 `data/memory_vectors.json` 体积。`MemoryVectorStore` 改为使用紧凑 JSON 保存向量索引，embedding 写入前按 `memory.memory_vector_precision` 做浮点精度压缩，跳过短于 `memory.memory_vector_min_text_length` 的文本，并通过 `memory.memory_vector_max_items` 限制索引条目数，超限时优先保留重要字段和较新条目；`embedding_signature` 纳入精度配置，模型、维度或精度变化时会重建索引。`app_config.example.json` 新增对应配置项，扩展 `test_memory_vector_store.py` 覆盖紧凑体积、默认配置、短文本跳过、旧签名重建和最大条目裁剪，语义去重逻辑保持不变。
-- 2026-06-08：为 Prompt / Context / Summarizer 新增上下文预算控制。新增 `desktop_pet/ai/context_budget.py` 集中提供 `max_prompt_chars`、`max_history_messages`、`max_user_message_chars`、`max_history_message_chars`、`max_summary_chars`、`max_memory_chars`、`max_mem0_chars`、`summary_max_input_chars` 和 `memory_extract_max_input_chars` 的缺省值；`app_config.example.json` 的 `api` 节新增同名配置项。`PromptBuilder` 改为对用户输入、历史消息、摘要、普通记忆、关系记忆和 Mem0 检索结果分别做长度限制，并在全局 `max_prompt_chars` 下按“安全规则/角色设定/当前用户输入/最近对话/高价值记忆”的优先级裁剪；`ContextManager` 改为同时限制历史消息条数和单条长度；`Summarizer` 改为按字符预算从最近消息向前构建 summary / memory extraction transcript，并保证输入不超过配置预算。新增 `desktop_pet/tests/test_context_budget_controls.py`，重写 `test_prompt_builder_memory_sections.py`，并在 `test_summarizer_memory_updates.py` 中注入 `requests` stub，覆盖长历史 prompt 裁剪、超长用户输入限制、摘要输入预算和缺少新配置项时的默认回退。
-- 2026-06-08：收拢后台任务和 `QThread` 生命周期管理。新增 `desktop_pet/app/background_task_registry.py`，统一登记、查询、移除和停止 `QThread`/worker，负责 `quit()`、有界 `wait()`、必要时 `terminate()`、`deleteLater()` 和清理回调；`DesktopPetWindow` 将聊天类任务、清理历史、Mem0 初始化/检索和语义记忆维护接入注册表，同名任务重复启动会被拒绝，关闭窗口时统一有界停止后台线程并避免关闭中 worker 回调继续更新 UI；`memory.mem0_init_timeout_seconds` 接入 Mem0 初始化线程等待超时。新增 `desktop_pet/tests/test_background_task_registry.py` 覆盖注册/移除、重复登记拦截、退出清理和超时终止。
-- 2026-06-08：第一阶段低风险拆分 `DesktopPetWindow `的窗口位置逻辑。新增 `desktop_pet/app/window_position_service.py`，集中负责读取/保存 `window_state.json`、多屏可见性判断和屏幕外坐标回退默认位置；`DesktopPetWindow._restore_position()`、`_save_window_position()`、_position_visible_on_any_screen() 保留原方法名并转调服务，未改变聊天、气泡、主动问候、动画、菜单逻辑和 `window_state.json `结构。新增 `desktop_pet/tests/test_window_position_service.py` 覆盖首次启动、位置保存、下次恢复、多屏可见性和屏幕外回退。
-- 2026-06-09：第二阶段低风险拆分 `DesktopPetWindow` 的气泡位置计算逻辑。新增 `desktop_pet/app/bubble_position_service.py`，集中负责普通气泡和知识问候应答气泡的候选位置、屏幕可用区域避让、避免覆盖桌宠以及气泡间 `exclusion_rects` 互斥；`DesktopPetWindow._sync_floating_widgets()` 保留原方法名和可见性判断，只调用服务计算坐标后移动气泡，未改变气泡样式、显示时机、聊天流程、主动问候流程、输入框和正式问答面板。新增 `desktop_pet/tests/test_bubble_position_service.py` 覆盖屏幕中央、左边缘、右边缘、底部和气泡互斥避让。
-- 2026-06-09：补齐第三阶段后台任务注册表接口。`BackgroundTaskRegistry` 新增 `unregister()`、支持 `request_quit_all(timeout_ms)` 返回仍在运行的任务、并新增 `clear_finished()` 清理已结束线程引用；`DesktopPetWindow` 原线程清理方法名保留，内部改为调用 `unregister()`，`_request_background_workers_quit()` 改为带 1000ms 有界等待。未改变 `ChatWorker`、Mem0 初始化/检索 worker、语义记忆维护 worker 或清理历史 worker 的业务逻辑。扩展 `test_background_task_registry.py` 覆盖新接口。
-- 2026-06-11：第四阶段低风险拆分 `DesktopPetWindow` 的配置读取辅助逻辑。新增 `desktop_pet/app/config_service.py`，提供点分路径 `get()`、`get_bool()`、`get_int()`、`get_str()` 和缺失字段默认值兜底；`DesktopPetWindow` 仅迁移右键菜单状态、窗口置顶/点击聊天/自主移动、清理前摘要、Mem0 超时、语义记忆维护开关、摘要轮数、正式问答显示、气泡时长等低风险只读配置读取，保留原配置文件结构、配置项名称和写回路径。新增 `desktop_pet/tests/test_config_service.py` 覆盖配置服务行为，并同步更新配置加载与测试说明。
-- 2026-06-11：第五阶段低风险拆分 `DesktopPetWindow` 的用户聊天流程协调逻辑。新增 `desktop_pet/app/chat_flow_controller.py`，协助管理普通/正式问答模式快照、用户与助手消息落盘、本地回复/API 缺配置/API worker 分流、`ChatWorker` 参数准备、成功/失败后的 pending 状态；`DesktopPetWindow` 保留 `_handle_user_message()`、`_start_chat_worker()`、`_on_chat_success()`、`_on_chat_failure()` 等方法名，并继续负责气泡、正式问答面板、动作切换、鼠标/菜单和 `QThread` 生命周期。新增 `desktop_pet/tests/test_chat_flow_controller.py` 覆盖本地回复、缺 API、正式问答、worker 参数和重复聊天任务判断。
-- 2026-06-11：新增本地话术服务接口。`desktop_pet/storage/local_lines_service.py` 提供 `LocalLinesService`，集中处理本地话术随机抽取、首启话术消费、手动追加、生成话术受控替换、去重、长度限制和机械记忆表达过滤；`BehaviorController` 改为通过该服务读取普通话术和 `first_start`，`DesktopPetWindow._handle_knowledge_speak()` 改为从 `knowledge_speak_intro` 随机抽取知识问候前置提示，缺失时回退本地兜底。`local_lines.json` 新增 `knowledge_speak_intro` 话术组，新增 `test_local_lines_service.py` 覆盖旧数组格式、fallback、受控生成更新、去重和首启话术消费。
-- 2026-06-12：新增 `knowledge_speak_intro` 定期刷新。`LocalLinesService` 增加 `should_refresh_generated_lines()` 和 `group_metadata()`，根据 `data/local_lines_generated_meta.json` 判断七天周期和月初刷新；`DesktopPetWindow` 新增 `LocalLinesRefreshWorker`，窗口显示后立即检查一次，并通过 `_local_lines_refresh_timer` 每 6 小时复查，到期且 DeepSeek API 已配置时生成短话术并调用 `replace_generated_lines("knowledge_speak_intro", ...)` 写回本地话术，未到期或缺 API 时静默跳过。`app_config.example.json` 新增 `local_lines_refresh` 配置节，`test_local_lines_service.py` 覆盖七天到期、跨月刷新、未到期跳过、worker 写入和缺 API 跳过。
-- 2026-06-12：新增知识问候气泡本地分段展示。`desktop_pet/app/message_splitter.py` 提供 `split_knowledge_bubble_text()`，按句号、问号、感叹号、分号等句末符号把知识问候回复拆为最多两段，首句过短时合并下一句；`DesktopPetWindow._on_knowledge_speak_success()` 改为第一段立即展示、第二段延迟展示，并在最后一段展示后再弹出右侧 `ReplyBubble` 确认气泡。新增 `test_message_splitter.py` 覆盖句号拆分、短首句合并、单句保留、问号/感叹号和空白归一。
+- 2026-05-30: Strengthened the first round of the memory system. `MemoryStore` added `normalize_memory_schema()`, preserving compatibility with old `memory.json` and filling `relationship_memory` plus `memory_meta.schema_version=2`. `Summarizer` model/local memory extraction now supports relationship memory and records communication preferences, interaction style, and recent interaction patterns only from user messages. `PromptBuilder` split local fact memory, interaction-style memory, and Mem0 semantic memory into independent prompt blocks and added expression constraints to avoid mechanical memory repetition or exposing implementation details such as memory.json/Mem0. Added `test_memory_schema.py` and `test_prompt_builder_memory_sections.py`, and extended `test_summarizer_memory_updates.py` to cover relationship memory extraction and not inferring user preferences from assistant replies.
+- 2026-05-30: Strengthened the second round of scenario-based proactive greetings. Added `character/proactive_context.py`, responsible for building compact scenario context from `memory.json`, local template fallback, and API prompts. `BehaviorController._maybe_idle_prompt()` now prioritizes low-interruption greetings after consecutive unanswered greetings after basic guards, then triggers `memory_context_greeting` when cooldown is over and memory is sufficient; when the API is enabled and quota is available it emits `scenario_greeting_requested`, otherwise it uses local templates. `DesktopPetWindow` added `ScenarioGreetingWorker`, which generates short greetings in a separate `QThread`; failures or mechanical memory expressions silently fall back to local templates. `app_config.example.json` added `behavior.scenario_greeting_*` config keys, `local_lines.json` added `scenario_greeting_templates` and `low_interrupt`, and corresponding regression tests were added.
+- 2026-06-08: Improved reliability of JSON storage in `storage/json_store.py`. `save_json()` now performs same-directory `.tmp` atomic writes, preserves `.bak` for non-empty target files before writing, then uses `os.replace` after `flush` + `os.fsync`. When `load_json()` encounters a damaged main file, it isolates it as `.corrupt.<timestamp>` and prefers recovery from `.bak`; only when the backup is also damaged does it fall back to a deep copy of the default value. Added `cleanup_tmp_json_files()` to clean leftover temporary files. Added `test_json_store.py` covering missing-file creation, normal read/write, backup recovery, double-damage fallback, and failed writes not leaving half-written JSON.
+- 2026-06-08: Improved long-running stability and privacy safety of the logging system. `utils/logger.py` changed `app.log` file output to `RotatingFileHandler`, limiting single-file size and keeping finite backups. Added `utils/log_sanitizer.py`, providing API key sanitization, common secret-pattern cleanup, long-text truncation, exception summaries, messages statistics, and response structure summaries. Error logs in `DeepSeekClient`, `Summarizer`, and `Mem0MemoryService` now record status code, message count, character count, response keys, and truncated exceptions instead of full payloads, prompts, memory, model replies, or API responses. Added `test_logging_privacy.py` covering log creation, rotation configuration, API key sanitization, and long-text truncation.
+- 2026-06-08: Compressed `data/memory_vectors.json` size. `MemoryVectorStore` now saves the vector index as compact JSON, compresses floating-point precision according to `memory.memory_vector_precision` before writing embeddings, skips texts shorter than `memory.memory_vector_min_text_length`, and limits index entries through `memory.memory_vector_max_items`, preserving important fields and newer entries first when over limit. `embedding_signature` now includes precision configuration, so model, dimension, or precision changes rebuild the index. `app_config.example.json` added corresponding configuration keys, and `test_memory_vector_store.py` was extended to cover compact size, default config, short-text skipping, old-signature rebuilds, and maximum-entry trimming. Semantic deduplication logic remained unchanged.
+- 2026-06-08: Added context budget controls for Prompt / Context / Summarizer. Added `desktop_pet/ai/context_budget.py`, centralizing defaults for `max_prompt_chars`, `max_history_messages`, `max_user_message_chars`, `max_history_message_chars`, `max_summary_chars`, `max_memory_chars`, `max_mem0_chars`, `summary_max_input_chars`, and `memory_extract_max_input_chars`; the `api` section of `app_config.example.json` added the same config keys. `PromptBuilder` now separately limits user input, history messages, summaries, normal memory, relationship memory, and Mem0 retrieval results, and under global `max_prompt_chars` trims by priority: safety rules, character settings, current user input, recent conversation, and high-value memory. `ContextManager` now limits both history message count and single-message length. `Summarizer` now builds summary / memory extraction transcripts from recent messages backward according to character budgets, guaranteeing inputs do not exceed config budgets. Added `desktop_pet/tests/test_context_budget_controls.py`, rewrote `test_prompt_builder_memory_sections.py`, and injected a `requests` stub in `test_summarizer_memory_updates.py`, covering long-history prompt trimming, oversized user-input limits, summary input budgets, and default fallback when new config keys are absent.
+- 2026-06-08: Consolidated background task and `QThread` lifecycle management. Added `desktop_pet/app/background_task_registry.py`, centrally registering, querying, removing, and stopping `QThread`/worker pairs, and handling `quit()`, bounded `wait()`, necessary `terminate()`, `deleteLater()`, and cleanup callbacks. `DesktopPetWindow` connected chat tasks, history clearing, Mem0 initialization/search, and semantic memory maintenance to the registry; duplicate tasks with the same name are rejected, and closing the window centrally stops background threads with bounded waits while avoiding worker callbacks updating UI during shutdown. `memory.mem0_init_timeout_seconds` was connected to Mem0 initialization thread wait timeout. Added `desktop_pet/tests/test_background_task_registry.py` covering registration/removal, duplicate registration rejection, exit cleanup, and timeout termination.
+- 2026-06-08: First low-risk phase splitting window-position logic out of `DesktopPetWindow`. Added `desktop_pet/app/window_position_service.py`, centrally responsible for reading/saving `window_state.json`, multi-monitor visibility checks, and default-position fallback for off-screen coordinates. `DesktopPetWindow._restore_position()`, `_save_window_position()`, and `_position_visible_on_any_screen()` kept their original method names and delegate to the service. Chat, bubbles, proactive greetings, animations, menu logic, and the `window_state.json` structure were not changed. Added `desktop_pet/tests/test_window_position_service.py` covering first startup, position saving, next-run restore, multi-monitor visibility, and off-screen fallback.
+- 2026-06-09: Second low-risk phase splitting bubble-position calculation logic out of `DesktopPetWindow`. Added `desktop_pet/app/bubble_position_service.py`, centrally responsible for candidate positions for normal bubbles and knowledge-greeting reply bubbles, available-screen avoidance, avoiding covering the desktop pet, and mutual exclusion through bubble `exclusion_rects`. `DesktopPetWindow._sync_floating_widgets()` kept its original method name and visibility checks, only calling the service to calculate coordinates before moving bubbles. Bubble style, display timing, chat flow, proactive greeting flow, input box, and formal Q&A panel were not changed. Added `desktop_pet/tests/test_bubble_position_service.py` covering screen center, left edge, right edge, bottom, and mutual bubble avoidance.
+- 2026-06-09: Completed the third-phase background task registry interfaces. `BackgroundTaskRegistry` added `unregister()`, supports `request_quit_all(timeout_ms)` returning tasks that are still running, and added `clear_finished()` to clean references to ended threads. Original thread cleanup method names in `DesktopPetWindow` were preserved, with internals changed to call `unregister()`. `_request_background_workers_quit()` now performs a bounded 1000ms wait. Business logic for `ChatWorker`, Mem0 initialization/search workers, semantic memory maintenance workers, and history-clear workers was not changed. Extended `test_background_task_registry.py` to cover the new interfaces.
+- 2026-06-11: Fourth low-risk phase splitting configuration read helpers out of `DesktopPetWindow`. Added `desktop_pet/app/config_service.py`, providing dot-path `get()`, `get_bool()`, `get_int()`, `get_str()`, and missing-field default fallbacks. `DesktopPetWindow` only migrated low-risk read-only configuration reads such as right-click menu state, always-on-top / click-to-chat / autonomous movement, summarize-before-clear, Mem0 timeout, semantic memory maintenance switch, summary rounds, formal Q&A display, and bubble duration; the original configuration file structure, configuration key names, and write-back paths were preserved. Added `desktop_pet/tests/test_config_service.py` covering configuration service behavior, and updated configuration loading and test documentation.
+- 2026-06-11: Fifth low-risk phase splitting user chat-flow coordination out of `DesktopPetWindow`. Added `desktop_pet/app/chat_flow_controller.py`, which helps manage normal/formal Q&A mode snapshots, user and assistant message persistence, local-reply / missing-API-config / API-worker branching, `ChatWorker` argument preparation, and pending state after success/failure. `DesktopPetWindow` preserved method names such as `_handle_user_message()`, `_start_chat_worker()`, `_on_chat_success()`, and `_on_chat_failure()`, and remains responsible for bubbles, formal Q&A panels, action switching, mouse/menu handling, and `QThread` lifecycle. Added `desktop_pet/tests/test_chat_flow_controller.py` covering local replies, missing API config, formal Q&A, worker arguments, and duplicate chat-task decisions.
+- 2026-06-11: Added the local line service interface. `desktop_pet/storage/local_lines_service.py` provides `LocalLinesService`, centralizing local line random selection, first-start line consumption, manual append, controlled generated-line replacement, deduplication, length limits, and mechanical memory expression filtering. `BehaviorController` now reads normal lines and `first_start` through this service, and `DesktopPetWindow._handle_knowledge_speak()` now randomly selects a knowledge-greeting lead-in from `knowledge_speak_intro`, falling back to local defaults when absent. `local_lines.json` added the `knowledge_speak_intro` line group, and `test_local_lines_service.py` was added to cover legacy array format, fallback, controlled generated updates, deduplication, and first-start line consumption.
+- 2026-06-12: Added periodic refresh for `knowledge_speak_intro`. `LocalLinesService` added `should_refresh_generated_lines()` and `group_metadata()`, using `data/local_lines_generated_meta.json` to determine seven-day cadence and month-start refresh. `DesktopPetWindow` added `LocalLinesRefreshWorker`; after the window is shown, it checks once immediately and `_local_lines_refresh_timer` checks again every 6 hours. When due and the DeepSeek API is configured, it generates short lines and calls `replace_generated_lines("knowledge_speak_intro", ...)` to write them back to local lines; when not due or the API is missing, it silently skips. `app_config.example.json` added the `local_lines_refresh` config section, and `test_local_lines_service.py` covers seven-day due checks, cross-month refresh, not-due skips, worker writes, and missing-API skips.
+- 2026-06-12: Added local segmented display for knowledge-greeting bubbles. `desktop_pet/app/message_splitter.py` provides `split_knowledge_bubble_text()`, which splits knowledge-greeting replies into at most two segments by sentence-ending punctuation such as full stops, question marks, exclamation marks, and semicolons, merging the next sentence when the first sentence is too short. `DesktopPetWindow._on_knowledge_speak_success()` now displays the first segment immediately, delays the second segment, and only shows the right-side `ReplyBubble` confirmation bubble after the final segment. Added `test_message_splitter.py` covering full-stop splitting, short-first-sentence merging, single-sentence preservation, question/exclamation marks, and whitespace normalization.
