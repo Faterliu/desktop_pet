@@ -115,6 +115,23 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertEqual(metadata["groups"]["knowledge_speak_intro"]["source"], "deepseek")
         self.assertEqual(metadata["groups"]["knowledge_speak_intro"]["count"], 1)
 
+    def test_replace_generated_lines_preserves_first_start_shape(self) -> None:
+        save_json(self.lines_path, {"first_start": {"enable": True, "data": ["人工"]}})
+        service = LocalLinesService(self.lines_path, self.meta_path)
+
+        result = service.replace_generated_lines(
+            "first_start",
+            ["新首次问候"],
+            source="deepseek",
+            max_chars=20,
+            max_items=5,
+        )
+
+        self.assertTrue(result.saved)
+        payload = load_json(self.lines_path, {})
+        self.assertEqual(payload["first_start"]["data"], ["人工", "新首次问候"])
+        self.assertTrue(payload["first_start"]["enable"])
+
     def test_append_manual_line_dedupes_without_rewriting_existing_line(self) -> None:
         save_json(self.lines_path, {"idle": ["已有"]})
         service = LocalLinesService(self.lines_path)
@@ -210,11 +227,16 @@ class LocalLinesServiceTests(unittest.TestCase):
         worker = LocalLinesRefreshWorker(
             client,  # type: ignore[arg-type]
             service,
-            group="knowledge_speak_intro",
-            interval_days=7,
-            monthly_refresh=True,
-            max_chars=20,
-            max_items=5,
+            targets=[
+                {
+                    "group": "knowledge_speak_intro",
+                    "label": "知识问候前置提示",
+                    "interval_days": 7,
+                    "monthly_refresh": True,
+                    "max_chars": 20,
+                    "max_items": 5,
+                }
+            ],
         )
         results: list[dict] = []
         worker.finished.connect(lambda result: results.append(result))
@@ -225,6 +247,59 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertTrue(results[0]["refreshed"])
         self.assertEqual(load_json(self.lines_path, {})["knowledge_speak_intro"], ["人工", "新开场一", "新开场二"])
 
+    def test_refresh_worker_skips_when_no_group_is_enabled(self) -> None:
+        save_json(self.lines_path, {"idle": ["人工"]})
+        service = LocalLinesService(self.lines_path, self.meta_path)
+        client = FakeDeepSeekClient()
+        worker = LocalLinesRefreshWorker(
+            client,  # type: ignore[arg-type]
+            service,
+            targets=[],
+        )
+        results: list[dict] = []
+        worker.finished.connect(lambda result: results.append(result))
+
+        worker.run()
+
+        self.assertEqual(client.calls, 0)
+        self.assertEqual(results[0]["reason"], "no_enabled_groups")
+
+    def test_refresh_worker_updates_multiple_enabled_groups(self) -> None:
+        save_json(self.lines_path, {"idle": ["旧空闲"], "reply": ["旧回应"]})
+        service = LocalLinesService(self.lines_path, self.meta_path)
+        client = FakeDeepSeekClient(reply="新话术一\n新话术二")
+        worker = LocalLinesRefreshWorker(
+            client,  # type: ignore[arg-type]
+            service,
+            targets=[
+                {
+                    "group": "idle",
+                    "label": "空闲主动问候",
+                    "interval_days": 14,
+                    "monthly_refresh": False,
+                    "max_chars": 20,
+                    "max_items": 5,
+                },
+                {
+                    "group": "reply",
+                    "label": "知识问候回应气泡",
+                    "interval_days": 14,
+                    "monthly_refresh": False,
+                    "max_chars": 20,
+                    "max_items": 5,
+                },
+            ],
+        )
+        results: list[dict] = []
+        worker.finished.connect(lambda result: results.append(result))
+
+        worker.run()
+
+        self.assertEqual(client.calls, 2)
+        payload = load_json(self.lines_path, {})
+        self.assertEqual(payload["idle"], ["旧空闲", "新话术一", "新话术二"])
+        self.assertEqual(payload["reply"], ["旧回应", "新话术一", "新话术二"])
+
     def test_refresh_worker_skips_when_api_is_not_configured(self) -> None:
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
@@ -232,11 +307,16 @@ class LocalLinesServiceTests(unittest.TestCase):
         worker = LocalLinesRefreshWorker(
             client,  # type: ignore[arg-type]
             service,
-            group="knowledge_speak_intro",
-            interval_days=7,
-            monthly_refresh=True,
-            max_chars=20,
-            max_items=5,
+            targets=[
+                {
+                    "group": "knowledge_speak_intro",
+                    "label": "知识问候前置提示",
+                    "interval_days": 7,
+                    "monthly_refresh": True,
+                    "max_chars": 20,
+                    "max_items": 5,
+                }
+            ],
         )
         results: list[dict] = []
         worker.finished.connect(lambda result: results.append(result))

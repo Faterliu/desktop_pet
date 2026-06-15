@@ -98,7 +98,7 @@ class LocalLinesService:
         payload = self.payload()
         manual = self._list_group(payload, group)
         merged = _dedupe_preserve_order([*manual, *accepted])
-        payload[group] = merged
+        self._set_group_lines(payload, group, merged)
         save_json(self.local_lines_path, payload)
         self._record_generated_metadata(group, accepted, source)
         return LocalLinesUpdateResult(group, accepted, validation.rejected, True)
@@ -193,6 +193,13 @@ class LocalLinesService:
             if isinstance(lines, list):
                 return [line.strip() for line in lines if isinstance(line, str) and line.strip()]
         return []
+
+    def _set_group_lines(self, payload: dict[str, Any], group: str, lines: list[str]) -> None:
+        value = payload.get(group, [])
+        if isinstance(value, dict) and "data" in value:
+            payload[group] = {**value, "data": lines}
+            return
+        payload[group] = lines
 
     def _record_generated_metadata(self, group: str, lines: list[str], source: str) -> None:
         if self.metadata_path is None:

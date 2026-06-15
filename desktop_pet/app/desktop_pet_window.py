@@ -55,6 +55,49 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+LOCAL_LINE_REFRESH_LABELS = {
+    "first_start": "首次启动问候",
+    "startup": "启动问候",
+    "idle": "空闲主动问候",
+    "quiet": "安静陪伴问候",
+    "encourage": "鼓励话术",
+    "sleepy": "晚间提醒",
+    "greeting_morning": "早晨问候",
+    "greeting_noon": "中午问候",
+    "greeting_afternoon": "下午问候",
+    "greeting_evening": "晚间问候",
+    "greeting_spring": "春季问候",
+    "greeting_summer": "夏季问候",
+    "greeting_autumn": "秋季问候",
+    "greeting_winter": "冬季问候",
+    "thinking": "思考等待话术",
+    "api_error": "API 错误提示",
+    "ignored": "取消置顶提示",
+    "return_after_idle": "恢复置顶提示",
+    "work_focus": "专注工作提醒",
+    "break_reminder": "休息提醒",
+    "comfort": "安慰话术",
+    "happy": "开心反馈",
+    "sad": "低落反馈",
+    "waiting": "输入等待提醒",
+    "feedback": "主动问候反馈",
+    "scenario_greeting_templates": "场景问候模板",
+    "low_interrupt": "低打扰问候",
+    "knowledge_speak_intro": "知识问候前置提示",
+    "farewell": "退出告别",
+    "poetry": "诗歌话术",
+    "reply": "知识问候回应气泡",
+}
+
+
+def _positive_int(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
 class ChatWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
@@ -351,50 +394,63 @@ class LocalLinesRefreshWorker(QObject):
         self,
         client: DeepSeekClient,
         local_lines_service: LocalLinesService,
-        group: str,
-        interval_days: int,
-        monthly_refresh: bool,
-        max_chars: int,
-        max_items: int,
+        targets: list[dict[str, Any]],
     ) -> None:
-        """Refresh generated local lines when the configured schedule is due."""
+        """Refresh configured local line groups when their schedules are due."""
         super().__init__()
         self.client = client
         self.local_lines_service = local_lines_service
-        self.group = group
-        self.interval_days = interval_days
-        self.monthly_refresh = monthly_refresh
-        self.max_chars = max_chars
-        self.max_items = max_items
+        self.targets = targets
 
     def run(self) -> None:
         try:
-            if not self.local_lines_service.should_refresh_generated_lines(
-                self.group,
-                interval_days=self.interval_days,
-                monthly_refresh=self.monthly_refresh,
-            ):
-                self.finished.emit({"refreshed": False, "reason": "not_due", "group": self.group})
+            if not self.targets:
+                self.finished.emit({"refreshed": False, "reason": "no_enabled_groups", "results": []})
                 return
             if not self.client.is_configured():
-                self.finished.emit({"refreshed": False, "reason": "api_not_configured", "group": self.group})
+                self.finished.emit({"refreshed": False, "reason": "api_not_configured", "results": []})
                 return
 
-            reply = self.client.chat(self._messages())
-            candidates = self._parse_lines(reply)
-            result = self.local_lines_service.replace_generated_lines(
-                self.group,
-                candidates,
-                source="deepseek",
-                max_chars=self.max_chars,
-                max_items=self.max_items,
-            )
+            results = []
+            for target in self.targets:
+                group = str(target.get("group", "")).strip()
+                if not group:
+                    continue
+                interval_days = _positive_int(target.get("interval_days"), 14)
+                monthly_refresh = bool(target.get("monthly_refresh", False))
+                if not self.local_lines_service.should_refresh_generated_lines(
+                    group,
+                    interval_days=interval_days,
+                    monthly_refresh=monthly_refresh,
+                ):
+                    results.append({"refreshed": False, "reason": "not_due", "group": group})
+                    continue
+
+                max_chars = _positive_int(target.get("max_chars"), 80)
+                max_items = _positive_int(target.get("max_items"), 8)
+                label = str(target.get("label", group)).strip() or group
+                reply = self.client.chat(self._messages(group, label, max_items, max_chars))
+                candidates = self._parse_lines(reply)
+                result = self.local_lines_service.replace_generated_lines(
+                    group,
+                    candidates,
+                    source="deepseek",
+                    max_chars=max_chars,
+                    max_items=max_items,
+                )
+                results.append(
+                    {
+                        "refreshed": result.saved,
+                        "group": group,
+                        "accepted_count": len(result.accepted),
+                        "rejected_count": len(result.rejected),
+                    }
+                )
+
             self.finished.emit(
                 {
-                    "refreshed": result.saved,
-                    "group": self.group,
-                    "accepted_count": len(result.accepted),
-                    "rejected_count": len(result.rejected),
+                    "refreshed": any(item.get("refreshed") for item in results),
+                    "results": results,
                 }
             )
         except DeepSeekError as exc:
@@ -403,7 +459,13 @@ class LocalLinesRefreshWorker(QObject):
             logger.exception("Local lines refresh worker failed")
             self.failed.emit(str(exc))
 
-    def _messages(self) -> list[dict[str, str]]:
+    def _messages(
+        self,
+        group: str,
+        label: str,
+        max_items: int,
+        max_chars: int,
+    ) -> list[dict[str, str]]:
         return [
             {
                 "role": "system",
@@ -415,10 +477,10 @@ class LocalLinesRefreshWorker(QObject):
             {
                 "role": "user",
                 "content": (
-                    f"为知识问候前置提示生成 {self.max_items} 条自然、不机械、不打扰的中文短句。"
-                    f"每条不超过 {self.max_chars} 个汉字或字符。"
+                    f"为本地话术分组“{label}”（配置键：{group}）生成 {max_items} 条中文短句。"
+                    f"每条不超过 {max_chars} 个汉字或字符。"
                     "语气轻松温柔，不要说“根据记忆”“你之前说过”“数据库”“Mem0”“memory.json”。"
-                    "每行一条。"
+                    "贴合该分组用途，每行一条。"
                 ),
             },
         ]
@@ -580,7 +642,6 @@ class DesktopPetWindow(QWidget):
         self._topmost_enforcement_timer.timeout.connect(self._enforce_topmost)
         self._local_lines_refresh_timer = QTimer(self)
         self._local_lines_refresh_timer.timeout.connect(self._start_local_lines_refresh_worker)
-
         self._setup_window()
         self._setup_ui()
         self._connect_signals()
@@ -1466,21 +1527,15 @@ class DesktopPetWindow(QWidget):
         if not self.config_service.get_bool("local_lines_refresh.enabled", True):
             return
 
-        group = self.config_service.get_str("local_lines_refresh.knowledge_intro_group", "knowledge_speak_intro")
-        interval_days = self.config_service.get_int("local_lines_refresh.interval_days", 7)
-        max_chars = self.config_service.get_int("local_lines_refresh.max_chars", 40)
-        max_items = self.config_service.get_int("local_lines_refresh.max_items", 8)
-        monthly_refresh = self.config_service.get_bool("local_lines_refresh.monthly_refresh", True)
+        targets = self._local_lines_refresh_targets()
+        if not targets:
+            return
 
         self.local_lines_refresh_thread = QThread(self)
         self.local_lines_refresh_worker = LocalLinesRefreshWorker(
             self.deepseek_client,
             self.local_lines_service,
-            group=group,
-            interval_days=interval_days if interval_days > 0 else 7,
-            monthly_refresh=monthly_refresh,
-            max_chars=max_chars if max_chars > 0 else 40,
-            max_items=max_items if max_items > 0 else 8,
+            targets=targets,
         )
         self.local_lines_refresh_worker.moveToThread(self.local_lines_refresh_thread)
         self.local_lines_refresh_thread.started.connect(self.local_lines_refresh_worker.run)
@@ -1502,6 +1557,42 @@ class DesktopPetWindow(QWidget):
             )
             return
         self.local_lines_refresh_thread.start()
+
+    def _local_lines_refresh_targets(self) -> list[dict[str, Any]]:
+        refresh_config = self.app_config.get("local_lines_refresh", {})
+        if not isinstance(refresh_config, dict):
+            return []
+        groups_config = refresh_config.get("groups", {})
+        if not isinstance(groups_config, dict):
+            return []
+
+        default_interval = _positive_int(refresh_config.get("interval_days"), 14)
+        default_max_chars = _positive_int(refresh_config.get("max_chars"), 80)
+        default_max_items = _positive_int(refresh_config.get("max_items"), 8)
+        default_monthly_refresh = bool(refresh_config.get("monthly_refresh", False))
+        targets: list[dict[str, Any]] = []
+
+        for group, config in groups_config.items():
+            if not isinstance(config, dict) or not config.get("enabled", False):
+                continue
+            group_name = str(group).strip()
+            if not group_name:
+                continue
+            targets.append(
+                {
+                    "group": group_name,
+                    "label": str(
+                        config.get("label")
+                        or LOCAL_LINE_REFRESH_LABELS.get(group_name)
+                        or group_name
+                    ),
+                    "interval_days": _positive_int(config.get("interval_days"), default_interval),
+                    "monthly_refresh": bool(config.get("monthly_refresh", default_monthly_refresh)),
+                    "max_chars": _positive_int(config.get("max_chars"), default_max_chars),
+                    "max_items": _positive_int(config.get("max_items"), default_max_items),
+                }
+            )
+        return targets
 
     def _on_local_lines_refresh_success(self, result: object) -> None:
         if self._closing_or_closed():
@@ -1660,11 +1751,6 @@ class DesktopPetWindow(QWidget):
             return
 
         self.sprite_player.set_action("waving")
-        intro = self.local_lines_service.pick_line(
-            "knowledge_speak_intro",
-            fallback="我想到一个小知识。",
-        )
-        self._display_message(intro, 2800, "system")
         self._start_knowledge_worker()
 
     def _start_knowledge_worker(self) -> None:
