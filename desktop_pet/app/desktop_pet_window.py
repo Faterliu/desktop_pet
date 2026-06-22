@@ -15,6 +15,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
     QObject,
+    Slot,
 )
 from PySide6.QtGui import QAction, QCloseEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QWidget
@@ -538,6 +539,7 @@ class DesktopPetWindow(QWidget):
         self.mouse_press_position = QPoint()
         self.chat_thread: QThread | None = None
         self.chat_worker: QObject | None = None
+        self._pending_scenario_fallback_line = ""
         self.clear_history_thread: QThread | None = None
         self.clear_history_worker: QObject | None = None
         self.mem0_init_thread: QThread | None = None
@@ -1685,6 +1687,7 @@ class DesktopPetWindow(QWidget):
             return
         fallback_line = str(payload.get("fallback_line", "")).strip()
         if not self.deepseek_client.is_configured():
+            self._pending_scenario_fallback_line = ""
             self._show_scenario_greeting_line(fallback_line)
             return
         if self.background_tasks.is_registered("chat"):
@@ -1693,20 +1696,22 @@ class DesktopPetWindow(QWidget):
 
     def _start_scenario_greeting_worker(self, payload: dict[str, Any]) -> None:
         self.chat_thread = QThread(self)
+        self._pending_scenario_fallback_line = str(payload.get("fallback_line", ""))
         self.chat_worker = ScenarioGreetingWorker(
             self.deepseek_client,
             context=payload.get("context", {}),
-            fallback_line=str(payload.get("fallback_line", "")),
+            fallback_line=self._pending_scenario_fallback_line,
             max_chars=int(payload.get("max_chars", 80) or 80),
         )
         self.chat_worker.moveToThread(self.chat_thread)
         self.chat_thread.started.connect(self.chat_worker.run)
-        self.chat_worker.finished.connect(self._on_scenario_greeting_success)
+        self.chat_worker.finished.connect(
+            self._on_scenario_greeting_success,
+            Qt.ConnectionType.QueuedConnection,
+        )
         self.chat_worker.failed.connect(
-            lambda _error, fallback=str(payload.get("fallback_line", "")): (
-                logger.warning("Scenario greeting API failed; using local fallback"),
-                None if self._closing_or_closed() else self._show_scenario_greeting_line(fallback),
-            )
+            self._on_scenario_greeting_failure,
+            Qt.ConnectionType.QueuedConnection,
         )
         self.chat_worker.finished.connect(self.chat_thread.quit)
         self.chat_worker.failed.connect(self.chat_thread.quit)
@@ -1717,6 +1722,7 @@ class DesktopPetWindow(QWidget):
             self.chat_worker,
             self._clear_chat_task_refs,
         ):
+            self._pending_scenario_fallback_line = ""
             self._discard_unregistered_task(
                 self.chat_thread,
                 self.chat_worker,
@@ -1725,10 +1731,23 @@ class DesktopPetWindow(QWidget):
             return
         self.chat_thread.start()
 
+    @Slot(str)
     def _on_scenario_greeting_success(self, reply: str) -> None:
         if self._closing_or_closed():
             return
+        self._pending_scenario_fallback_line = ""
         self._show_scenario_greeting_line(reply)
+
+    @Slot(str)
+    def _on_scenario_greeting_failure(self, error_message: str) -> None:
+        logger.warning("Scenario greeting API failed; using local fallback: %s", error_message)
+        if self._closing_or_closed():
+            self._pending_scenario_fallback_line = ""
+            return
+        fallback = self._pending_scenario_fallback_line
+        self._pending_scenario_fallback_line = ""
+        if fallback:
+            self._show_scenario_greeting_line(fallback)
 
     def _show_scenario_greeting_line(self, line: str) -> None:
         if not line or self.chat_input.isVisible():
