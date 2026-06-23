@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from ai.context_budget import clip_text, read_context_budget
+from character.persona_state import PersonaState, read_persona_state
 from storage.json_store import load_json, load_json_prefer_primary
 from storage.memory_store import DEFAULT_MEMORY, normalize_memory_schema
 
@@ -11,12 +12,30 @@ from storage.memory_store import DEFAULT_MEMORY, normalize_memory_schema
 DEFAULT_CHARACTER = {
     "name": "小桃",
     "role": "可爱温柔的桌面小伙伴",
+    "core_identity": {
+        "summary": "长期陪伴在桌面上的像素小伙伴。",
+        "motivation": "在不打扰用户的前提下提供可靠帮助。",
+    },
+    "personality_core": {
+        "stable_traits": ["安静细腻", "认真可靠", "低打扰", "有边界感"],
+        "not_traits": ["不过度撒娇", "不假装真人", "不制造依赖"],
+    },
     "personality": ["可爱", "温柔", "安静陪伴"],
     "speaking_style": {
+        "default": "语气自然温和，先回应当前需求，再提供帮助。",
+        "task_mode": "清晰、具体、结构化。",
+        "emotional_mode": "先简短承接情绪，再给一个低压力的小建议。",
+        "avoid": ["避免过度亲昵称呼", "避免空泛鼓励"],
         "daily_chat": "默认回复 2-3 句话，简短、自然、温柔。",
         "knowledge_answer": "知识回答可以适度展开。",
         "catchphrases": ["我在这里哦。"],
     },
+    "behavior_policy": {
+        "proactive_style": "主动问候轻、短、低频，不要求回应。",
+        "memory_usage": "只在直接相关时自然参考记忆。",
+        "boundary": "不假装真人，不制造依赖。",
+    },
+    "scenario_reactions": {},
     "custom_prompt": "",
 }
 
@@ -62,6 +81,7 @@ class PromptBuilder:
         recent_messages: list[dict[str, Any]] | None = None,
         formal_qa_mode: bool = False,
         relevant_memories: str | None = None,
+        runtime_persona_state: dict[str, Any] | PersonaState | None = None,
     ) -> list[dict[str, str]]:
         """组装发送给模型的完整 messages 列表。"""
         character = load_json(self.character_path, DEFAULT_CHARACTER)
@@ -72,9 +92,6 @@ class PromptBuilder:
         budget = read_context_budget(self._config())
 
         safety_rules = "\n".join(f"- {rule}" for rule in safety.get("rules", []))
-        personality = "、".join(character.get("personality", []))
-        speaking = character.get("speaking_style", {})
-        catchphrases = " / ".join(speaking.get("catchphrases", []))
         fact_memory_text = self._fit_section(
             self._format_fact_memory(memory),
             budget["max_memory_chars"],
@@ -104,14 +121,10 @@ class PromptBuilder:
             },
             {
                 "role": "system",
-                "content": (
-                    f"你是{character.get('name', '小桃')}，角色定位是"
-                    f"{character.get('role', '桌面陪伴小伙伴')}。\n"
-                    f"你的性格关键词：{personality}。\n"
-                    f"日常聊天风格：{speaking.get('daily_chat', '')}\n"
-                    f"知识问答风格：{speaking.get('knowledge_answer', '')}\n"
-                    f"常用口头禅：{catchphrases}\n"
-                    "保持自然、温柔、可爱，不要太啰嗦，也不要像客服。"
+                "content": self._format_character_guidance(
+                    character,
+                    formal_qa_mode,
+                    runtime_persona_state,
                 ),
             },
         ]
@@ -212,6 +225,7 @@ class PromptBuilder:
         return self._force_fit_messages(final_messages, max_prompt_chars)
 
     def _config(self) -> dict[str, Any]:
+        """处理 `_config` 对应的业务逻辑。"""
         if self.config_path is None:
             return {}
         fallback = self.fallback_config_path or self.config_path
@@ -223,6 +237,7 @@ class PromptBuilder:
         max_messages: int,
         max_message_chars: int,
     ) -> list[dict[str, str]]:
+        """整理 `_trim_conversation_messages` 对应的文本或数据。"""
         trimmed = [
             {
                 "role": str(item.get("role", "user")),
@@ -238,6 +253,7 @@ class PromptBuilder:
         messages: list[dict[str, str]],
         available_chars: int,
     ) -> list[dict[str, str]]:
+        """整理 `_trim_history_to_budget` 对应的文本或数据。"""
         if available_chars <= 0:
             return []
 
@@ -260,11 +276,13 @@ class PromptBuilder:
         return kept
 
     def _fit_section(self, text: str, limit: int) -> str:
+        """处理 `_fit_section` 对应的业务逻辑。"""
         if not text:
             return ""
         return clip_text(text, limit)
 
     def _messages_char_count(self, messages: list[dict[str, str]]) -> int:
+        """处理 `_messages_char_count` 对应的业务逻辑。"""
         return sum(len(item.get("content", "")) for item in messages)
 
     def _force_fit_messages(
@@ -272,6 +290,7 @@ class PromptBuilder:
         messages: list[dict[str, str]],
         max_prompt_chars: int,
     ) -> list[dict[str, str]]:
+        """处理 `_force_fit_messages` 对应的业务逻辑。"""
         if max_prompt_chars <= 0:
             return messages
 
@@ -289,19 +308,146 @@ class PromptBuilder:
         return fitted
 
     def _format_mode_guidance(self, formal_qa_mode: bool) -> str:
+        """格式化 `_format_mode_guidance` 对应的内容。"""
         if formal_qa_mode:
             return (
                 "当前处于正式问答模式。请优先保证回答准确、结构清晰、可执行。"
                 "可以参考用户事实记忆理解项目背景；相处方式记忆只用于调整回答结构、"
-                "详细程度和确认频率。减少闲聊和陪伴式铺垫。"
+                "详细程度和确认频率。减少闲聊、口头禅、撒娇和陪伴式铺垫，"
+                "角色风格不能降低专业性。"
             )
         return (
             "当前是普通陪伴聊天模式。请让记忆自然影响你的理解、语气和建议，"
             "但不要机械说明你记得什么。除非用户主动询问，否则不要提及记忆系统。"
         )
 
+    def _format_character_guidance(
+        self,
+        character: dict[str, Any],
+        formal_qa_mode: bool,
+        runtime_state: dict[str, Any] | PersonaState | None,
+    ) -> str:
+        """格式化 `_format_character_guidance` 对应的内容。"""
+        name = self._string_value(character.get("name")) or "小桃"
+        role = self._string_value(character.get("role")) or "桌面陪伴小伙伴"
+        core = self._mapping(character.get("core_identity"))
+        personality_core = self._mapping(character.get("personality_core"))
+        speaking = self._mapping(character.get("speaking_style"))
+        legacy_speech = character.get("speech_style")
+        behavior = self._mapping(character.get("behavior_policy"))
+        scenarios = self._mapping(character.get("scenario_reactions"))
+
+        identity = self._string_value(core.get("summary")) or role
+        motivation = self._string_value(core.get("motivation"))
+        traits = self._string_items(personality_core.get("stable_traits"))
+        if not traits:
+            traits = self._string_items(character.get("personality"))
+        not_traits = self._string_items(personality_core.get("not_traits"))
+
+        default_style = (
+            self._string_value(speaking.get("default"))
+            or self._string_value(speaking.get("daily_chat"))
+            or self._legacy_style(legacy_speech, "default", "daily_chat")
+            or "自然、温和、简洁，先回应当前需求。"
+        )
+        task_style = (
+            self._string_value(speaking.get("task_mode"))
+            or self._string_value(speaking.get("knowledge_answer"))
+            or self._legacy_style(legacy_speech, "task_mode", "knowledge_answer")
+            or "清晰、具体、结构化，以解决问题为先。"
+        )
+        emotional_style = (
+            self._string_value(speaking.get("emotional_mode"))
+            or self._legacy_style(legacy_speech, "emotional_mode")
+            or "先简短承接情绪，再给一个低压力的小建议。"
+        )
+        avoid_styles = self._string_items(speaking.get("avoid"))
+        catchphrases = self._string_items(speaking.get("catchphrases"))
+        if not catchphrases:
+            catchphrases = self._string_items(character.get("catchphrases"))
+
+        proactive_style = (
+            self._string_value(behavior.get("proactive_style"))
+            or "主动表达要轻、短、低频，不要求用户回应。"
+        )
+        memory_usage = (
+            self._string_value(behavior.get("memory_usage"))
+            or "只在与当前问题直接相关时自然参考记忆，不强调自己记得。"
+        )
+        boundary = (
+            self._string_value(behavior.get("boundary"))
+            or "保持亲切但有边界，不假装真人，不制造依赖。"
+        )
+
+        lines = [
+            "【角色与表达规则】",
+            f"你是{name}，角色定位：{identity}",
+        ]
+        if motivation:
+            lines.append(f"行动动机：{motivation}")
+        if traits:
+            lines.append(f"稳定人格底色：{'、'.join(traits[:6])}")
+        if not_traits:
+            lines.append(f"明确不是：{'、'.join(not_traits[:6])}")
+        lines.extend(
+            [
+                "按情境切换表达，不要把规则复述给用户：",
+                f"- 普通陪伴：{default_style}",
+                f"- 任务协助：{task_style}",
+                f"- 情绪安抚：{emotional_style}",
+                f"主动行为：{proactive_style}",
+                f"记忆使用：{memory_usage}",
+                f"关系边界：{boundary}",
+                "始终不过度撒娇、不假装真人、不暗示排他关系、不索取回应或制造依赖。",
+            ]
+        )
+        if avoid_styles:
+            lines.append(f"避免表达：{'；'.join(avoid_styles[:4])}")
+        scenario_text = self._format_scenario_rules(scenarios)
+        if scenario_text:
+            lines.append(f"场景反应：{scenario_text}")
+        if catchphrases and not formal_qa_mode:
+            lines.append(f"口头禅只能偶尔自然使用：{' / '.join(catchphrases[:3])}")
+        if runtime_state is not None:
+            state = read_persona_state(runtime_state)
+            lines.append(
+                "当前运行状态仅用于轻微调节表达："
+                f"mood={state.mood.value}, energy={state.energy}, mode={state.mode}；"
+                "closeness 不得突破上述关系边界。"
+            )
+        return "\n".join(lines)
+
+    def _format_scenario_rules(self, scenarios: dict[str, Any]) -> str:
+        """格式化 `_format_scenario_rules` 对应的内容。"""
+        labels = {
+            "user_tired": "用户疲惫",
+            "user_coding": "代码任务",
+            "user_studying": "学习任务",
+            "user_silent_long_time": "长时间沉默",
+        }
+        fragments = []
+        for key, label in labels.items():
+            text = self._string_value(scenarios.get(key))
+            if text:
+                fragments.append(f"{label}时{text}")
+        return "；".join(fragments)
+
+    def _legacy_style(self, value: Any, *keys: str) -> str:
+        """处理 `_legacy_style` 对应的业务逻辑。"""
+        if isinstance(value, dict):
+            for key in keys:
+                text = self._string_value(value.get(key))
+                if text:
+                    return text
+            return ""
+        return self._string_value(value)
+
+    def _mapping(self, value: Any) -> dict[str, Any]:
+        """处理 `_mapping` 对应的业务逻辑。"""
+        return value if isinstance(value, dict) else {}
+
     def _format_fact_memory(self, memory: dict[str, Any]) -> str:
-        """Format factual memory separately from style guidance."""
+        """格式化 `_format_fact_memory` 对应的内容。"""
         fragments: list[str] = []
         user_profile = memory.get("user_profile", {})
         work_study = memory.get("work_study", {})
@@ -320,6 +466,7 @@ class PromptBuilder:
     def _format_relationship_memory(
         self, memory: dict[str, Any], formal_qa_mode: bool
     ) -> str:
+        """格式化 `_format_relationship_memory` 对应的内容。"""
         fragments: list[str] = []
         relationship = memory.get("relationship_memory", {})
         communication = relationship.get("communication_style", {})
@@ -376,6 +523,7 @@ class PromptBuilder:
         return "\n".join(f"- {item}" for item in fragments[:8])
 
     def _format_relevant_semantic_memories(self, relevant_memories: str | None) -> str:
+        """格式化 `_format_relevant_semantic_memories` 对应的内容。"""
         if not relevant_memories:
             return ""
         lines = [
@@ -386,6 +534,7 @@ class PromptBuilder:
         return "\n".join(lines[:8])
 
     def _format_memory_guidelines(self, formal_qa_mode: bool) -> str:
+        """格式化 `_format_memory_guidelines` 对应的内容。"""
         mode_line = (
             "- 正式问答模式下，风格记忆只用于让回答更清晰、直接、结构化。"
             if formal_qa_mode
@@ -403,16 +552,19 @@ class PromptBuilder:
         )
 
     def _append_memory_items(self, fragments: list[str], label: str, value: Any) -> None:
+        """添加 `_append_memory_items` 对应的内容。"""
         items = self._string_items(value)
         if items:
             fragments.append(f"{label}：{'、'.join(items[:3])}")
 
     def _append_scalar(self, fragments: list[str], label: str, value: Any) -> None:
+        """添加 `_append_scalar` 对应的内容。"""
         text = self._string_value(value)
         if text:
             fragments.append(f"{label}：{text}")
 
     def _append_legacy_preferences(self, fragments: list[str], value: Any) -> None:
+        """添加 `_append_legacy_preferences` 对应的内容。"""
         if isinstance(value, dict):
             for key, item in value.items():
                 items = self._string_items(item)
@@ -422,6 +574,7 @@ class PromptBuilder:
             self._append_memory_items(fragments, "旧版偏好", value)
 
     def _string_items(self, value: Any) -> list[str]:
+        """处理 `_string_items` 对应的业务逻辑。"""
         if isinstance(value, list):
             return [clip_text(str(item).strip(), 80) for item in value if str(item).strip()]
         if isinstance(value, str) and value.strip():
@@ -429,6 +582,7 @@ class PromptBuilder:
         return []
 
     def _string_value(self, value: Any) -> str:
+        """处理 `_string_value` 对应的业务逻辑。"""
         if value in (None, ""):
             return ""
         return clip_text(str(value).strip(), 80)

@@ -182,6 +182,7 @@ class ReplyBubble(QWidget):
     clicked = Signal()
 
     def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
         super().__init__(
             None,
             Qt.WindowType.Tool

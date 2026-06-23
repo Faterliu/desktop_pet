@@ -23,28 +23,35 @@ from ai.summarizer import Summarizer  # noqa: E402
 
 class FakeChatStore:
     def __init__(self, messages: list[dict[str, str]]) -> None:
+        """初始化当前对象及其依赖。"""
         self._messages = messages
 
     def all_messages(self) -> list[dict[str, str]]:
+        """处理 `all_messages` 对应的业务逻辑。"""
         return list(self._messages)
 
 
 class FakeMemoryStore:
     def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
         self.merged: list[dict[str, object]] = []
 
     def merge(self, payload: dict[str, object]) -> None:
+        """处理 `merge` 对应的业务逻辑。"""
         self.merged.append(payload)
 
 
 class EmptyMemoryDeepSeekClient:
     def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
         self.calls = 0
 
     def is_configured(self) -> bool:
+        """判断 `is_configured` 对应的条件是否成立。"""
         return True
 
     def chat(self, messages: list[dict[str, str]]) -> str:
+        """处理 `chat` 对应的业务逻辑。"""
         self.calls += 1
         if self.calls == 1:
             return json.dumps({"summary": "用户提到了偏好和项目。", "highlights": []}, ensure_ascii=False)
@@ -67,6 +74,7 @@ class EmptyMemoryDeepSeekClient:
 
 class FakeMem0MemoryService:
     def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
         self.added_texts: list[str] = []
 
     def add_memory_text(
@@ -75,11 +83,13 @@ class FakeMem0MemoryService:
         text: str,
         metadata: dict[str, object] | None = None,
     ) -> None:
+        """添加 `add_memory_text` 对应的内容。"""
         self.added_texts.append(text)
 
 
 class SummarizerMemoryUpdateTests(unittest.TestCase):
     def test_empty_model_memory_updates_fall_back_to_local_extraction_and_mem0_write(self) -> None:
+        """验证 `test_empty_model_memory_updates_fall_back_to_local_extraction_and_mem0_write` 对应的行为。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_summarizer_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -120,6 +130,7 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
     def test_formal_question_with_empty_model_memory_updates_falls_back_to_learning_topic(
         self,
     ) -> None:
+        """验证 `test_formal_question_with_empty_model_memory_updates_falls_back_to_learning_topic` 对应的行为。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_formal_summarizer_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_formal.json"
@@ -155,6 +166,7 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         self.assertIn("conda环境和Python虚拟环境", merged_text)
 
     def test_question_keywords_fall_back_to_learning_topics(self) -> None:
+        """验证 `test_question_keywords_fall_back_to_learning_topics` 对应的行为。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_question_keyword_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -193,6 +205,7 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         self.assertIn("如何实现桌宠启动时自动问候？", topics)
 
     def test_informal_summary_mode_does_not_use_formal_question_fallback(self) -> None:
+        """验证 `test_informal_summary_mode_does_not_use_formal_question_fallback` 对应的行为。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_informal_summary_mode"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -228,6 +241,7 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         self.assertEqual([], topics)
 
     def test_user_interaction_preference_writes_relationship_memory(self) -> None:
+        """验证 `test_user_interaction_preference_writes_relationship_memory` 对应的行为。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_relationship_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -275,6 +289,7 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         )
 
     def test_assistant_claim_does_not_write_relationship_memory(self) -> None:
+        """验证 `test_assistant_claim_does_not_write_relationship_memory` 对应的行为。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_no_assistant_relationship_memory"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"

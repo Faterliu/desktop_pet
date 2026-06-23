@@ -22,7 +22,7 @@ BLOCKED_SUBSTRINGS = (
 
 @dataclass(frozen=True)
 class LocalLinesUpdateResult:
-    """Summary of a controlled local-lines update."""
+    """记录本地台词受控更新的结果摘要。"""
 
     group: str
     accepted: list[str]
@@ -31,17 +31,20 @@ class LocalLinesUpdateResult:
 
 
 class LocalLinesService:
-    """Read and safely update local speech lines without changing file shape."""
+    """在不改变文件结构的前提下安全读写本地台词。"""
 
     def __init__(self, local_lines_path: str | Path, metadata_path: str | Path | None = None) -> None:
+        """初始化当前对象及其依赖。"""
         self.local_lines_path = Path(local_lines_path)
         self.metadata_path = Path(metadata_path) if metadata_path is not None else None
 
     def payload(self) -> dict[str, Any]:
+        """处理 `payload` 对应的业务逻辑。"""
         payload = load_json(self.local_lines_path, {})
         return payload if isinstance(payload, dict) else {}
 
     def get_lines(self, group: str) -> list[str]:
+        """读取 `get_lines` 所需的数据。"""
         value = self.payload().get(group, [])
         if isinstance(value, list):
             return [line.strip() for line in value if isinstance(line, str) and line.strip()]
@@ -55,6 +58,7 @@ class LocalLinesService:
         return []
 
     def pick_line(self, group: str, fallback: str = "") -> str:
+        """选择 `pick_line` 对应的内容。"""
         lines = self.get_lines(group)
         if not lines:
             return fallback
@@ -67,6 +71,7 @@ class LocalLinesService:
         *,
         max_chars: int = 80,
     ) -> LocalLinesUpdateResult:
+        """添加 `append_manual_line` 对应的内容。"""
         result = self.validate_lines([line], max_chars=max_chars)
         if not result.accepted:
             return LocalLinesUpdateResult(group, [], result.rejected, False)
@@ -90,6 +95,7 @@ class LocalLinesService:
         max_chars: int = 80,
         max_items: int = 10,
     ) -> LocalLinesUpdateResult:
+        """处理 `replace_generated_lines` 对应的业务逻辑。"""
         validation = self.validate_lines(lines, max_chars=max_chars)
         accepted = validation.accepted[: max(max_items, 0)]
         if not accepted:
@@ -111,6 +117,7 @@ class LocalLinesService:
         monthly_refresh: bool = True,
         now: datetime | None = None,
     ) -> bool:
+        """判断 `should_refresh_generated_lines` 对应的条件是否成立。"""
         metadata = self.group_metadata(group)
         if not metadata:
             return True
@@ -132,6 +139,7 @@ class LocalLinesService:
         return current - last_refreshed >= timedelta(days=days)
 
     def group_metadata(self, group: str) -> dict[str, Any]:
+        """处理 `group_metadata` 对应的业务逻辑。"""
         if self.metadata_path is None:
             return {}
         metadata = load_json(self.metadata_path, {})
@@ -144,6 +152,7 @@ class LocalLinesService:
         return group_metadata if isinstance(group_metadata, dict) else {}
 
     def validate_lines(self, lines: list[str], *, max_chars: int = 80) -> LocalLinesUpdateResult:
+        """校验 `validate_lines` 对应的数据或状态。"""
         accepted: list[str] = []
         rejected: list[str] = []
         seen: set[str] = set()
@@ -166,6 +175,7 @@ class LocalLinesService:
         return LocalLinesUpdateResult("", accepted, rejected, False)
 
     def consume_first_start_line(self) -> str:
+        """处理 `consume_first_start_line` 对应的业务逻辑。"""
         payload = self.payload()
         first_start = payload.get("first_start", {})
         if not isinstance(first_start, dict) or not first_start.get("enable", False):
@@ -185,6 +195,7 @@ class LocalLinesService:
         return line
 
     def _list_group(self, payload: dict[str, Any], group: str) -> list[str]:
+        """处理 `_list_group` 对应的业务逻辑。"""
         value = payload.get(group, [])
         if isinstance(value, list):
             return [line.strip() for line in value if isinstance(line, str) and line.strip()]
@@ -195,6 +206,7 @@ class LocalLinesService:
         return []
 
     def _set_group_lines(self, payload: dict[str, Any], group: str, lines: list[str]) -> None:
+        """更新 `_set_group_lines` 对应的状态。"""
         value = payload.get(group, [])
         if isinstance(value, dict) and "data" in value:
             payload[group] = {**value, "data": lines}
@@ -202,6 +214,7 @@ class LocalLinesService:
         payload[group] = lines
 
     def _record_generated_metadata(self, group: str, lines: list[str], source: str) -> None:
+        """处理 `_record_generated_metadata` 对应的业务逻辑。"""
         if self.metadata_path is None:
             return
 
@@ -226,6 +239,7 @@ class LocalLinesService:
 
 
 def _dedupe_preserve_order(lines: list[str]) -> list[str]:
+    """处理 `_dedupe_preserve_order` 对应的业务逻辑。"""
     seen: set[str] = set()
     result: list[str] = []
     for line in lines:
@@ -237,11 +251,13 @@ def _dedupe_preserve_order(lines: list[str]) -> list[str]:
 
 
 def _contains_blocked_expression(line: str) -> bool:
+    """处理 `_contains_blocked_expression` 对应的业务逻辑。"""
     lowered = line.lower()
     return any(blocked.lower() in lowered for blocked in BLOCKED_SUBSTRINGS)
 
 
 def _parse_datetime(value: str) -> datetime | None:
+    """解析 `_parse_datetime` 对应的数据。"""
     if not value:
         return None
     try:

@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
+    """读取 `_load_json` 所需的数据。"""
     if not path.exists():
         return {}
     try:
@@ -21,12 +22,14 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _load_app_config() -> dict[str, Any]:
+    """读取 `_load_app_config` 所需的数据。"""
     primary = PROJECT_ROOT / "config" / "app_config.json"
     fallback = PROJECT_ROOT / "config" / "app_config.example.json"
     return _load_json(primary) or _load_json(fallback)
 
 
 def _dashscope_api_key(memory_config: dict[str, Any]) -> str:
+    """处理 `_dashscope_api_key` 对应的业务逻辑。"""
     configured_key = str(memory_config.get("dashscope_api_key", "") or "").strip()
     if configured_key:
         return configured_key
@@ -37,6 +40,7 @@ def _dashscope_api_key(memory_config: dict[str, Any]) -> str:
 
 
 def main() -> int:
+    """运行当前模块的主流程。"""
     app_config = _load_app_config()
     memory_config = app_config.get("memory", {})
 

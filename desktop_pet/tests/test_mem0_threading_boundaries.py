@@ -10,6 +10,7 @@ WINDOW_SOURCE_PATH = PROJECT_ROOT / "app" / "desktop_pet_window.py"
 
 
 def _method_source(class_name: str, method_name: str) -> str:
+    """处理 `_method_source` 对应的业务逻辑。"""
     source = WINDOW_SOURCE_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in tree.body:
@@ -22,6 +23,7 @@ def _method_source(class_name: str, method_name: str) -> str:
 
 class Mem0ThreadingBoundaryTests(unittest.TestCase):
     def test_mem0_init_and_reload_are_worker_driven(self) -> None:
+        """验证 `test_mem0_init_and_reload_are_worker_driven` 对应的行为。"""
         source = WINDOW_SOURCE_PATH.read_text(encoding="utf-8")
         init_source = _method_source("DesktopPetWindow", "__init__")
         reload_source = _method_source("DesktopPetWindow", "_reload_config")
@@ -33,6 +35,7 @@ class Mem0ThreadingBoundaryTests(unittest.TestCase):
         self.assertNotIn("Mem0MemoryService(self.app_config)", reload_source)
 
     def test_knowledge_memory_check_starts_search_worker_without_sync_search(self) -> None:
+        """验证 `test_knowledge_memory_check_starts_search_worker_without_sync_search` 对应的行为。"""
         source = WINDOW_SOURCE_PATH.read_text(encoding="utf-8")
         method_source = _method_source("DesktopPetWindow", "_has_knowledge_memory")
 

@@ -12,7 +12,7 @@ def split_knowledge_bubble_text(
     min_first_chars: int = 8,
     max_parts: int = 2,
 ) -> list[str]:
-    """Split a knowledge greeting into display-friendly bubble chunks."""
+    """整理 `split_knowledge_bubble_text` 对应的文本或数据。"""
     cleaned = _normalize_text(text)
     if not cleaned:
         return []
@@ -44,10 +44,12 @@ def split_knowledge_bubble_text(
 
 
 def _normalize_text(text: str) -> str:
+    """规范化 `_normalize_text` 对应的数据。"""
     return re.sub(r"\s+", " ", text.strip())
 
 
 def _sentences(text: str) -> list[str]:
+    """处理 `_sentences` 对应的业务逻辑。"""
     parts = SENTENCE_END_RE.split(text)
     sentences: list[str] = []
     index = 0

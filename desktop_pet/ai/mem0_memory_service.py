@@ -14,13 +14,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Mem0MemoryService:
-    """Optional Mem0-backed long-term semantic memory service.
-
-    The desktop pet must keep working when Mem0 is disabled, missing, or failing.
-    All public methods degrade to no-op or empty results after logging.
-    """
+    """提供可选的 Mem0 长期语义记忆服务。"""
 
     def __init__(self, app_config: dict[str, Any]) -> None:
+        """初始化当前对象及其依赖。"""
         self.app_config = app_config
         memory_config = app_config.get("memory", {})
 
@@ -52,10 +49,11 @@ class Mem0MemoryService:
             self._memory = None
 
     def is_available(self) -> bool:
+        """判断 `is_available` 对应的条件是否成立。"""
         return self.enabled and self._memory is not None
 
     def close(self) -> None:
-        """Best-effort release for Mem0 local resources."""
+        """处理 `close` 对应的业务逻辑。"""
         if self._memory is None:
             return
 
@@ -70,7 +68,7 @@ class Mem0MemoryService:
             self.enabled = False
 
     def _build_mem0_config(self, app_config: dict[str, Any]) -> dict[str, Any]:
-        """Build Mem0 config with DeepSeek LLM and DashScope embeddings."""
+        """构建 `_build_mem0_config` 所需的结果。"""
         api_config = app_config.get("api", {})
         memory_config = app_config.get("memory", {})
         use_app_deepseek = bool(memory_config.get("mem0_use_app_deepseek_config", True))
@@ -155,7 +153,7 @@ class Mem0MemoryService:
         return config
 
     def _mem0_config(self, memory_config: dict[str, Any]) -> dict[str, Any]:
-        """Backward-compatible wrapper for older internal checks."""
+        """处理 `_mem0_config` 对应的业务逻辑。"""
         app_config = dict(self.app_config)
         app_config["memory"] = memory_config
         return self._build_mem0_config(app_config)
@@ -167,7 +165,7 @@ class Mem0MemoryService:
         assistant_message: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Add one user-assistant dialogue to Mem0."""
+        """添加 `add_dialogue` 对应的内容。"""
         if not self.is_available():
             return
 
@@ -199,7 +197,7 @@ class Mem0MemoryService:
         text: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Add one already-extracted long-term memory text to Mem0."""
+        """添加 `add_memory_text` 对应的内容。"""
         if not self.is_available():
             return
 
@@ -226,7 +224,7 @@ class Mem0MemoryService:
         query: str,
         top_k: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Search relevant memories for current user input."""
+        """处理 `search` 对应的业务逻辑。"""
         if not self.is_available():
             return []
 
@@ -260,7 +258,7 @@ class Mem0MemoryService:
         query: str,
         top_k: int | None = None,
     ) -> str:
-        """Return bullet-list text suitable for PromptBuilder."""
+        """格式化 `format_for_prompt` 对应的内容。"""
         lines: list[str] = []
         seen: set[str] = set()
         for item in self.search(user_id=user_id, query=query, top_k=top_k):
@@ -278,7 +276,7 @@ class Mem0MemoryService:
         return "\n".join(lines)
 
     def has_any_memory(self, user_id: str) -> bool:
-        """Best-effort check for knowledge-speak eligibility."""
+        """判断 `has_any_memory` 对应的条件是否成立。"""
         return bool(
             self.search(
                 user_id=user_id,
@@ -288,6 +286,7 @@ class Mem0MemoryService:
         )
 
     def _normalize_search_results(self, results: Any) -> list[dict[str, Any]]:
+        """规范化 `_normalize_search_results` 对应的数据。"""
         if isinstance(results, dict):
             raw_items = results.get("results") or results.get("memories") or []
         else:
@@ -305,6 +304,7 @@ class Mem0MemoryService:
         return normalized
 
     def _positive_int(self, value: Any, default: int) -> int:
+        """处理 `_positive_int` 对应的业务逻辑。"""
         try:
             parsed = int(value)
         except (TypeError, ValueError):
@@ -312,12 +312,14 @@ class Mem0MemoryService:
         return parsed if parsed > 0 else default
 
     def _float_value(self, value: Any, default: float) -> float:
+        """处理 `_float_value` 对应的业务逻辑。"""
         try:
             return float(value)
         except (TypeError, ValueError):
             return default
 
     def _dashscope_api_key(self, memory_config: dict[str, Any]) -> str:
+        """处理 `_dashscope_api_key` 对应的业务逻辑。"""
         configured_key = str(memory_config.get("dashscope_api_key", "") or "").strip()
         if configured_key:
             return configured_key
@@ -327,6 +329,7 @@ class Mem0MemoryService:
         return str(os.getenv(env_name, "") or "").strip()
 
     def _has_required_embedding_config(self, memory_config: dict[str, Any]) -> bool:
+        """判断 `_has_required_embedding_config` 对应的条件是否成立。"""
         if self._dashscope_api_key(memory_config):
             return True
 
@@ -337,7 +340,7 @@ class Mem0MemoryService:
         return False
 
     def _is_sensitive_text(self, text: str) -> bool:
-        """Simple local sensitive-memory guard."""
+        """判断 `_is_sensitive_text` 对应的条件是否成立。"""
         sensitive_keywords = [
             "自杀",
             "自残",

@@ -25,6 +25,7 @@ class ChatFlowDecision:
     reply: str = ""
 
     def with_kind(self, kind: ChatDecisionKind) -> ChatFlowDecision:
+        """处理 `with_kind` 对应的业务逻辑。"""
         return ChatFlowDecision(
             kind=kind,
             message=self.message,
@@ -49,7 +50,7 @@ class ChatFailure:
 
 
 class ChatFlowController:
-    """Coordinate non-UI state transitions for the main user chat flow."""
+    """协调主聊天流程中的非界面状态变化。"""
 
     missing_api_reply = (
         "我已经收到你说的话啦。先在 config/app_config.json 里填好 DeepSeek API key，"
@@ -65,6 +66,7 @@ class ChatFlowController:
         api_configured: Callable[[], bool],
         local_reply_provider: Callable[[str, bool], str],
     ) -> None:
+        """初始化当前对象及其依赖。"""
         self.formal_store = formal_store
         self.informal_store = informal_store
         self._formal_qa_enabled = formal_qa_enabled
@@ -75,9 +77,11 @@ class ChatFlowController:
         self.pending_was_formal = False
 
     def can_start_chat(self, chat_task_registered: bool) -> bool:
+        """判断 `can_start_chat` 对应的条件是否成立。"""
         return not chat_task_registered
 
     def begin_user_message(self, message: str) -> ChatMessageContext:
+        """处理 `begin_user_message` 对应的业务逻辑。"""
         formal_qa_mode = self._formal_qa_enabled()
         store = self._store_for_mode(formal_qa_mode)
         store.append_message("user", message)
@@ -95,6 +99,7 @@ class ChatFlowController:
         context: ChatMessageContext,
         reply: str,
     ) -> ChatFlowDecision:
+        """添加 `append_assistant_reply` 对应的内容。"""
         context.store.append_message("assistant", reply)
         return ChatFlowDecision(
             kind="local_reply",
@@ -105,6 +110,7 @@ class ChatFlowController:
         )
 
     def decide_after_thinking(self, context: ChatMessageContext) -> ChatFlowDecision:
+        """处理 `decide_after_thinking` 对应的业务逻辑。"""
         if not self._api_chat_enabled():
             reply = self._local_reply_provider(context.message, context.formal_qa_mode)
             return self.append_assistant_reply(context, reply)
@@ -132,6 +138,7 @@ class ChatFlowController:
         user_id: str,
         app_config: dict[str, Any],
     ) -> dict[str, Any]:
+        """处理 `chat_worker_kwargs` 对应的业务逻辑。"""
         return {
             "user_message": message,
             "client": client,
@@ -144,6 +151,7 @@ class ChatFlowController:
         }
 
     def complete_success(self, reply: str) -> ChatCompletion:
+        """处理 `complete_success` 对应的业务逻辑。"""
         cleaned_reply = reply.strip() or "我在这里哦。"
         store = self._store_for_mode(self.pending_was_formal)
         store.append_message("assistant", cleaned_reply)
@@ -157,6 +165,7 @@ class ChatFlowController:
         return completion
 
     def complete_failure(self, error_message: str) -> ChatFailure:
+        """处理 `complete_failure` 对应的业务逻辑。"""
         failure = ChatFailure(
             error_message=error_message,
             question=self.pending_question,
@@ -167,7 +176,9 @@ class ChatFlowController:
         return failure
 
     def active_store(self) -> Any:
+        """处理 `active_store` 对应的业务逻辑。"""
         return self._store_for_mode(self._formal_qa_enabled())
 
     def _store_for_mode(self, formal_qa_mode: bool) -> Any:
+        """保存 `_store_for_mode` 产生的数据。"""
         return self.formal_store if formal_qa_mode else self.informal_store

@@ -20,38 +20,47 @@ except ModuleNotFoundError:
 
     class _FakeSignal:
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
+            """初始化当前对象及其依赖。"""
             self._callbacks = []
 
         def connect(self, callback) -> None:  # type: ignore[no-untyped-def]
+            """处理 `connect` 对应的业务逻辑。"""
             self._callbacks.append(callback)
 
         def emit(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            """处理 `emit` 对应的业务逻辑。"""
             for callback in list(self._callbacks):
                 callback(*args, **kwargs)
 
     class _FakeQObject:
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
+            """初始化当前对象及其依赖。"""
             pass
 
     class _FakeQTimer:
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
+            """初始化当前对象及其依赖。"""
             self.timeout = _FakeSignal()
             self.running = False
 
         def start(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            """处理 `start` 对应的业务逻辑。"""
             self.running = True
 
         def stop(self) -> None:
+            """处理 `stop` 对应的业务逻辑。"""
             self.running = False
 
     class QCoreApplication:  # type: ignore[no-redef]
         _instance = None
 
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
+            """初始化当前对象及其依赖。"""
             QCoreApplication._instance = self
 
         @staticmethod
         def instance():  # type: ignore[no-untyped-def]
+            """处理 `instance` 对应的业务逻辑。"""
             return QCoreApplication._instance
 
     qt_core.QObject = _FakeQObject
@@ -68,27 +77,33 @@ from utils.time_utils import now_local  # noqa: E402
 
 class FakeUsageStore:
     def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
         self.max_values: list[int] = []
         self.local_count = 0
         self.api_count = 0
 
     def can_use_local(self, max_per_day: int) -> bool:
+        """判断 `can_use_local` 对应的条件是否成立。"""
         self.max_values.append(max_per_day)
         return True
 
     def can_use_api(self, max_per_day: int) -> bool:
+        """判断 `can_use_api` 对应的条件是否成立。"""
         return True
 
     def increment_local_line(self) -> None:
+        """处理 `increment_local_line` 对应的业务逻辑。"""
         self.local_count += 1
 
     def increment_api_line(self) -> None:
+        """处理 `increment_api_line` 对应的业务逻辑。"""
         self.api_count += 1
 
 
 class BehaviorControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        """准备当前测试类共用的环境和数据。"""
         cls.app = QCoreApplication.instance() or QCoreApplication([])
 
     def _controller(
@@ -98,7 +113,9 @@ class BehaviorControllerTests(unittest.TestCase):
         saver=None,
         local_lines: dict | None = None,
         memory: dict | None = None,
+        character: dict | None = None,
     ) -> BehaviorController:
+        """处理 `_controller` 对应的业务逻辑。"""
         config_dir = temp_dir / "config"
         data_dir = temp_dir / "data"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -119,6 +136,10 @@ class BehaviorControllerTests(unittest.TestCase):
             json.dumps(memory or {}, ensure_ascii=False),
             encoding="utf-8",
         )
+        (config_dir / "character_default.json").write_text(
+            json.dumps(character or {}, ensure_ascii=False),
+            encoding="utf-8",
+        )
         controller = BehaviorController(
             config_dir / "app_config.json",
             local_lines_path,
@@ -131,6 +152,7 @@ class BehaviorControllerTests(unittest.TestCase):
         return controller
 
     def test_invalid_daily_limit_falls_back_to_default(self) -> None:
+        """验证 `test_invalid_daily_limit_falls_back_to_default` 对应的行为。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {
@@ -151,6 +173,7 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertEqual(usage.max_values[-1], 10)
 
     def test_proactive_ratio_adjustment_calls_save_callback(self) -> None:
+        """验证 `test_proactive_ratio_adjustment_calls_save_callback` 对应的行为。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "proactive_content_ratio": {
@@ -161,6 +184,7 @@ class BehaviorControllerTests(unittest.TestCase):
             saved = 0
 
             def saver() -> None:
+                """处理 `saver` 对应的业务逻辑。"""
                 nonlocal saved
                 saved += 1
 
@@ -172,6 +196,7 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertGreater(config["proactive_content_ratio"]["extra_knowledge"], 0.35)
 
     def test_scenario_greeting_response_does_not_add_ratio_bucket(self) -> None:
+        """验证 `test_scenario_greeting_response_does_not_add_ratio_bucket` 对应的行为。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "proactive_content_ratio": {
@@ -188,6 +213,7 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertEqual(config["proactive_content_ratio"]["regular_greeting"], 0.65)
 
     def test_low_interrupt_greeting_takes_priority_after_ignored_prompts(self) -> None:
+        """验证 `test_low_interrupt_greeting_takes_priority_after_ignored_prompts` 对应的行为。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {
@@ -218,6 +244,7 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertEqual(controller._last_proactive_type, "low_interrupt_greeting")
 
     def test_scenario_greeting_emits_api_request_when_memory_context_exists(self) -> None:
+        """验证 `test_scenario_greeting_emits_api_request_when_memory_context_exists` 对应的行为。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {
@@ -239,7 +266,20 @@ class BehaviorControllerTests(unittest.TestCase):
                 "first_start": {"enable": False, "data": []},
             }
             memory = {"work_study": {"current_projects": ["桌宠记忆系统"]}}
-            controller = self._controller(Path(temp), config, local_lines=local_lines, memory=memory)
+            character = {
+                "behavior_policy": {
+                    "proactive_style": "轻量出现，不要求回应。",
+                    "memory_usage": "只在直接相关时参考。",
+                    "boundary": "不制造依赖。",
+                }
+            }
+            controller = self._controller(
+                Path(temp),
+                config,
+                local_lines=local_lines,
+                memory=memory,
+                character=character,
+            )
             controller.last_user_interaction = now_local().replace(year=2000)
             requested: list[dict] = []
             controller.scenario_greeting_requested.connect(lambda payload: requested.append(payload))
@@ -249,9 +289,14 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertTrue(requested)
             self.assertEqual(requested[0]["greeting_type"], "memory_context_greeting")
             self.assertIn("桌宠记忆系统", requested[0]["context"]["recent_task_focus"])
+            self.assertEqual(
+                requested[0]["context"]["character_behavior"]["proactive_style"],
+                "轻量出现，不要求回应。",
+            )
             self.assertEqual(controller._last_proactive_type, "memory_context_greeting")
 
     def test_scenario_greeting_uses_local_template_when_api_disabled(self) -> None:
+        """验证 `test_scenario_greeting_uses_local_template_when_api_disabled` 对应的行为。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {

@@ -17,6 +17,7 @@ DEFAULT_CONTEXT_BUDGET = {
 
 
 def read_context_budget(config: dict[str, Any] | None) -> dict[str, int]:
+    """读取 `read_context_budget` 所需的数据。"""
     api_config = (config or {}).get("api", {})
     budget: dict[str, int] = {}
     for key, default in DEFAULT_CONTEXT_BUDGET.items():
@@ -25,6 +26,7 @@ def read_context_budget(config: dict[str, Any] | None) -> dict[str, int]:
 
 
 def clip_text(text: Any, limit: int) -> str:
+    """整理 `clip_text` 对应的文本或数据。"""
     content = str(text or "").strip()
     if limit <= 0 or len(content) <= limit:
         return content
@@ -35,6 +37,7 @@ def clip_text(text: Any, limit: int) -> str:
 
 
 def _safe_positive_int(value: Any, default: int) -> int:
+    """处理 `_safe_positive_int` 对应的业务逻辑。"""
     try:
         parsed = int(value)
     except (TypeError, ValueError):

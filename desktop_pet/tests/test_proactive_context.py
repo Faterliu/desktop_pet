@@ -18,6 +18,7 @@ from character.proactive_context import (  # noqa: E402
 
 class ProactiveContextTests(unittest.TestCase):
     def test_build_context_uses_task_and_relationship_memory_without_full_dump(self) -> None:
+        """验证 `test_build_context_uses_task_and_relationship_memory_without_full_dump` 对应的行为。"""
         memory = {
             "work_study": {
                 "current_projects": ["桌宠记忆系统", "Mem0 接入", "很久以前的旧任务"],
@@ -46,6 +47,16 @@ class ProactiveContextTests(unittest.TestCase):
             runtime_state={"consecutive_unanswered": 1, "last_proactive_type": "regular_greeting"},
             time_period="afternoon",
             season="summer",
+            character={
+                "behavior_policy": {
+                    "proactive_style": "低频、轻量，不要求回应。",
+                    "memory_usage": "只在直接相关时参考。",
+                    "boundary": "不制造依赖。",
+                },
+                "scenario_reactions": {
+                    "user_silent_long_time": "不追问，也不责怪。",
+                },
+            },
         )
 
         self.assertEqual(context["time_period"], "afternoon")
@@ -55,9 +66,16 @@ class ProactiveContextTests(unittest.TestCase):
             "direct_actionable",
         )
         self.assertEqual(context["companionship_style"]["proactive_boundary"], "low_frequency_when_busy")
+        self.assertEqual(
+            context["character_behavior"]["proactive_style"],
+            "低频、轻量，不要求回应。",
+        )
+        self.assertEqual(context["runtime_state"]["mood"], "calm")
+        self.assertEqual(context["runtime_state"]["consecutive_unanswered"], 1)
         self.assertTrue(has_scenario_context(context, min_items=2))
 
     def test_local_template_greeting_is_short_natural_and_not_mechanical(self) -> None:
+        """验证 `test_local_template_greeting_is_short_natural_and_not_mechanical` 对应的行为。"""
         context = {
             "recent_task_focus": ["桌宠记忆系统"],
             "runtime_state": {"consecutive_unanswered": 0},
@@ -82,6 +100,7 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertNotIn("memory.json", line)
 
     def test_low_interrupt_template_uses_quiet_line(self) -> None:
+        """验证 `test_low_interrupt_template_uses_quiet_line` 对应的行为。"""
         context = {"runtime_state": {"consecutive_unanswered": 3}}
         local_lines = {"low_interrupt": ["看你可能在忙，我先安静一会儿，需要我就点我。"]}
 
@@ -95,6 +114,7 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertEqual(line, "看你可能在忙，我先安静一会儿，需要我就点我。")
 
     def test_api_prompt_for_scenario_greeting_hides_memory_implementation(self) -> None:
+        """验证 `test_api_prompt_for_scenario_greeting_hides_memory_implementation` 对应的行为。"""
         context = {
             "time_period": "afternoon",
             "recent_task_focus": ["桌宠记忆系统"],
@@ -110,6 +130,8 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertIn("不要超过 60 个中文字符", prompt)
         self.assertIn("不要说“根据记忆”", prompt)
         self.assertIn("不要暴露 memory.json、Mem0、数据库、配置等技术细节", prompt)
+        self.assertIn("不要频繁引用长期记忆", prompt)
+        self.assertIn("不制造依赖", prompt)
         self.assertIn("桌宠记忆系统", prompt)
 
 

@@ -15,18 +15,22 @@ logger = get_logger(__name__)
 
 
 def _normalize_path(path: str | Path) -> Path:
+    """规范化 `_normalize_path` 对应的数据。"""
     return Path(path)
 
 
 def _backup_path(path: Path) -> Path:
+    """处理 `_backup_path` 对应的业务逻辑。"""
     return path.with_name(f"{path.name}.bak")
 
 
 def _tmp_path(path: Path) -> Path:
+    """处理 `_tmp_path` 对应的业务逻辑。"""
     return path.with_name(f"{path.name}.tmp")
 
 
 def _corrupt_path(path: Path) -> Path:
+    """处理 `_corrupt_path` 对应的业务逻辑。"""
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
     candidate = path.with_name(f"{path.name}.corrupt.{timestamp}")
     counter = 1
@@ -37,11 +41,13 @@ def _corrupt_path(path: Path) -> Path:
 
 
 def _read_json_file(path: Path) -> Any:
+    """读取 `_read_json_file` 所需的数据。"""
     with path.open("r", encoding="utf-8") as file:
         return json.load(file)
 
 
 def _move_corrupt_file(path: Path) -> Path | None:
+    """处理 `_move_corrupt_file` 对应的业务逻辑。"""
     if not path.exists():
         return None
 
@@ -51,7 +57,7 @@ def _move_corrupt_file(path: Path) -> Path | None:
 
 
 def cleanup_tmp_json_files(directory: Path) -> None:
-    """Remove leftover temp files from interrupted JSON writes."""
+    """处理 `cleanup_tmp_json_files` 对应的业务逻辑。"""
     target_dir = _normalize_path(directory)
     if not target_dir.exists() or not target_dir.is_dir():
         return
@@ -66,6 +72,7 @@ def cleanup_tmp_json_files(directory: Path) -> None:
 
 
 def ensure_json_file(path: str | Path, default: Any) -> Path:
+    """处理 `ensure_json_file` 对应的业务逻辑。"""
     target = _normalize_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
@@ -74,6 +81,7 @@ def ensure_json_file(path: str | Path, default: Any) -> Path:
 
 
 def load_json(path: str | Path, default: Any = None) -> Any:
+    """读取 `load_json` 所需的数据。"""
     target = _normalize_path(path)
     ensure_json_file(target, default if default is not None else {})
 
@@ -101,6 +109,7 @@ def load_json_prefer_primary(
     fallback_path: str | Path,
     default: Any = None,
 ) -> Any:
+    """读取 `load_json_prefer_primary` 所需的数据。"""
     primary = _normalize_path(primary_path)
     fallback = _normalize_path(fallback_path)
 
@@ -112,6 +121,7 @@ def load_json_prefer_primary(
 
 
 def save_json(path: str | Path, data: Any) -> Path:
+    """保存 `save_json` 产生的数据。"""
     target = _normalize_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     cleanup_tmp_json_files(target.parent)

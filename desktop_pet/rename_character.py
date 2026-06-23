@@ -26,6 +26,7 @@ BINARY_EXTENSIONS = {
 
 
 def is_text_file(path: Path) -> bool:
+    """判断 `is_text_file` 对应的条件是否成立。"""
     suffix = path.suffix.lower()
     if suffix in BINARY_EXTENSIONS:
         return False
@@ -78,6 +79,7 @@ def execute_replace(new_name: str, files: dict[Path, int]) -> None:
 
 
 def main() -> None:
+    """运行当前模块的主流程。"""
     if len(sys.argv) < 2:
         print("用法: py rename_character.py 新名字")
         print("示例: py rename_character.py 小虎")

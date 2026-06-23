@@ -46,6 +46,7 @@ class MemoryTextItem:
 
 class MemoryEmbeddingClient:
     def __init__(self, memory_config: dict[str, Any]) -> None:
+        """初始化当前对象及其依赖。"""
         self.memory_config = memory_config
         self.api_key = self._dashscope_api_key(memory_config)
         self.base_url = str(
@@ -65,12 +66,15 @@ class MemoryEmbeddingClient:
         )
 
     def is_configured(self) -> bool:
+        """判断 `is_configured` 对应的条件是否成立。"""
         return bool(self.api_key and self.base_url and self.model)
 
     def signature(self) -> str:
+        """处理 `signature` 对应的业务逻辑。"""
         return "|".join([self.base_url, self.model, str(self.dimensions), self.encoding_format])
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """处理 `embed_texts` 对应的业务逻辑。"""
         if not self.is_configured():
             return []
 
@@ -82,6 +86,7 @@ class MemoryEmbeddingClient:
         return embeddings
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """处理 `_embed_batch` 对应的业务逻辑。"""
         if requests is None:
             raise RuntimeError("requests is not installed")
         response = requests.post(
@@ -115,6 +120,7 @@ class MemoryEmbeddingClient:
         return vectors
 
     def _dashscope_api_key(self, memory_config: dict[str, Any]) -> str:
+        """处理 `_dashscope_api_key` 对应的业务逻辑。"""
         configured_key = str(memory_config.get("dashscope_api_key", "") or "").strip()
         if configured_key:
             return configured_key
@@ -124,6 +130,7 @@ class MemoryEmbeddingClient:
         return str(os.getenv(env_name, "") or "").strip()
 
     def _positive_int(self, value: Any, default: int) -> int:
+        """处理 `_positive_int` 对应的业务逻辑。"""
         try:
             parsed = int(value)
         except (TypeError, ValueError):
@@ -133,13 +140,16 @@ class MemoryEmbeddingClient:
 
 class MemoryVectorStore:
     def __init__(self, path: str | Path, app_config: dict[str, Any]) -> None:
+        """初始化当前对象及其依赖。"""
         self.path = Path(path)
         self.app_config = app_config
 
     def update_config(self, app_config: dict[str, Any]) -> None:
+        """更新 `update_config` 对应的状态。"""
         self.app_config = app_config
 
     def sync_memory(self, memory: dict[str, Any]) -> None:
+        """同步并刷新 `sync_memory` 对应的状态。"""
         memory_config = self._memory_config()
         if not memory_config.get("enable_memory_vectors", True):
             return
@@ -209,6 +219,7 @@ class MemoryVectorStore:
             self._save_index(index)
 
     def run_due_semantic_merge(self, memory_path: str | Path) -> dict[str, Any]:
+        """执行 `run_due_semantic_merge` 对应的流程。"""
         memory_config = self._memory_config()
         if not memory_config.get("enable_semantic_memory_merge", True):
             return {"status": "disabled", "merged_count": 0}
@@ -227,6 +238,7 @@ class MemoryVectorStore:
         return result
 
     def is_semantic_merge_due(self) -> bool:
+        """判断 `is_semantic_merge_due` 对应的条件是否成立。"""
         index = self._load_index()
         last_run = str(index.get("last_semantic_merge_at", "") or "").strip()
         if not last_run:
@@ -243,6 +255,7 @@ class MemoryVectorStore:
         return datetime.now() - last_dt >= timedelta(days=interval_days)
 
     def _merge_semantic_duplicates(self, memory_path: str | Path) -> dict[str, Any]:
+        """处理 `_merge_semantic_duplicates` 对应的业务逻辑。"""
         threshold = self._float_value(
             self._memory_config().get("semantic_duplicate_similarity_threshold", 0.96),
             0.96,
@@ -265,6 +278,7 @@ class MemoryVectorStore:
         return {"status": "completed", "merged_count": merged_count}
 
     def _duplicate_groups(self, items: list[dict[str, Any]], threshold: float) -> list[list[dict[str, Any]]]:
+        """处理 `_duplicate_groups` 对应的业务逻辑。"""
         groups_by_path: dict[str, list[dict[str, Any]]] = {}
         for item in items:
             path = str(item.get("path", "") or "")
@@ -278,12 +292,14 @@ class MemoryVectorStore:
             parent = list(range(len(path_items)))
 
             def find(index: int) -> int:
+                """处理 `find` 对应的业务逻辑。"""
                 while parent[index] != index:
                     parent[index] = parent[parent[index]]
                     index = parent[index]
                 return index
 
             def union(left: int, right: int) -> None:
+                """处理 `union` 对应的业务逻辑。"""
                 left_root = find(left)
                 right_root = find(right)
                 if left_root != right_root:
@@ -307,6 +323,7 @@ class MemoryVectorStore:
         right_item: dict[str, Any],
         threshold: float,
     ) -> bool:
+        """判断 `_is_semantic_duplicate` 对应的条件是否成立。"""
         left_text = str(left_item.get("text", "") or "").strip()
         right_text = str(right_item.get("text", "") or "").strip()
         if not left_text or not right_text or left_text == right_text:
@@ -322,6 +339,7 @@ class MemoryVectorStore:
         memory: dict[str, Any],
         duplicate_groups: list[list[dict[str, Any]]],
     ) -> int:
+        """更新 `_apply_duplicate_groups` 对应的状态。"""
         by_path: dict[str, list[list[dict[str, Any]]]] = {}
         for group in duplicate_groups:
             path = str(group[0].get("path", "") or "")
@@ -359,6 +377,7 @@ class MemoryVectorStore:
         return merged_count
 
     def _representative_text(self, items: list[dict[str, Any]]) -> str:
+        """处理 `_representative_text` 对应的业务逻辑。"""
         ordered = sorted(
             items,
             key=lambda item: (
@@ -369,17 +388,20 @@ class MemoryVectorStore:
         return str(ordered[0].get("text", "") or "").strip()
 
     def _mark_semantic_merge_finished(self) -> None:
+        """处理 `_mark_semantic_merge_finished` 对应的业务逻辑。"""
         with MEMORY_IO_LOCK:
             index = self._load_index()
             index["last_semantic_merge_at"] = now_iso()
             self._save_index(index)
 
     def _iter_memory_texts(self, memory: dict[str, Any]) -> list[MemoryTextItem]:
+        """处理 `_iter_memory_texts` 对应的业务逻辑。"""
         items: list[MemoryTextItem] = []
         seen: set[tuple[str, str]] = set()
         min_text_length = self._memory_vector_min_text_length()
 
         def visit(node: Any, path: list[str]) -> None:
+            """处理 `visit` 对应的业务逻辑。"""
             if isinstance(node, dict):
                 for key, value in node.items():
                     if key in {"schema_version", "last_updated"}:
@@ -410,6 +432,7 @@ class MemoryVectorStore:
         return items
 
     def _node_for_path(self, memory: dict[str, Any], path: str) -> Any:
+        """处理 `_node_for_path` 对应的业务逻辑。"""
         node: Any = memory
         for part in path.split("."):
             if not isinstance(node, dict):
@@ -418,6 +441,7 @@ class MemoryVectorStore:
         return node
 
     def _load_index(self) -> dict[str, Any]:
+        """读取 `_load_index` 所需的数据。"""
         index = load_json(self.path, DEFAULT_VECTOR_INDEX)
         if not isinstance(index, dict):
             return dict(DEFAULT_VECTOR_INDEX)
@@ -429,6 +453,7 @@ class MemoryVectorStore:
         return index
 
     def _save_index(self, index: dict[str, Any]) -> None:
+        """保存 `_save_index` 产生的数据。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.path.with_name(f"{self.path.name}.tmp")
         try:
@@ -446,13 +471,16 @@ class MemoryVectorStore:
             raise
 
     def _embedding_signature(self, client: MemoryEmbeddingClient) -> str:
+        """处理 `_embedding_signature` 对应的业务逻辑。"""
         return f"{client.signature()}|precision={self._memory_vector_precision()}"
 
     def _compress_embedding(self, embedding: list[float]) -> list[float]:
+        """处理 `_compress_embedding` 对应的业务逻辑。"""
         precision = self._memory_vector_precision()
         return [round(float(value), precision) for value in embedding]
 
     def _limit_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """处理 `_limit_items` 对应的业务逻辑。"""
         max_items = self._memory_vector_max_items()
         valid_items = [item for item in items if isinstance(item, dict)]
         if len(valid_items) <= max_items:
@@ -471,6 +499,7 @@ class MemoryVectorStore:
         return [item for item in valid_items if str(item.get("id")) in keep_ids]
 
     def _memory_item_importance(self, path: str) -> int:
+        """处理 `_memory_item_importance` 对应的业务逻辑。"""
         if path.startswith("relationship_memory."):
             return 30
         if path.startswith("work_study.current_projects"):
@@ -484,37 +513,44 @@ class MemoryVectorStore:
         return 10
 
     def _timestamp_score(self, value: str) -> float:
+        """处理 `_timestamp_score` 对应的业务逻辑。"""
         try:
             return datetime.fromisoformat(value).timestamp()
         except ValueError:
             return 0.0
 
     def _memory_vector_precision(self) -> int:
+        """处理 `_memory_vector_precision` 对应的业务逻辑。"""
         return self._positive_int(
             self._memory_config().get("memory_vector_precision", DEFAULT_VECTOR_PRECISION),
             DEFAULT_VECTOR_PRECISION,
         )
 
     def _memory_vector_min_text_length(self) -> int:
+        """处理 `_memory_vector_min_text_length` 对应的业务逻辑。"""
         return self._positive_int(
             self._memory_config().get("memory_vector_min_text_length", DEFAULT_VECTOR_MIN_TEXT_LENGTH),
             DEFAULT_VECTOR_MIN_TEXT_LENGTH,
         )
 
     def _memory_vector_max_items(self) -> int:
+        """处理 `_memory_vector_max_items` 对应的业务逻辑。"""
         return self._positive_int(
             self._memory_config().get("memory_vector_max_items", DEFAULT_VECTOR_MAX_ITEMS),
             DEFAULT_VECTOR_MAX_ITEMS,
         )
 
     def _memory_config(self) -> dict[str, Any]:
+        """处理 `_memory_config` 对应的业务逻辑。"""
         return self.app_config.setdefault("memory", {})
 
     def _item_id(self, path: str, text: str) -> str:
+        """处理 `_item_id` 对应的业务逻辑。"""
         raw = f"{path}\n{text}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
 
     def _cosine_similarity(self, left: Any, right: Any) -> float:
+        """处理 `_cosine_similarity` 对应的业务逻辑。"""
         if not isinstance(left, list) or not isinstance(right, list) or len(left) != len(right):
             return 0.0
         left_values = [float(value) for value in left]
@@ -527,12 +563,14 @@ class MemoryVectorStore:
         return dot / (left_norm * right_norm)
 
     def _has_negation_mismatch(self, left: str, right: str) -> bool:
+        """判断 `_has_negation_mismatch` 对应的条件是否成立。"""
         negations = ["不", "别", "不要", "不想", "不喜欢", "讨厌", "避免", "拒绝", "no", "not", "never"]
         left_has = any(word in left.lower() for word in negations)
         right_has = any(word in right.lower() for word in negations)
         return left_has != right_has
 
     def _positive_int(self, value: Any, default: int) -> int:
+        """处理 `_positive_int` 对应的业务逻辑。"""
         try:
             parsed = int(value)
         except (TypeError, ValueError):
@@ -540,6 +578,7 @@ class MemoryVectorStore:
         return parsed if parsed > 0 else default
 
     def _float_value(self, value: Any, default: float) -> float:
+        """处理 `_float_value` 对应的业务逻辑。"""
         try:
             parsed = float(value)
         except (TypeError, ValueError):

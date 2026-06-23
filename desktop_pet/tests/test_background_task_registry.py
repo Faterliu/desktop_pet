@@ -13,14 +13,17 @@ from app.background_task_registry import BackgroundTaskRegistry  # noqa: E402
 
 class FakeQtObject:
     def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
         self.deleted = False
 
     def deleteLater(self) -> None:  # noqa: N802
+        """处理 `deleteLater` 对应的业务逻辑。"""
         self.deleted = True
 
 
 class FakeThread(FakeQtObject):
     def __init__(self, running: bool = False, wait_result: bool = True) -> None:
+        """初始化当前对象及其依赖。"""
         super().__init__()
         self.running = running
         self.wait_result = wait_result
@@ -29,14 +32,17 @@ class FakeThread(FakeQtObject):
         self.terminate_calls = 0
 
     def isRunning(self) -> bool:  # noqa: N802
+        """处理 `isRunning` 对应的业务逻辑。"""
         return self.running
 
     def quit(self) -> None:
+        """处理 `quit` 对应的业务逻辑。"""
         self.quit_calls += 1
         if self.wait_result:
             self.running = False
 
     def wait(self, timeout_ms: int) -> bool:
+        """处理 `wait` 对应的业务逻辑。"""
         self.wait_calls.append(timeout_ms)
         if self.wait_result:
             self.running = False
@@ -44,18 +50,21 @@ class FakeThread(FakeQtObject):
         return False
 
     def terminate(self) -> None:
+        """处理 `terminate` 对应的业务逻辑。"""
         self.terminate_calls += 1
         self.running = False
 
 
 class BackgroundTaskRegistryTests(unittest.TestCase):
     def test_register_and_remove_clears_task_and_calls_cleanup(self) -> None:
+        """验证 `test_register_and_remove_clears_task_and_calls_cleanup` 对应的行为。"""
         registry = BackgroundTaskRegistry(default_wait_timeout_ms=250)
         thread = FakeThread(running=False)
         worker = FakeQtObject()
         cleaned = False
 
         def cleanup() -> None:
+            """处理 `cleanup` 对应的业务逻辑。"""
             nonlocal cleaned
             cleaned = True
 
@@ -70,12 +79,14 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         self.assertTrue(cleaned)
 
     def test_duplicate_registered_task_is_blocked_before_thread_starts(self) -> None:
+        """验证 `test_duplicate_registered_task_is_blocked_before_thread_starts` 对应的行为。"""
         registry = BackgroundTaskRegistry()
 
         self.assertTrue(registry.register("mem0_search", FakeThread(), FakeQtObject()))
         self.assertFalse(registry.register("mem0_search", FakeThread(), FakeQtObject()))
 
     def test_stop_all_quits_waits_and_removes_active_threads(self) -> None:
+        """验证 `test_stop_all_quits_waits_and_removes_active_threads` 对应的行为。"""
         registry = BackgroundTaskRegistry(default_wait_timeout_ms=500)
         thread = FakeThread(running=True)
         worker = FakeQtObject()
@@ -91,6 +102,7 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         self.assertFalse(registry.is_registered("memory_maintenance"))
 
     def test_stop_all_reports_and_terminates_stuck_threads(self) -> None:
+        """验证 `test_stop_all_reports_and_terminates_stuck_threads` 对应的行为。"""
         registry = BackgroundTaskRegistry(default_wait_timeout_ms=100)
         thread = FakeThread(running=True, wait_result=False)
 
@@ -104,6 +116,7 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         self.assertFalse(registry.is_registered("mem0_init"))
 
     def test_unregister_alias_removes_task(self) -> None:
+        """验证 `test_unregister_alias_removes_task` 对应的行为。"""
         registry = BackgroundTaskRegistry()
 
         registry.register("chat", FakeThread(), FakeQtObject())
@@ -112,6 +125,7 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         self.assertFalse(registry.is_registered("chat"))
 
     def test_request_quit_all_waits_without_terminating(self) -> None:
+        """验证 `test_request_quit_all_waits_without_terminating` 对应的行为。"""
         registry = BackgroundTaskRegistry(default_wait_timeout_ms=500)
         thread = FakeThread(running=True, wait_result=False)
 
@@ -125,6 +139,7 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         self.assertTrue(registry.is_registered("mem0_search"))
 
     def test_clear_finished_removes_only_stopped_threads(self) -> None:
+        """验证 `test_clear_finished_removes_only_stopped_threads` 对应的行为。"""
         registry = BackgroundTaskRegistry()
         stopped = FakeThread(running=False)
         running = FakeThread(running=True)

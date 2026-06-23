@@ -15,6 +15,7 @@ from ai.mem0_memory_service import Mem0MemoryService  # noqa: E402
 
 class Mem0MemoryServiceTests(unittest.TestCase):
     def test_enabled_mem0_without_dashscope_key_skips_import_and_init(self) -> None:
+        """验证 `test_enabled_mem0_without_dashscope_key_skips_import_and_init` 对应的行为。"""
         config = {
             "api": {"api_key": "deepseek-key"},
             "memory": {
@@ -28,6 +29,7 @@ class Mem0MemoryServiceTests(unittest.TestCase):
         mem0_import_attempted = False
 
         def fail_if_mem0_imported(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
+            """处理 `fail_if_mem0_imported` 对应的业务逻辑。"""
             nonlocal mem0_import_attempted
             if name == "mem0":
                 mem0_import_attempted = True

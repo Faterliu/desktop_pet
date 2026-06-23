@@ -26,18 +26,22 @@ from storage.json_store import save_json  # noqa: E402
 
 class FakeMemoryStore:
     def merge(self, payload: dict[str, object]) -> None:
+        """处理 `merge` 对应的业务逻辑。"""
         self.payload = payload
 
 
 class BudgetRecordingClient:
     def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
         self.messages: list[list[dict[str, str]]] = []
         self.calls = 0
 
     def is_configured(self) -> bool:
+        """判断 `is_configured` 对应的条件是否成立。"""
         return True
 
     def chat(self, messages: list[dict[str, str]]) -> str:
+        """处理 `chat` 对应的业务逻辑。"""
         self.calls += 1
         self.messages.append(messages)
         if self.calls == 1:
@@ -54,6 +58,7 @@ class BudgetRecordingClient:
 
 class ContextBudgetControlsTests(unittest.TestCase):
     def setUp(self) -> None:
+        """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / self._testMethodName
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.config_path = self.temp_dir / "app_config.json"
@@ -69,6 +74,7 @@ class ContextBudgetControlsTests(unittest.TestCase):
         )
 
     def test_context_manager_limits_message_count_and_message_chars(self) -> None:
+        """验证 `test_context_manager_limits_message_count_and_message_chars` 对应的行为。"""
         save_json(
             self.config_path,
             {
@@ -89,6 +95,7 @@ class ContextBudgetControlsTests(unittest.TestCase):
         self.assertTrue(all(len(item["content"]) <= 40 for item in recent))
 
     def test_context_manager_uses_defaults_when_budget_keys_missing(self) -> None:
+        """验证 `test_context_manager_uses_defaults_when_budget_keys_missing` 对应的行为。"""
         save_json(self.config_path, {"api": {}})
         chat_store = ChatStore(self.temp_dir / "chat_history_defaults.json")
         for index in range(15):
@@ -100,6 +107,7 @@ class ContextBudgetControlsTests(unittest.TestCase):
         self.assertEqual(12, len(recent))
 
     def test_summary_input_respects_budget(self) -> None:
+        """验证 `test_summary_input_respects_budget` 对应的行为。"""
         save_json(
             self.config_path,
             {

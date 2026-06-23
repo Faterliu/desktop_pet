@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
+from character.persona_state import compact_behavior_policy, read_persona_state
 from storage.memory_store import normalize_memory_schema
 
 
@@ -22,8 +23,9 @@ def build_proactive_context(
     runtime_state: dict[str, Any] | None = None,
     time_period: str | None = None,
     season: str | None = None,
+    character: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build a compact context for scenario greetings from memory and runtime state."""
+    """构建 `build_proactive_context` 所需的结果。"""
     normalized = normalize_memory_schema(memory)
     work_study = normalized.get("work_study", {})
     relationship = normalized.get("relationship_memory", {})
@@ -37,6 +39,10 @@ def build_proactive_context(
         + _string_items(work_study.get("current_learning_topics", [])),
         limit=4,
     )
+    runtime = dict(runtime_state or {})
+    persona_state = read_persona_state(runtime_state)
+    for key, value in persona_state.to_dict().items():
+        runtime.setdefault(key, value)
 
     return {
         "time_period": time_period or "",
@@ -68,12 +74,13 @@ def build_proactive_context(
                 "response_to_proactive_greetings",
             ],
         ),
-        "runtime_state": dict(runtime_state or {}),
+        "character_behavior": compact_behavior_policy(character),
+        "runtime_state": runtime,
     }
 
 
 def has_scenario_context(context: dict[str, Any], min_items: int = 1) -> bool:
-    """Return whether the compact context has enough useful memory to personalize a line."""
+    """判断 `has_scenario_context` 对应的条件是否成立。"""
     return _count_context_items(context) >= max(1, min_items)
 
 
@@ -83,7 +90,7 @@ def build_local_scenario_greeting(
     max_chars: int = 80,
     greeting_type: str = "memory_context_greeting",
 ) -> str:
-    """Render a local fallback scenario greeting from compact context and templates."""
+    """构建 `build_local_scenario_greeting` 所需的结果。"""
     if greeting_type == "low_interrupt_greeting":
         return sanitize_scenario_greeting(_pick_line(local_lines, "low_interrupt"), max_chars)
 
@@ -101,7 +108,7 @@ def build_scenario_greeting_messages(
     context: dict[str, Any],
     max_chars: int = 80,
 ) -> list[dict[str, str]]:
-    """Build API messages for one short, natural scenario greeting."""
+    """构建 `build_scenario_greeting_messages` 所需的结果。"""
     context_text = format_proactive_context(context)
     return [
         {
@@ -116,8 +123,10 @@ def build_scenario_greeting_messages(
                 "- 不要暴露 memory.json、Mem0、数据库、配置等技术细节。\n"
                 "- 不要像任务管理器一样催促用户。\n"
                 "- 语气自然、克制、有陪伴感。\n"
+                "- 遵守角色行为策略，但不要逐字复述策略。\n"
                 "- 如果上下文显示用户可能在忙，请降低打扰感。\n"
-                "- 可以轻轻关联用户近期关注点，但不要机械复述。\n"
+                "- 只有近期关注点与此刻明显相关时才轻轻带到，不要频繁引用长期记忆。\n"
+                "- 不过度撒娇，不假装真人，不索取回应，不制造依赖。\n"
                 "- 只输出问候文本，不要输出解释、JSON 或多候选。"
             ),
         },
@@ -126,12 +135,17 @@ def build_scenario_greeting_messages(
 
 
 def format_proactive_context(context: dict[str, Any]) -> str:
-    """Format compact context into a short prompt-readable text block."""
+    """格式化 `format_proactive_context` 对应的内容。"""
     lines: list[str] = []
     _append_scalar(lines, "time_period", context.get("time_period"))
     _append_scalar(lines, "season", context.get("season"))
     _append_list(lines, "recent_task_focus", context.get("recent_task_focus", []))
-    for section in ("communication_style", "companionship_style", "interaction_patterns"):
+    for section in (
+        "communication_style",
+        "companionship_style",
+        "interaction_patterns",
+        "character_behavior",
+    ):
         values = context.get(section, {})
         if isinstance(values, dict) and values:
             rendered = ", ".join(
@@ -154,7 +168,7 @@ def format_proactive_context(context: dict[str, Any]) -> str:
 
 
 def sanitize_scenario_greeting(text: str, max_chars: int = 80) -> str:
-    """Trim generated/local scenario greeting to a safe, single-line bubble text."""
+    """规范化 `sanitize_scenario_greeting` 对应的数据。"""
     line = " ".join(str(text or "").split())
     if len(line) > max_chars:
         line = line[: max(0, max_chars - 1)].rstrip() + "…"
@@ -162,21 +176,25 @@ def sanitize_scenario_greeting(text: str, max_chars: int = 80) -> str:
 
 
 def is_scenario_greeting_acceptable(text: str) -> bool:
+    """判断 `is_scenario_greeting_acceptable` 对应的条件是否成立。"""
     line = str(text or "").strip()
     return bool(line) and not any(phrase in line for phrase in FORBIDDEN_GREETING_PHRASES)
 
 
 def _pick_line(local_lines: dict[str, Any], group_name: str) -> str:
+    """选择 `_pick_line` 对应的内容。"""
     lines = _string_items(local_lines.get(group_name, []))
     return random.choice(lines) if lines else ""
 
 
 def _primary_task(context: dict[str, Any]) -> str:
+    """处理 `_primary_task` 对应的业务逻辑。"""
     tasks = _string_items(context.get("recent_task_focus", []))
     return tasks[0] if tasks else ""
 
 
 def _compact_mapping(source: Any, keys: list[str]) -> dict[str, Any]:
+    """处理 `_compact_mapping` 对应的业务逻辑。"""
     if not isinstance(source, dict):
         return {}
     compact: dict[str, Any] = {}
@@ -194,6 +212,7 @@ def _compact_mapping(source: Any, keys: list[str]) -> dict[str, Any]:
 
 
 def _string_items(value: Any) -> list[str]:
+    """处理 `_string_items` 对应的业务逻辑。"""
     if not isinstance(value, list):
         if isinstance(value, str) and value.strip():
             return [_clip_text(value)]
@@ -202,12 +221,14 @@ def _string_items(value: Any) -> list[str]:
 
 
 def _string_value(value: Any) -> str:
+    """处理 `_string_value` 对应的业务逻辑。"""
     if value in (None, ""):
         return ""
     return _clip_text(str(value).strip())
 
 
 def _clip_text(text: str, limit: int = 80) -> str:
+    """整理 `_clip_text` 对应的文本或数据。"""
     text = text.strip()
     if len(text) <= limit:
         return text
@@ -215,6 +236,7 @@ def _clip_text(text: str, limit: int = 80) -> str:
 
 
 def _unique_limited(items: list[str], limit: int) -> list[str]:
+    """处理 `_unique_limited` 对应的业务逻辑。"""
     unique: list[str] = []
     for item in items:
         if item and item not in unique:
@@ -225,6 +247,7 @@ def _unique_limited(items: list[str], limit: int) -> list[str]:
 
 
 def _count_context_items(context: dict[str, Any]) -> int:
+    """计算 `_count_context_items` 对应的结果。"""
     count = len(_string_items(context.get("recent_task_focus", [])))
     for section in ("communication_style", "companionship_style", "interaction_patterns"):
         values = context.get(section, {})
@@ -238,18 +261,21 @@ def _count_context_items(context: dict[str, Any]) -> int:
 
 
 def _append_scalar(lines: list[str], label: str, value: Any) -> None:
+    """添加 `_append_scalar` 对应的内容。"""
     text = _string_value(value)
     if text:
         lines.append(f"{label}: {text}")
 
 
 def _append_list(lines: list[str], label: str, value: Any) -> None:
+    """添加 `_append_list` 对应的内容。"""
     items = _string_items(value)
     if items:
         lines.append(f"{label}: {', '.join(items)}")
 
 
 def _value_text(value: Any) -> str:
+    """处理 `_value_text` 对应的业务逻辑。"""
     if isinstance(value, list):
         return "、".join(_string_items(value))
     return _string_value(value)

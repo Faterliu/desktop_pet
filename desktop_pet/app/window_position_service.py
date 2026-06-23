@@ -15,14 +15,16 @@ logger = get_logger(__name__)
 
 class ScreenProvider(Protocol):
     def primaryScreen(self) -> QScreen | None:  # noqa: N802
+        """处理 `primaryScreen` 对应的业务逻辑。"""
         ...
 
     def screens(self) -> list[QScreen]:
+        """处理 `screens` 对应的业务逻辑。"""
         ...
 
 
 class WindowPositionService:
-    """Read, validate, restore, and save the desktop pet window position."""
+    """读取、校验、恢复并保存桌宠窗口位置。"""
 
     def __init__(
         self,
@@ -31,6 +33,7 @@ class WindowPositionService:
         default_margin: int = 30,
         fallback_position: QPoint | None = None,
     ) -> None:
+        """初始化当前对象及其依赖。"""
         self.state_path = state_path
         self.screen_provider = screen_provider
         self.default_margin = default_margin
@@ -42,7 +45,7 @@ class WindowPositionService:
         base_size: tuple[int, int],
         remember_last_position: bool = True,
     ) -> QPoint:
-        """Return saved visible position or the default visible startup position."""
+        """处理 `restore_position` 对应的业务逻辑。"""
         state = self.load_state()
         if remember_last_position:
             saved_position = self._saved_position(state)
@@ -57,12 +60,15 @@ class WindowPositionService:
         return self.default_position(base_size)
 
     def load_state(self) -> dict[str, Any]:
+        """读取 `load_state` 所需的数据。"""
         return load_json(self.state_path, {"x": None, "y": None})
 
     def save_position(self, position: QPoint) -> None:
+        """保存 `save_position` 产生的数据。"""
         save_json(self.state_path, {"x": position.x(), "y": position.y()})
 
     def position_visible_on_any_screen(self, position: QPoint, window_size: QSize) -> bool:
+        """处理 `position_visible_on_any_screen` 对应的业务逻辑。"""
         window_rect = QRect(position, window_size)
         for screen in self.screen_provider.screens():
             if screen.availableGeometry().intersects(window_rect):
@@ -70,6 +76,7 @@ class WindowPositionService:
         return False
 
     def default_position(self, base_size: tuple[int, int]) -> QPoint:
+        """处理 `default_position` 对应的业务逻辑。"""
         screen = self.screen_provider.primaryScreen()
         if screen is None:
             return QPoint(self.fallback_position)
@@ -81,6 +88,7 @@ class WindowPositionService:
         )
 
     def _saved_position(self, state: dict[str, Any]) -> QPoint | None:
+        """处理 `_saved_position` 对应的业务逻辑。"""
         if state.get("x") is None or state.get("y") is None:
             return None
         try:

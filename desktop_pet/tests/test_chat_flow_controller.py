@@ -13,9 +13,11 @@ from app.chat_flow_controller import ChatFlowController  # noqa: E402
 
 class FakeStore:
     def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
         self.messages: list[tuple[str, str]] = []
 
     def append_message(self, role: str, content: str) -> None:
+        """添加 `append_message` 对应的内容。"""
         self.messages.append((role, content))
 
 
@@ -27,6 +29,7 @@ class ChatFlowControllerTests(unittest.TestCase):
         api_enabled: bool = True,
         api_configured: bool = True,
     ) -> tuple[ChatFlowController, FakeStore, FakeStore]:
+        """构建 `make_controller` 所需的结果。"""
         formal_store = FakeStore()
         informal_store = FakeStore()
         controller = ChatFlowController(
@@ -42,6 +45,7 @@ class ChatFlowControllerTests(unittest.TestCase):
         return controller, formal_store, informal_store
 
     def test_local_reply_uses_current_mode_store(self) -> None:
+        """验证 `test_local_reply_uses_current_mode_store` 对应的行为。"""
         controller, formal_store, informal_store = self.make_controller(api_enabled=False)
 
         context = controller.begin_user_message("你好")
@@ -53,6 +57,7 @@ class ChatFlowControllerTests(unittest.TestCase):
         self.assertEqual(formal_store.messages, [])
 
     def test_missing_api_config_keeps_existing_reply_text(self) -> None:
+        """验证 `test_missing_api_config_keeps_existing_reply_text` 对应的行为。"""
         controller, _formal_store, informal_store = self.make_controller(api_configured=False)
 
         context = controller.begin_user_message("测试")
@@ -63,6 +68,7 @@ class ChatFlowControllerTests(unittest.TestCase):
         self.assertEqual(informal_store.messages[-1], ("assistant", decision.reply))
 
     def test_formal_success_appends_to_formal_store_and_returns_question(self) -> None:
+        """验证 `test_formal_success_appends_to_formal_store_and_returns_question` 对应的行为。"""
         controller, formal_store, informal_store = self.make_controller(formal=True)
 
         controller.begin_user_message("如何实现？")
@@ -77,6 +83,7 @@ class ChatFlowControllerTests(unittest.TestCase):
         self.assertEqual(controller.pending_question, "")
 
     def test_worker_kwargs_use_pending_formal_snapshot(self) -> None:
+        """验证 `test_worker_kwargs_use_pending_formal_snapshot` 对应的行为。"""
         controller, _formal_store, _informal_store = self.make_controller(formal=True)
         controller.begin_user_message("正式问题")
 
@@ -95,6 +102,7 @@ class ChatFlowControllerTests(unittest.TestCase):
         self.assertEqual(kwargs["user_id"], "user")
 
     def test_can_start_chat_rejects_registered_chat_task(self) -> None:
+        """验证 `test_can_start_chat_rejects_registered_chat_task` 对应的行为。"""
         controller, _formal_store, _informal_store = self.make_controller()
 
         self.assertFalse(controller.can_start_chat(True))

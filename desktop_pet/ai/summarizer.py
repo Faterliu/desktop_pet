@@ -80,16 +80,18 @@ class Summarizer:
             self._write_memory_updates_to_mem0(extracted_memory)
 
     def _config(self) -> dict[str, Any]:
+        """处理 `_config` 对应的业务逻辑。"""
         if self.config_path is None:
             return {}
         fallback = self.fallback_config_path or self.config_path
         return load_json_prefer_primary(self.config_path, fallback, {})
 
     def _budget(self) -> dict[str, int]:
+        """处理 `_budget` 对应的业务逻辑。"""
         return read_context_budget(self._config())
 
     def _write_memory_updates_to_mem0(self, memory_updates: dict[str, Any]) -> None:
-        """Best-effort shadow write of extracted memory updates into Mem0."""
+        """保存 `_write_memory_updates_to_mem0` 产生的数据。"""
         if self.mem0_memory_service is None:
             return
 
@@ -109,10 +111,11 @@ class Summarizer:
                 logger.warning("Failed to shadow-write memory update to Mem0: %s", safe_exception(exc))
 
     def _iter_memory_texts(self, value: Any) -> list[str]:
-        """Flatten the structured memory update payload into unique text items."""
+        """处理 `_iter_memory_texts` 对应的业务逻辑。"""
         texts: list[str] = []
 
         def visit(node: Any) -> None:
+            """处理 `visit` 对应的业务逻辑。"""
             if isinstance(node, dict):
                 for item in node.values():
                     visit(item)
@@ -128,10 +131,11 @@ class Summarizer:
         return texts
 
     def _has_memory_update_text(self, value: Any) -> bool:
-        """Return whether a memory update payload contains actual text."""
+        """判断 `_has_memory_update_text` 对应的条件是否成立。"""
         return bool(self._iter_memory_texts(value))
 
     def _summary_mode(self) -> str:
+        """处理 `_summary_mode` 对应的业务逻辑。"""
         name = self.summary_path.name.lower()
         if "informal" in name:
             return "informal"
@@ -145,7 +149,7 @@ class Summarizer:
         trigger_rounds: int,
         covered_count: int,
     ) -> bool:
-        """Only summarize after another full batch of user messages is uncovered."""
+        """判断 `_should_summarize` 对应的条件是否成立。"""
         trigger_rounds = max(1, int(trigger_rounds))
         total_user_rounds = self._count_user_messages(history)
         if total_user_rounds < trigger_rounds:
@@ -158,6 +162,7 @@ class Summarizer:
         return uncovered_user_rounds >= trigger_rounds
 
     def _count_user_messages(self, history: list[dict[str, Any]]) -> int:
+        """计算 `_count_user_messages` 对应的结果。"""
         return len([item for item in history if item.get("role") == "user"])
 
     def _has_summarizable_history(self, history: list[dict[str, Any]]) -> bool:
@@ -168,7 +173,7 @@ class Summarizer:
         )
 
     def _summarize_history(self, history: list[dict[str, Any]]) -> dict[str, Any]:
-        """Prefer model summary; fall back to local summary on failure."""
+        """处理 `_summarize_history` 对应的业务逻辑。"""
         if not self.deepseek_client.is_configured():
             return self._local_summary(history)
 
@@ -180,7 +185,7 @@ class Summarizer:
         return summary_payload
 
     def _model_summary(self, history: list[dict[str, Any]]) -> dict[str, Any] | None:
-        """Build summary and highlights from the capped conversation."""
+        """处理 `_model_summary` 对应的业务逻辑。"""
         try:
             content = self.deepseek_client.chat(self._summary_messages(history))
             parsed = json.loads(content)
@@ -336,6 +341,7 @@ class Summarizer:
         char_budget: int,
         role_prefix: str,
     ) -> str:
+        """构建 `_build_transcript` 所需的结果。"""
         messages = self._cap_messages(history, char_budget)
         lines: list[str] = []
         for item in messages:
@@ -349,6 +355,7 @@ class Summarizer:
         return clip_text("\n".join(lines), char_budget)
 
     def _cap_messages(self, history: list[dict[str, Any]], char_budget: int) -> list[dict[str, Any]]:
+        """处理 `_cap_messages` 对应的业务逻辑。"""
         kept: list[dict[str, Any]] = []
         used = 0
         per_message_limit = self._budget()["max_history_message_chars"]
@@ -371,6 +378,7 @@ class Summarizer:
         return kept
 
     def _cap_user_messages(self, history: list[dict[str, Any]], char_budget: int) -> list[dict[str, Any]]:
+        """处理 `_cap_user_messages` 对应的业务逻辑。"""
         users = self._user_history(history)
         return self._cap_messages(users, char_budget)
 
@@ -421,6 +429,7 @@ class Summarizer:
         }
 
     def _normalize_relationship_memory_updates(self, value: Any) -> dict[str, Any]:
+        """规范化 `_normalize_relationship_memory_updates` 对应的数据。"""
         if not isinstance(value, dict):
             return self._empty_relationship_memory_update()
 
@@ -474,6 +483,7 @@ class Summarizer:
         }
 
     def _empty_relationship_memory_update(self) -> dict[str, Any]:
+        """处理 `_empty_relationship_memory_update` 对应的业务逻辑。"""
         return {
             "communication_style": {
                 "preferred_response_style": "",
@@ -500,6 +510,7 @@ class Summarizer:
     def _extract_relationship_memory_from_text(
         self, text: str, relationship_memory: dict[str, Any]
     ) -> None:
+        """处理 `_extract_relationship_memory_from_text` 对应的业务逻辑。"""
         stripped = text.strip()
         if not stripped:
             return
@@ -523,6 +534,7 @@ class Summarizer:
             self._append_unique(companionship["evidence"], evidence)
 
     def _append_unique(self, items: list[str], value: str) -> None:
+        """添加 `_append_unique` 对应的内容。"""
         if value and value not in items:
             items.append(value)
 
@@ -539,4 +551,5 @@ class Summarizer:
         return normalized
 
     def _string_value(self, value: Any) -> str:
+        """处理 `_string_value` 对应的业务逻辑。"""
         return clip_text(value, 120) if value not in (None, "") else ""

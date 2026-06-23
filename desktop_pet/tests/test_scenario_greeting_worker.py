@@ -13,16 +13,19 @@ from app.desktop_pet_window import ScenarioGreetingWorker  # noqa: E402
 
 class FakeScenarioClient:
     def __init__(self, reply: str) -> None:
+        """初始化当前对象及其依赖。"""
         self.reply = reply
         self.messages: list[dict[str, str]] = []
 
     def chat(self, messages: list[dict[str, str]]) -> str:
+        """处理 `chat` 对应的业务逻辑。"""
         self.messages = messages
         return self.reply
 
 
 class ScenarioGreetingWorkerTests(unittest.TestCase):
     def test_worker_uses_fallback_when_model_exposes_memory_language(self) -> None:
+        """验证 `test_worker_uses_fallback_when_model_exposes_memory_language` 对应的行为。"""
         client = FakeScenarioClient("根据记忆，你最近在做桌宠记忆系统。")
         worker = ScenarioGreetingWorker(
             client,  # type: ignore[arg-type]
@@ -40,6 +43,7 @@ class ScenarioGreetingWorkerTests(unittest.TestCase):
         self.assertIn("不要说“根据记忆”", prompt)
 
     def test_worker_sanitizes_length(self) -> None:
+        """验证 `test_worker_sanitizes_length` 对应的行为。"""
         client = FakeScenarioClient("桌宠记忆系统这块可以先从 Prompt 分区和回退路径开始整理。")
         worker = ScenarioGreetingWorker(
             client,  # type: ignore[arg-type]

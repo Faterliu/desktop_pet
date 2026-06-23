@@ -9,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class StartMainScriptTests(unittest.TestCase):
     def test_vbs_does_not_repeat_pyside6_dependency_import_check(self) -> None:
+        """验证 `test_vbs_does_not_repeat_pyside6_dependency_import_check` 对应的行为。"""
         script_text = (PROJECT_ROOT / "start_main.vbs").read_text(encoding="utf-8")
 
         self.assertNotIn("import PySide6, requests", script_text)

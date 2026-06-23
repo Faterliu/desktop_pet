@@ -6,9 +6,10 @@ from PySide6.QtCore import QPoint, QRect
 
 
 class BubblePositionService:
-    """Calculate floating bubble positions around the pet window."""
+    """计算桌宠窗口周围的浮动气泡位置。"""
 
     def __init__(self, application: Any) -> None:
+        """初始化当前对象及其依赖。"""
         self.application = application
 
     def speech_bubble_position(
@@ -17,7 +18,7 @@ class BubblePositionService:
         anchor_rect: QRect,
         exclusion_rects: list[QRect] | None = None,
     ) -> QPoint:
-        """Return the normal speech bubble position near the pet."""
+        """处理 `speech_bubble_position` 对应的业务逻辑。"""
         bubble_width, bubble_height = bubble_size
         candidates = [
             QPoint(anchor_rect.x() + anchor_rect.width() - bubble_width + 20, anchor_rect.y() - bubble_height - 10),
@@ -35,7 +36,7 @@ class BubblePositionService:
         anchor_rect: QRect,
         exclusion_rects: list[QRect] | None = None,
     ) -> QPoint:
-        """Return the clickable reply bubble position near the pet."""
+        """处理 `reply_bubble_position` 对应的业务逻辑。"""
         bubble_width, bubble_height = bubble_size
         center_x = anchor_rect.x() + anchor_rect.width() // 2
         center_y = anchor_rect.y() + anchor_rect.height() // 2
@@ -55,7 +56,7 @@ class BubblePositionService:
         candidates: list[QPoint],
         exclusion_rects: list[QRect] | None = None,
     ) -> QPoint:
-        """Pick the first on-screen candidate that avoids the pet and other bubbles."""
+        """查找 `_find_position` 对应的结果。"""
         available = self._available_geometry(anchor_rect)
         if available is None:
             return candidates[0] if candidates else QPoint(0, 0)
@@ -80,6 +81,7 @@ class BubblePositionService:
         return QPoint(max(0, x), max(0, y))
 
     def _available_geometry(self, anchor_rect: QRect) -> QRect | None:
+        """处理 `_available_geometry` 对应的业务逻辑。"""
         screen = self.application.screenAt(anchor_rect.center())
         if screen is None:
             screen = self.application.primaryScreen()

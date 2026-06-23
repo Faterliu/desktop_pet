@@ -150,6 +150,9 @@ Startup diagnostics:
 
 ## Project Conventions
 
+- Read source code, configuration, documentation, and other text files explicitly as UTF-8. On PowerShell, use `Get-Content -Encoding UTF8`; do not rely on the terminal's default encoding, especially for Chinese text.
+- When piping inline Python from PowerShell, do not place raw Chinese literals in the here-string. Use Unicode escapes such as `\u4e2d\u6587`, or use `apply_patch` for text edits, then read and write target files explicitly as UTF-8.
+- Write new or updated code comments and docstrings in Chinese. Keep identifiers and established external-interface terms unchanged where English is required.
 - Prefer small services with pure logic where possible; keep QWidget creation and signal wiring in UI modules.
 - Keep long-running work off the Qt main thread.
 - Background workers should report back through signals; UI updates must happen in the main window/main thread.
@@ -242,4 +245,4 @@ External services:
 - No packaging plan exists yet; source-code execution is the current assumption.
 - `ai/safety_filter.py` exists but is not wired into the main chat flow.
 - Some reserved character-state modules are present but not clearly used by the main flow.
-- Some Chinese text may display incorrectly in PowerShell depending on terminal encoding; verify whether the source file itself is affected before changing text.
+- If Chinese text displays incorrectly, first reread the file explicitly as UTF-8 and verify the source bytes before changing any text.

@@ -17,6 +17,7 @@ from utils.log_sanitizer import mask_api_key, safe_exception, truncate_text  # n
 
 class LoggingPrivacyTests(unittest.TestCase):
     def setUp(self) -> None:
+        """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_logging_privacy" / self._testMethodName
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
@@ -30,6 +31,7 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.original_configured = self.logger_module._CONFIGURED
 
     def tearDown(self) -> None:
+        """清理当前测试产生的环境和数据。"""
         for handler in list(self.root_logger.handlers):
             if handler not in self.original_handlers:
                 self.root_logger.removeHandler(handler)
@@ -42,6 +44,7 @@ class LoggingPrivacyTests(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
 
     def test_configure_logging_uses_rotating_file_handler(self) -> None:
+        """验证 `test_configure_logging_uses_rotating_file_handler` 对应的行为。"""
         logger_module = self.logger_module
         logger_module._CONFIGURED = False
         logger_module.PROJECT_ROOT = self.temp_dir
@@ -62,6 +65,7 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertTrue((self.temp_dir / "data" / "app.log").exists())
 
     def test_log_rotation_creates_backup_file(self) -> None:
+        """验证 `test_log_rotation_creates_backup_file` 对应的行为。"""
         logger_module = self.logger_module
         logger_module._CONFIGURED = False
         logger_module.PROJECT_ROOT = self.temp_dir
@@ -81,6 +85,7 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertTrue((log_dir / "app.log.1").exists())
 
     def test_api_key_is_masked(self) -> None:
+        """验证 `test_api_key_is_masked` 对应的行为。"""
         api_key = "sk-1234567890abcdef"
 
         masked = mask_api_key(api_key)
@@ -91,6 +96,7 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertIn("...", masked)
 
     def test_exception_text_masks_bearer_api_key(self) -> None:
+        """验证 `test_exception_text_masks_bearer_api_key` 对应的行为。"""
         api_key = "sk-1234567890abcdef"
         exc = RuntimeError(f"Authorization failed: Bearer {api_key}")
 
@@ -100,6 +106,7 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertIn("Bearer sk-1...cdef", sanitized)
 
     def test_long_text_is_truncated(self) -> None:
+        """验证 `test_long_text_is_truncated` 对应的行为。"""
         text = "a" * 100
 
         truncated = truncate_text(text, max_chars=20)

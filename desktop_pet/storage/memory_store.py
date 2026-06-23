@@ -59,7 +59,7 @@ DEFAULT_MEMORY = {
 
 
 def normalize_memory_schema(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Fill missing memory v2 fields while preserving unknown existing fields."""
+    """规范化 `normalize_memory_schema` 对应的数据。"""
     if not isinstance(data, dict):
         data = {}
     normalized = copy.deepcopy(data)
@@ -73,6 +73,7 @@ def normalize_memory_schema(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _merge_defaults(target: dict[str, Any], defaults: dict[str, Any]) -> None:
+    """处理 `_merge_defaults` 对应的业务逻辑。"""
     for key, value in defaults.items():
         if key not in target:
             target[key] = copy.deepcopy(value)
@@ -88,14 +89,17 @@ def _merge_defaults(target: dict[str, Any], defaults: dict[str, Any]) -> None:
 
 class MemoryStore:
     def __init__(self, path: str | Path, vector_store: Any | None = None) -> None:
+        """初始化当前对象及其依赖。"""
         self.path = Path(path)
         self.vector_store = vector_store
 
     def load(self) -> dict[str, Any]:
+        """处理 `load` 对应的业务逻辑。"""
         with MEMORY_IO_LOCK:
             return normalize_memory_schema(load_json(self.path, DEFAULT_MEMORY))
 
     def save(self, data: dict[str, Any]) -> None:
+        """处理 `save` 对应的业务逻辑。"""
         with MEMORY_IO_LOCK:
             data = normalize_memory_schema(data)
             self._touch_memory(data)
@@ -103,6 +107,7 @@ class MemoryStore:
         self._sync_vectors(data)
 
     def merge(self, updates: dict[str, Any]) -> dict[str, Any]:
+        """处理 `merge` 对应的业务逻辑。"""
         with MEMORY_IO_LOCK:
             current = normalize_memory_schema(load_json(self.path, DEFAULT_MEMORY))
             self._merge_lists(current, updates)
@@ -114,6 +119,7 @@ class MemoryStore:
         return current
 
     def _touch_memory(self, data: dict[str, Any]) -> None:
+        """处理 `_touch_memory` 对应的业务逻辑。"""
         timestamp = now_iso()
         data["last_updated"] = timestamp
         data.setdefault("memory_meta", {})
@@ -123,6 +129,7 @@ class MemoryStore:
     def _touch_relationship_sections(
         self, current: dict[str, Any], updates: dict[str, Any]
     ) -> None:
+        """处理 `_touch_relationship_sections` 对应的业务逻辑。"""
         relationship_updates = updates.get("relationship_memory", {})
         if not isinstance(relationship_updates, dict):
             return
@@ -140,6 +147,7 @@ class MemoryStore:
                 relationship.setdefault(section, {})[time_key] = timestamp
 
     def _has_update_content(self, value: Any) -> bool:
+        """判断 `_has_update_content` 对应的条件是否成立。"""
         if isinstance(value, dict):
             return any(
                 key not in {"last_updated", "last_observed_at"}
@@ -151,6 +159,7 @@ class MemoryStore:
         return value not in (None, "")
 
     def _sync_vectors(self, data: dict[str, Any]) -> None:
+        """同步并刷新 `_sync_vectors` 对应的状态。"""
         if self.vector_store is None:
             return
         try:
@@ -159,6 +168,7 @@ class MemoryStore:
             return
 
     def _merge_lists(self, current: dict[str, Any], updates: dict[str, Any]) -> None:
+        """处理 `_merge_lists` 对应的业务逻辑。"""
         for key, value in updates.items():
             if isinstance(value, dict):
                 node = current.setdefault(key, {})

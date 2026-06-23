@@ -13,6 +13,7 @@ from storage.json_store import load_json  # noqa: E402
 
 class ScenarioGreetingConfigTests(unittest.TestCase):
     def test_example_config_contains_conservative_scenario_greeting_defaults(self) -> None:
+        """验证 `test_example_config_contains_conservative_scenario_greeting_defaults` 对应的行为。"""
         config = load_json(DESKTOP_PET_ROOT / "config" / "app_config.example.json", {})
         behavior = config["behavior"]
 
@@ -24,6 +25,7 @@ class ScenarioGreetingConfigTests(unittest.TestCase):
         self.assertEqual(behavior["scenario_greeting_low_interrupt_after_ignored"], 2)
 
     def test_local_lines_contains_scenario_and_low_interrupt_fallbacks(self) -> None:
+        """验证 `test_local_lines_contains_scenario_and_low_interrupt_fallbacks` 对应的行为。"""
         local_lines = load_json(DESKTOP_PET_ROOT / "config" / "local_lines.json", {})
 
         self.assertTrue(local_lines["scenario_greeting_templates"])

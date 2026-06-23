@@ -9,3 +9,13 @@ class EmotionState(str, Enum):
     THINKING = "thinking"
     SLEEPY = "sleepy"
     SAD = "sad"
+
+
+def parse_emotion_state(value: object, default: EmotionState = EmotionState.CALM) -> EmotionState:
+    """解析 `parse_emotion_state` 对应的数据。"""
+    if isinstance(value, EmotionState):
+        return value
+    try:
+        return EmotionState(str(value).strip().lower())
+    except (TypeError, ValueError):
+        return default

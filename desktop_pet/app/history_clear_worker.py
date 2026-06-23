@@ -22,6 +22,7 @@ class ChatHistoryClearWorker(QObject):
         chat_store: Any,
         force_summarize: bool,
     ) -> None:
+        """初始化当前对象及其依赖。"""
         super().__init__()
         self.mode = mode
         self.summarizer = summarizer
@@ -29,7 +30,7 @@ class ChatHistoryClearWorker(QObject):
         self.force_summarize = force_summarize
 
     def run(self) -> None:
-        """Run summary and clear operations away from the UI thread."""
+        """处理 `run` 对应的业务逻辑。"""
         try:
             if self.force_summarize:
                 self.summarizer.maybe_summarize(0, force=True)

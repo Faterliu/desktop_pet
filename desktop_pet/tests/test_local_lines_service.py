@@ -25,17 +25,21 @@ except ModuleNotFoundError:
 
     class _FakeSignal:
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
+            """初始化当前对象及其依赖。"""
             self._callbacks = []
 
         def connect(self, callback) -> None:  # type: ignore[no-untyped-def]
+            """处理 `connect` 对应的业务逻辑。"""
             self._callbacks.append(callback)
 
         def emit(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            """处理 `emit` 对应的业务逻辑。"""
             for callback in list(self._callbacks):
                 callback(*args, **kwargs)
 
     class _FakeQObject:
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
+            """初始化当前对象及其依赖。"""
             pass
 
     qt_core.QObject = _FakeQObject
@@ -52,20 +56,24 @@ from app.desktop_pet_window import LocalLinesRefreshWorker  # noqa: E402
 
 class FakeDeepSeekClient:
     def __init__(self, configured: bool = True, reply: str = "新开场一\n新开场二") -> None:
+        """初始化当前对象及其依赖。"""
         self.configured = configured
         self.reply = reply
         self.calls = 0
 
     def is_configured(self) -> bool:
+        """判断 `is_configured` 对应的条件是否成立。"""
         return self.configured
 
     def chat(self, messages):  # type: ignore[no-untyped-def]
+        """处理 `chat` 对应的业务逻辑。"""
         self.calls += 1
         return self.reply
 
 
 class LocalLinesServiceTests(unittest.TestCase):
     def setUp(self) -> None:
+        """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_local_lines_service" / self._testMethodName
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
@@ -74,10 +82,12 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.meta_path = self.temp_dir / "local_lines_generated_meta.json"
 
     def tearDown(self) -> None:
+        """清理当前测试产生的环境和数据。"""
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
 
     def test_pick_line_supports_existing_array_shape(self) -> None:
+        """验证 `test_pick_line_supports_existing_array_shape` 对应的行为。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["一句话", "另一句话"]})
         service = LocalLinesService(self.lines_path)
 
@@ -85,12 +95,14 @@ class LocalLinesServiceTests(unittest.TestCase):
             self.assertEqual(service.pick_line("knowledge_speak_intro"), "一句话")
 
     def test_pick_line_returns_fallback_for_missing_group(self) -> None:
+        """验证 `test_pick_line_returns_fallback_for_missing_group` 对应的行为。"""
         save_json(self.lines_path, {})
         service = LocalLinesService(self.lines_path)
 
         self.assertEqual(service.pick_line("missing", fallback="兜底"), "兜底")
 
     def test_replace_generated_lines_filters_bad_lines_and_records_metadata(self) -> None:
+        """验证 `test_replace_generated_lines_filters_bad_lines_and_records_metadata` 对应的行为。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工话术"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
 
@@ -116,6 +128,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertEqual(metadata["groups"]["knowledge_speak_intro"]["count"], 1)
 
     def test_replace_generated_lines_preserves_first_start_shape(self) -> None:
+        """验证 `test_replace_generated_lines_preserves_first_start_shape` 对应的行为。"""
         save_json(self.lines_path, {"first_start": {"enable": True, "data": ["人工"]}})
         service = LocalLinesService(self.lines_path, self.meta_path)
 
@@ -133,6 +146,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertTrue(payload["first_start"]["enable"])
 
     def test_append_manual_line_dedupes_without_rewriting_existing_line(self) -> None:
+        """验证 `test_append_manual_line_dedupes_without_rewriting_existing_line` 对应的行为。"""
         save_json(self.lines_path, {"idle": ["已有"]})
         service = LocalLinesService(self.lines_path)
 
@@ -142,6 +156,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertEqual(load_json(self.lines_path, {})["idle"], ["已有"])
 
     def test_consume_first_start_line_disables_flag(self) -> None:
+        """验证 `test_consume_first_start_line_disables_flag` 对应的行为。"""
         save_json(self.lines_path, {"first_start": {"enable": True, "data": ["你好"]}})
         service = LocalLinesService(self.lines_path)
 
@@ -149,6 +164,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertFalse(load_json(self.lines_path, {})["first_start"]["enable"])
 
     def test_should_refresh_when_seven_day_interval_elapsed(self) -> None:
+        """验证 `test_should_refresh_when_seven_day_interval_elapsed` 对应的行为。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工"]})
         save_json(
             self.meta_path,
@@ -173,6 +189,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         )
 
     def test_should_refresh_when_month_changes_even_before_interval(self) -> None:
+        """验证 `test_should_refresh_when_month_changes_even_before_interval` 对应的行为。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工"]})
         save_json(
             self.meta_path,
@@ -197,6 +214,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         )
 
     def test_should_not_refresh_before_interval_in_same_month(self) -> None:
+        """验证 `test_should_not_refresh_before_interval_in_same_month` 对应的行为。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工"]})
         last = datetime.now() - timedelta(days=2)
         save_json(
@@ -221,6 +239,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         )
 
     def test_refresh_worker_updates_due_knowledge_intro_lines(self) -> None:
+        """验证 `test_refresh_worker_updates_due_knowledge_intro_lines` 对应的行为。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
         client = FakeDeepSeekClient(reply="1. 新开场一\n- 新开场二\n根据记忆我想到一句")
@@ -248,6 +267,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertEqual(load_json(self.lines_path, {})["knowledge_speak_intro"], ["人工", "新开场一", "新开场二"])
 
     def test_refresh_worker_skips_when_no_group_is_enabled(self) -> None:
+        """验证 `test_refresh_worker_skips_when_no_group_is_enabled` 对应的行为。"""
         save_json(self.lines_path, {"idle": ["人工"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
         client = FakeDeepSeekClient()
@@ -265,6 +285,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertEqual(results[0]["reason"], "no_enabled_groups")
 
     def test_refresh_worker_updates_multiple_enabled_groups(self) -> None:
+        """验证 `test_refresh_worker_updates_multiple_enabled_groups` 对应的行为。"""
         save_json(self.lines_path, {"idle": ["旧空闲"], "reply": ["旧回应"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
         client = FakeDeepSeekClient(reply="新话术一\n新话术二")
@@ -301,6 +322,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertEqual(payload["reply"], ["旧回应", "新话术一", "新话术二"])
 
     def test_refresh_worker_skips_when_api_is_not_configured(self) -> None:
+        """验证 `test_refresh_worker_skips_when_api_is_not_configured` 对应的行为。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
         client = FakeDeepSeekClient(configured=False)

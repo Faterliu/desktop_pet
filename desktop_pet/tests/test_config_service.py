@@ -13,6 +13,7 @@ from app.config_service import ConfigService  # noqa: E402
 
 class ConfigServiceTests(unittest.TestCase):
     def test_get_returns_nested_values_and_defaults(self) -> None:
+        """验证 `test_get_returns_nested_values_and_defaults` 对应的行为。"""
         service = ConfigService(
             {
                 "api": {"enabled": True, "timeout": "12"},
@@ -26,6 +27,7 @@ class ConfigServiceTests(unittest.TestCase):
         self.assertEqual(service.get("api.timeout.seconds", 5), 5)
 
     def test_typed_getters_are_safe_for_missing_and_invalid_values(self) -> None:
+        """验证 `test_typed_getters_are_safe_for_missing_and_invalid_values` 对应的行为。"""
         service = ConfigService(
             {
                 "feature": {"enabled": 1},
@@ -43,6 +45,7 @@ class ConfigServiceTests(unittest.TestCase):
         self.assertEqual(service.get_str("text.none", "fallback"), "fallback")
 
     def test_update_points_to_new_config(self) -> None:
+        """验证 `test_update_points_to_new_config` 对应的行为。"""
         service = ConfigService({"ui": {"always_on_top": True}})
 
         service.update({"ui": {"always_on_top": False}})
@@ -50,6 +53,7 @@ class ConfigServiceTests(unittest.TestCase):
         self.assertFalse(service.get_bool("ui.always_on_top", True))
 
     def test_empty_config_keeps_original_mapping_reference(self) -> None:
+        """验证 `test_empty_config_keeps_original_mapping_reference` 对应的行为。"""
         config: dict[str, object] = {}
         service = ConfigService(config)
 
