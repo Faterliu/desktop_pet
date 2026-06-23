@@ -31,7 +31,7 @@ class ChatInput(QWidget):
         layout.setSpacing(6)
 
         self.input = QLineEdit(self)
-        self.input.setPlaceholderText("想和小胡说点什么？")
+        self.input.setPlaceholderText("想和小桃说点什么？")
         self.input.returnPressed.connect(self._submit)
         layout.addWidget(self.input)
 

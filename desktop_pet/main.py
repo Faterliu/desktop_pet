@@ -34,7 +34,7 @@ def main() -> int:
 
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
-        app.setApplicationName("小胡 Desktop Pet")
+        app.setApplicationName("小桃 Desktop Pet")
         _write_boot_log(project_root, "[boot] QApplication created")
 
         window = DesktopPetWindow(project_root)

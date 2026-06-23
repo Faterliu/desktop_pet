@@ -471,7 +471,7 @@ class LocalLinesRefreshWorker(QObject):
             {
                 "role": "system",
                 "content": (
-                    "你是 Windows 桌面 AI 宠物“小胡”的本地话术编辑器。"
+                    "你是 Windows 桌面 AI 宠物“小桃”的本地话术编辑器。"
                     "只输出中文短句列表，不要解释，不要编号，不要 Markdown。"
                 ),
             },
@@ -962,14 +962,14 @@ class DesktopPetWindow(QWidget):
         self._save_app_config()
         if enabled and self.bubble.source == "proactive":
             self.bubble.hide()
-        self._display_message("小胡接下来不会说话了。" if enabled else "来和小胡聊天吧。", 3000, "system")
+        self._display_message("小桃接下来不会说话了。" if enabled else "来和小桃聊天吧。", 3000, "system")
 
     def _toggle_auto_move(self, enabled: bool) -> None:
         """切换自主移动功能并刷新定时器。"""
         self.app_config.setdefault("ui", {})["enable_free_move"] = enabled
         self._save_app_config()
         self._refresh_auto_move_timer()
-        self._display_message("小胡跑起来了！" if enabled else "我不会乱动啦。", 3000, "system")
+        self._display_message("小桃跑起来了！" if enabled else "我不会乱动啦。", 3000, "system")
 
     def _toggle_api_chat(self, enabled: bool) -> None:
         """切换用户聊天时是否调用外部 API。"""

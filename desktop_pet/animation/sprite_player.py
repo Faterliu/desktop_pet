@@ -235,7 +235,7 @@ class SpritePlayer(QObject):
             for action_name in self.config.get("actions", {"idle": {}}).keys()
         }
 
-    def _placeholder_frame(self, text: str = "小胡") -> QPixmap:
+    def _placeholder_frame(self, text: str = "小桃") -> QPixmap:
         """生成一张带文字的占位图，避免素材缺失时界面空白。"""
         width = int(self.config.get("frame_width", 192))
         height = int(self.config.get("frame_height", 208))

@@ -9,7 +9,7 @@ from storage.memory_store import DEFAULT_MEMORY, normalize_memory_schema
 
 
 DEFAULT_CHARACTER = {
-    "name": "小胡",
+    "name": "小桃",
     "role": "可爱温柔的桌面小伙伴",
     "personality": ["可爱", "温柔", "安静陪伴"],
     "speaking_style": {
@@ -105,7 +105,7 @@ class PromptBuilder:
             {
                 "role": "system",
                 "content": (
-                    f"你是{character.get('name', '小胡')}，角色定位是"
+                    f"你是{character.get('name', '小桃')}，角色定位是"
                     f"{character.get('role', '桌面陪伴小伙伴')}。\n"
                     f"你的性格关键词：{personality}。\n"
                     f"日常聊天风格：{speaking.get('daily_chat', '')}\n"
