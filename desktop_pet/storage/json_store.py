@@ -80,9 +80,24 @@ def ensure_json_file(path: str | Path, default: Any) -> Path:
     return target
 
 
+def _restore_from_backup(target: Path, backup: Path) -> Any:
+    """从可用备份恢复主 JSON 文件，并返回恢复后的内容。"""
+    recovered = _read_json_file(backup)
+    save_json(target, recovered)
+    logger.warning("Restored JSON file %s from backup %s", target, backup)
+    return recovered
+
+
 def load_json(path: str | Path, default: Any = None) -> Any:
     """读取 `load_json` 所需的数据。"""
     target = _normalize_path(path)
+    backup = _backup_path(target)
+    if not target.exists() and backup.exists():
+        try:
+            return _restore_from_backup(target, backup)
+        except json.JSONDecodeError as backup_exc:
+            logger.error("JSON backup parse failed for %s: %s", backup, backup_exc)
+
     ensure_json_file(target, default if default is not None else {})
 
     try:
@@ -93,10 +108,9 @@ def load_json(path: str | Path, default: Any = None) -> Any:
         if corrupt is not None:
             logger.warning("Moved corrupt JSON file from %s to %s", target, corrupt)
 
-        backup = _backup_path(target)
         if backup.exists():
             try:
-                return _read_json_file(backup)
+                return _restore_from_backup(target, backup)
             except json.JSONDecodeError as backup_exc:
                 logger.error("JSON backup parse failed for %s: %s", backup, backup_exc)
 

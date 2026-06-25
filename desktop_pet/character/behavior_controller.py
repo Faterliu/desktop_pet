@@ -274,7 +274,7 @@ class BehaviorController(QObject):
         self._emit_local_proactive_line(line, "regular_greeting")
 
     def _try_scenario_greeting(self, behavior: dict[str, Any], now: Any) -> bool:
-        """处理 `_try_scenario_greeting` 对应的业务逻辑。"""
+        """处理 场景化问候 对应的业务逻辑。"""
         if not behavior.get("enable_scenario_greeting", False):
             return False
 
@@ -389,7 +389,7 @@ class BehaviorController(QObject):
         return now - self.last_scenario_greeting_at < timedelta(minutes=cooldown)
 
     def _should_use_low_interrupt_greeting(self, behavior: dict[str, Any]) -> bool:
-        """判断 `_should_use_low_interrupt_greeting` 对应的条件是否成立。"""
+        """判断 `使用低打扰问候` 对应的条件是否成立。"""
         try:
             threshold = int(behavior.get("scenario_greeting_low_interrupt_after_ignored", 2))
         except (TypeError, ValueError):

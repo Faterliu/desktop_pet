@@ -68,6 +68,25 @@ class FakeChatStore:
         self.cleaned_at = timestamp
 
 
+class FakeAtomicChatStore(FakeChatStore):
+    def __init__(self) -> None:
+        """初始化当前对象及其依赖。"""
+        super().__init__()
+        self.atomic_clear_calls = 0
+        self.update_calls = 0
+
+    def clear_history_with_timestamp(self, timestamp: str) -> None:
+        """清空聊天记录并记录清理时间。"""
+        self.atomic_clear_calls += 1
+        self.cleared = True
+        self.cleaned_at = timestamp
+
+    def update_last_cleaned_at(self, timestamp: str) -> None:
+        """记录旧式更新时间接口是否被调用。"""
+        self.update_calls += 1
+        super().update_last_cleaned_at(timestamp)
+
+
 class HistoryClearWorkerTests(unittest.TestCase):
     def test_worker_runs_summary_and_clear_without_ui_dependency(self) -> None:
         """验证 `test_worker_runs_summary_and_clear_without_ui_dependency` 对应的行为。"""
@@ -83,6 +102,24 @@ class HistoryClearWorkerTests(unittest.TestCase):
         worker.run()
 
         self.assertEqual(summarizer.calls, [(0, True)])
+        self.assertTrue(store.cleared)
+        self.assertTrue(store.cleaned_at)
+
+    def test_worker_prefers_atomic_clear_when_available(self) -> None:
+        """存储支持合并清理时，worker 不再分两次写入。"""
+        summarizer = FakeSummarizer()
+        store = FakeAtomicChatStore()
+        worker = ChatHistoryClearWorker(
+            mode="informal",
+            summarizer=summarizer,
+            chat_store=store,
+            force_summarize=False,
+        )
+
+        worker.run()
+
+        self.assertEqual(store.atomic_clear_calls, 1)
+        self.assertEqual(store.update_calls, 0)
         self.assertTrue(store.cleared)
         self.assertTrue(store.cleaned_at)
 

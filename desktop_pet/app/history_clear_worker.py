@@ -34,8 +34,13 @@ class ChatHistoryClearWorker(QObject):
         try:
             if self.force_summarize:
                 self.summarizer.maybe_summarize(0, force=True)
-            self.chat_store.clear_history()
-            self.chat_store.update_last_cleaned_at(now_iso())
+            timestamp = now_iso()
+            clear_with_timestamp = getattr(self.chat_store, "clear_history_with_timestamp", None)
+            if callable(clear_with_timestamp):
+                clear_with_timestamp(timestamp)
+            else:
+                self.chat_store.clear_history()
+                self.chat_store.update_last_cleaned_at(timestamp)
             self.finished.emit(self.mode)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to clear %s chat history", self.mode)

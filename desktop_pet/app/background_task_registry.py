@@ -51,13 +51,17 @@ class BackgroundTaskRegistry:
         return True
 
     def remove(self, name: str, delete_later: bool = True) -> bool:
-        """处理 `remove` 对应的业务逻辑。"""
-        task = self._tasks.pop(name, None)
+        """移除已结束的后台任务；仍在运行时只请求退出并保留注册信息。"""
+        task = self._tasks.get(name)
         if task is None:
             return False
 
         if self._is_running(task.thread):
-            self._wait_thread(task)
+            self._quit_thread(task.thread)
+            if not self._wait_thread(task):
+                return False
+
+        self._tasks.pop(name, None)
         if delete_later:
             self._delete_later(task.worker)
             self._delete_later(task.thread)
@@ -103,8 +107,8 @@ class BackgroundTaskRegistry:
                 self.unregister(task.name)
 
     def stop_all(self, wait_timeout_ms: int | None = None) -> list[str]:
-        """结束 `stop_all` 对应的流程并清理资源。"""
-        stuck: list[str] = []
+        """请求所有后台任务退出，清理已停止任务并返回仍在运行的任务名。"""
+        still_running: list[str] = []
         for task in list(self._tasks.values()):
             if self._is_running(task.thread):
                 self._quit_thread(task.thread)
@@ -112,11 +116,10 @@ class BackgroundTaskRegistry:
                     task,
                     None if wait_timeout_ms is None else self._timeout(wait_timeout_ms),
                 ):
-                    stuck.append(task.name)
-                    self._terminate_thread(task.thread)
-                    self._wait_thread(task, 100)
+                    still_running.append(task.name)
+                    continue
             self.remove(task.name)
-        return stuck
+        return still_running
 
     def _timeout(self, wait_timeout_ms: int | None) -> int:
         """处理 `_timeout` 对应的业务逻辑。"""
@@ -146,15 +149,6 @@ class BackgroundTaskRegistry:
                 quit_method()
             except RuntimeError as exc:
                 logger.warning("Failed to quit background thread: %s", exc)
-
-    def _terminate_thread(self, thread: Any) -> None:
-        """处理 `_terminate_thread` 对应的业务逻辑。"""
-        terminate = getattr(thread, "terminate", None)
-        if callable(terminate):
-            try:
-                terminate()
-            except RuntimeError as exc:
-                logger.warning("Failed to terminate background thread: %s", exc)
 
     def _delete_later(self, obj: Any) -> None:
         """移除 `_delete_later` 对应的内容。"""

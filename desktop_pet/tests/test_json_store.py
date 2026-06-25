@@ -63,15 +63,26 @@ class JsonStoreTests(unittest.TestCase):
         self.assertEqual(load_json(self.path.with_suffix(".json.bak"), {}), {"version": 1})
 
     def test_load_json_recovers_from_backup_when_primary_is_corrupt(self) -> None:
-        """验证 `test_load_json_recovers_from_backup_when_primary_is_corrupt` 对应的行为。"""
+        """主文件损坏时从备份恢复，并把恢复内容写回主文件。"""
         save_json(self.path.with_suffix(".json.bak"), {"safe": True})
         self.path.write_text('{"broken": ', encoding="utf-8")
 
         loaded = load_json(self.path, {"safe": False})
 
         self.assertEqual(loaded, {"safe": True})
-        self.assertFalse(self.path.exists())
+        self.assertTrue(self.path.exists())
+        self.assertEqual(load_json(self.path, {"safe": False}), {"safe": True})
         self.assertEqual(len(list(self.temp_dir.glob("store.json.corrupt.*"))), 1)
+
+    def test_load_json_restores_missing_primary_from_backup(self) -> None:
+        """主文件缺失但备份存在时，优先恢复备份而不是写入默认值。"""
+        save_json(self.path.with_suffix(".json.bak"), {"safe": True})
+
+        loaded = load_json(self.path, {"safe": False})
+
+        self.assertEqual(loaded, {"safe": True})
+        self.assertTrue(self.path.exists())
+        self.assertEqual(load_json(self.path, {}), {"safe": True})
 
     def test_load_json_returns_deepcopy_default_when_primary_and_backup_are_corrupt(self) -> None:
         """验证 `test_load_json_returns_deepcopy_default_when_primary_and_backup_are_corrupt` 对应的行为。"""

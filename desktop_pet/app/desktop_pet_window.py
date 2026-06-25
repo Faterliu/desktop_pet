@@ -794,9 +794,11 @@ class DesktopPetWindow(QWidget):
             return
         if self._background_workers_running():
             self._close_after_workers_finished = True
-            stuck_tasks = self._stop_background_workers()
-            if stuck_tasks:
-                logger.warning("Forcing close with unfinished background tasks: %s", stuck_tasks)
+            running_tasks = self._stop_background_workers()
+            if running_tasks:
+                logger.warning("Waiting for unfinished background tasks before close: %s", running_tasks)
+                event.ignore()
+                return
             self._close_after_workers_finished = False
         self._destroy_formal_answer_panels()
         self._save_window_position()
@@ -885,7 +887,7 @@ class DesktopPetWindow(QWidget):
     def _test_idle_prompt_once(self) -> None:
         """手动触发一次空闲问候逻辑，测试内容比例分流（普通/知识）。"""
         if self._chat_in_progress():
-            self._display_message("我还在忙上一条请求呢，等我一下下。", 3200, "system")
+            self._display_message("麻烦等我一下下。", 3200, "system")
             return
         result = self.behavior_controller.trigger_test_idle_prompt()
         if result.startswith("未触发"):
@@ -915,7 +917,7 @@ class DesktopPetWindow(QWidget):
     def _test_api_proactive_speak_once(self) -> None:
         """手动触发一次 API 主动说话，便于测试联网和主动气泡。"""
         if self._chat_in_progress():
-            self._display_message("我还在忙上一条请求呢，等我一下下。", 3200, "system")
+            self._display_message("我还在忙上一个问题呢，等我一下下。", 3200, "system")
             return
         if not self.deepseek_client.is_configured():
             self._display_message(
@@ -1157,6 +1159,9 @@ class DesktopPetWindow(QWidget):
         if self._chat_in_progress():
             self._display_message("我还在想上一条呢，等我一下下。", 3200, "system")
             return
+        if self._clear_history_in_progress():
+            self._display_message("先等一下，我正在整理笔记。", 3200, "system")
+            return
         self.behavior_controller.notify_user_interaction()
         self.chat_input.set_always_on_top(self.config_service.get_bool("ui.always_on_top", True))
         self.chat_input.show_near(self.geometry())
@@ -1168,6 +1173,9 @@ class DesktopPetWindow(QWidget):
     def _handle_user_message(self, message: str) -> None:
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
         self._waiting_timer.stop()
+        if self._clear_history_in_progress():
+            self._display_message("先等一下，我正在整理笔记。", 3200, "system")
+            return
         self.behavior_controller.notify_user_interaction()
         chat_context = self.chat_flow_controller.begin_user_message(message)
         self._sync_chat_flow_state()
@@ -2155,7 +2163,7 @@ class DesktopPetWindow(QWidget):
         self.background_tasks.request_quit_all(timeout_ms=1000)
 
     def _stop_background_workers(self) -> list[str]:
-        """结束 `_stop_background_workers` 对应的流程并清理资源。"""
+        """请求后台任务退出，返回仍需等待自然结束的任务名。"""
         return self.background_tasks.stop_all()
 
     def _maybe_close_after_workers_finished(self) -> None:

@@ -101,19 +101,38 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         self.assertTrue(worker.deleted)
         self.assertFalse(registry.is_registered("memory_maintenance"))
 
-    def test_stop_all_reports_and_terminates_stuck_threads(self) -> None:
-        """验证 `test_stop_all_reports_and_terminates_stuck_threads` 对应的行为。"""
+    def test_stop_all_keeps_stuck_threads_registered_without_terminating(self) -> None:
+        """卡住的线程只报告并保留，普通退出路径不强制终止。"""
         registry = BackgroundTaskRegistry(default_wait_timeout_ms=100)
         thread = FakeThread(running=True, wait_result=False)
+        worker = FakeQtObject()
 
-        registry.register("mem0_init", thread, FakeQtObject(), wait_timeout_ms=200)
+        registry.register("mem0_init", thread, worker, wait_timeout_ms=200)
         stuck = registry.stop_all()
 
         self.assertEqual(stuck, ["mem0_init"])
         self.assertEqual(thread.quit_calls, 1)
-        self.assertEqual(thread.wait_calls, [200, 100])
-        self.assertEqual(thread.terminate_calls, 1)
-        self.assertFalse(registry.is_registered("mem0_init"))
+        self.assertEqual(thread.wait_calls, [200])
+        self.assertEqual(thread.terminate_calls, 0)
+        self.assertTrue(thread.running)
+        self.assertFalse(thread.deleted)
+        self.assertFalse(worker.deleted)
+        self.assertTrue(registry.is_registered("mem0_init"))
+
+    def test_remove_keeps_running_task_when_wait_times_out(self) -> None:
+        """直接移除运行中的任务失败时，不删除仍在线程中的对象。"""
+        registry = BackgroundTaskRegistry(default_wait_timeout_ms=100)
+        thread = FakeThread(running=True, wait_result=False)
+        worker = FakeQtObject()
+
+        registry.register("chat", thread, worker)
+
+        self.assertFalse(registry.remove("chat"))
+        self.assertTrue(registry.is_registered("chat"))
+        self.assertEqual(thread.quit_calls, 1)
+        self.assertEqual(thread.terminate_calls, 0)
+        self.assertFalse(thread.deleted)
+        self.assertFalse(worker.deleted)
 
     def test_unregister_alias_removes_task(self) -> None:
         """验证 `test_unregister_alias_removes_task` 对应的行为。"""

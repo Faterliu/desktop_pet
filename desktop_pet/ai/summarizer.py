@@ -10,6 +10,7 @@ from ai.deepseek_client import DeepSeekClient, DeepSeekError
 from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.memory_store import MemoryStore
+from storage.path_lock import lock_for_path
 from utils.log_sanitizer import safe_exception
 from utils.logger import get_logger
 from utils.time_utils import now_iso
@@ -48,33 +49,36 @@ class Summarizer:
         self.fallback_config_path = (
             Path(fallback_config_path) if fallback_config_path else self.config_path
         )
+        self._summary_lock = lock_for_path(self.summary_path)
 
     def load_summary(self) -> dict[str, Any]:
         """读取当前对话摘要数据。"""
-        return load_json(self.summary_path, DEFAULT_SUMMARY)
+        with self._summary_lock:
+            return load_json(self.summary_path, DEFAULT_SUMMARY)
 
     def maybe_summarize(self, trigger_rounds: int, force: bool = False) -> None:
         """在达到轮数阈值或强制触发时尝试生成并保存摘要。"""
-        history = self.chat_store.all_messages()
-        if not self._has_summarizable_history(history):
-            logger.info("Skip summary because chat history has no user content")
-            return
+        with self._summary_lock:
+            history = self.chat_store.all_messages()
+            if not self._has_summarizable_history(history):
+                logger.info("Skip summary because chat history has no user content")
+                return
 
-        current_summary = self.load_summary()
-        covered_count = int(current_summary.get("covered_message_count", 0))
-        if not force and not self._should_summarize(history, trigger_rounds, covered_count):
-            return
+            current_summary = load_json(self.summary_path, DEFAULT_SUMMARY)
+            covered_count = int(current_summary.get("covered_message_count", 0))
+            if not force and not self._should_summarize(history, trigger_rounds, covered_count):
+                return
 
-        try:
-            payload = self._summarize_history(history)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Summary generation failed: %s", safe_exception(exc))
-            return
+            try:
+                payload = self._summarize_history(history)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Summary generation failed: %s", safe_exception(exc))
+                return
 
-        extracted_memory = payload.pop("memory_updates", {})
-        payload["covered_message_count"] = len(history)
-        payload["last_updated"] = now_iso()
-        save_json(self.summary_path, payload)
+            extracted_memory = payload.pop("memory_updates", {})
+            payload["covered_message_count"] = len(history)
+            payload["last_updated"] = now_iso()
+            save_json(self.summary_path, payload)
         if self._has_memory_update_text(extracted_memory):
             self.memory_store.merge(extracted_memory)
             self._write_memory_updates_to_mem0(extracted_memory)
