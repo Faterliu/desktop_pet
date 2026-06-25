@@ -16,16 +16,19 @@ from storage.memory_vector_store import MemoryVectorStore  # noqa: E402
 
 
 class FakeEmbeddingResponse:
+    # 初始化当前对象及其依赖。
     def __init__(self, count: int) -> None:
         """初始化当前对象及其依赖。"""
         self.count = count
 
+    # 模拟 HTTP 响应的 raise_for_status 行为，向测试返回固定结果。
     def raise_for_status(self) -> None:
-        """处理 `raise_for_status` 对应的业务逻辑。"""
+        """模拟 HTTP 响应的 raise_for_status 行为，向测试返回固定结果。"""
         return
 
+    # 模拟 HTTP 响应的 json 行为，向测试返回固定结果。
     def json(self) -> dict[str, object]:
-        """处理 `json` 对应的业务逻辑。"""
+        """模拟 HTTP 响应的 json 行为，向测试返回固定结果。"""
         return {
             "data": [
                 {"index": index, "embedding": [1.0, float(index)]}
@@ -35,23 +38,27 @@ class FakeEmbeddingResponse:
 
 
 class FakeRequests:
+    # 模拟 HTTP 响应的 post 行为，向测试返回固定结果。
     @staticmethod
     def post(*args, **kwargs):  # type: ignore[no-untyped-def]
-        """处理 `post` 对应的业务逻辑。"""
+        """模拟 HTTP 响应的 post 行为，向测试返回固定结果。"""
         return FakeEmbeddingResponse(len(kwargs["json"]["input"]))
 
 
 class PreciseEmbeddingResponse:
+    # 初始化当前对象及其依赖。
     def __init__(self, count: int) -> None:
         """初始化当前对象及其依赖。"""
         self.count = count
 
+    # 为测试准备raiseforstatus数据或断言辅助结果。
     def raise_for_status(self) -> None:
-        """处理 `raise_for_status` 对应的业务逻辑。"""
+        """为测试准备raiseforstatus数据或断言辅助结果。"""
         return
 
+    # 为测试准备JSON数据或断言辅助结果。
     def json(self) -> dict[str, object]:
-        """处理 `json` 对应的业务逻辑。"""
+        """为测试准备JSON数据或断言辅助结果。"""
         return {
             "data": [
                 {
@@ -67,13 +74,15 @@ class PreciseEmbeddingResponse:
 
 
 class PreciseFakeRequests:
+    # 模拟 HTTP 响应的 post 行为，向测试返回固定结果。
     @staticmethod
     def post(*args, **kwargs):  # type: ignore[no-untyped-def]
-        """处理 `post` 对应的业务逻辑。"""
+        """模拟 HTTP 响应的 post 行为，向测试返回固定结果。"""
         return PreciseEmbeddingResponse(len(kwargs["json"]["input"]))
 
 
 class MemoryVectorStoreTests(unittest.TestCase):
+    # 准备当前测试所需的环境和数据。
     def setUp(self) -> None:
         """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / self._testMethodName
@@ -81,8 +90,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.memory_path = self.temp_dir / "memory.json"
         self.vector_path = self.temp_dir / "memory_vectors.json"
 
+    # 验证记忆 存储 merge generates vectors for written 记忆场景下的预期结果。
     def test_memory_store_merge_generates_vectors_for_written_memory(self) -> None:
-        """验证 `test_memory_store_merge_generates_vectors_for_written_memory` 对应的行为。"""
+        """验证记忆 存储 merge generates vectors for written 记忆场景下的预期结果。"""
         app_config = {
             "memory": {
                 "enable_memory_vectors": True,
@@ -110,8 +120,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(index["items"][0]["text"], "喜欢简洁直接的回答")
         self.assertEqual(index["items"][0]["embedding"], [1.0, 0.0])
 
+    # 验证向量 index is compact and embeddings are rounded场景下的预期结果。
     def test_vector_index_is_compact_and_embeddings_are_rounded(self) -> None:
-        """验证 `test_vector_index_is_compact_and_embeddings_are_rounded` 对应的行为。"""
+        """验证向量 index is compact and embeddings are rounded场景下的预期结果。"""
         app_config = {
             "memory": {
                 "enable_memory_vectors": True,
@@ -141,8 +152,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(index["items"][0]["embedding"], [0.123457, 0.987654])
         self.assertNotIn("\n  ", raw)
 
+    # 验证missing 向量 配置 uses defaults场景下的预期结果。
     def test_missing_vector_config_uses_defaults(self) -> None:
-        """验证 `test_missing_vector_config_uses_defaults` 对应的行为。"""
+        """验证missing 向量 配置 uses defaults场景下的预期结果。"""
         app_config = {
             "memory": {
                 "enable_memory_vectors": True,
@@ -162,8 +174,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(index["items"][0]["embedding"], [0.123457, 0.987654])
         self.assertIn("precision=6", index["embedding_signature"])
 
+    # 验证short 文本 are skipped场景下的预期结果。
     def test_short_texts_are_skipped(self) -> None:
-        """验证 `test_short_texts_are_skipped` 对应的行为。"""
+        """验证short 文本 are skipped场景下的预期结果。"""
         app_config = {
             "memory": {
                 "enable_memory_vectors": True,
@@ -182,8 +195,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         index = load_json(self.vector_path, {})
         self.assertEqual([item["text"] for item in index["items"]], ["long enough memory"])
 
+    # 验证old signature index is rebuilt with precision signature场景下的预期结果。
     def test_old_signature_index_is_rebuilt_with_precision_signature(self) -> None:
-        """验证 `test_old_signature_index_is_rebuilt_with_precision_signature` 对应的行为。"""
+        """验证old signature index is rebuilt with precision signature场景下的预期结果。"""
         save_json(
             self.vector_path,
             {
@@ -222,8 +236,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(index["items"][0]["embedding"], [0.1235, 0.9877])
         self.assertIn("precision=4", index["embedding_signature"])
 
+    # 验证向量 index keeps max items by recent or important 记忆场景下的预期结果。
     def test_vector_index_keeps_max_items_by_recent_or_important_memory(self) -> None:
-        """验证 `test_vector_index_keeps_max_items_by_recent_or_important_memory` 对应的行为。"""
+        """验证向量 index keeps max items by recent or important 记忆场景下的预期结果。"""
         app_config = {
             "memory": {
                 "enable_memory_vectors": True,
@@ -254,8 +269,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(len(texts), 2)
         self.assertIn("important project memory", texts)
 
+    # 验证语义 merge removes same field high similarity duplicate场景下的预期结果。
     def test_semantic_merge_removes_same_field_high_similarity_duplicate(self) -> None:
-        """验证 `test_semantic_merge_removes_same_field_high_similarity_duplicate` 对应的行为。"""
+        """验证语义 merge removes same field high similarity duplicate场景下的预期结果。"""
         memory = {
             "schema_version": "1.0",
             "user_profile": {
@@ -309,8 +325,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
             ["偏好简短直接的回答", "喜欢番茄"],
         )
 
+    # 验证语义 merge does not merge across 记忆 fields场景下的预期结果。
     def test_semantic_merge_does_not_merge_across_memory_fields(self) -> None:
-        """验证 `test_semantic_merge_does_not_merge_across_memory_fields` 对应的行为。"""
+        """验证语义 merge does not merge across 记忆 fields场景下的预期结果。"""
         memory = {
             "schema_version": "1.0",
             "user_profile": {
@@ -355,6 +372,7 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(updated["user_profile"]["preferences"], ["喜欢简短回答"])
         self.assertEqual(updated["user_profile"]["communication_style"], ["偏好简短直接的回答"])
 
+    # 为测试准备向量item数据或断言辅助结果。
     def _vector_item(
         self,
         store: MemoryVectorStore,
@@ -363,7 +381,7 @@ class MemoryVectorStoreTests(unittest.TestCase):
         order: int,
         embedding: list[float],
     ) -> dict[str, object]:
-        """处理 `_vector_item` 对应的业务逻辑。"""
+        """为测试准备向量item数据或断言辅助结果。"""
         return {
             "id": store._item_id(path, text),
             "path": path,

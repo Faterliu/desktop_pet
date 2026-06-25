@@ -22,36 +22,43 @@ from ai.summarizer import Summarizer  # noqa: E402
 
 
 class FakeChatStore:
+    # 初始化当前对象及其依赖。
     def __init__(self, messages: list[dict[str, str]]) -> None:
         """初始化当前对象及其依赖。"""
         self._messages = messages
 
+    # 为 FakeChatStore 测试替身提供all消息行为。
     def all_messages(self) -> list[dict[str, str]]:
-        """处理 `all_messages` 对应的业务逻辑。"""
+        """为 FakeChatStore 测试替身提供all消息行为。"""
         return list(self._messages)
 
 
 class FakeMemoryStore:
+    # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         self.merged: list[dict[str, object]] = []
 
+    # 为 FakeMemoryStore 测试替身提供merge行为。
     def merge(self, payload: dict[str, object]) -> None:
-        """处理 `merge` 对应的业务逻辑。"""
+        """为 FakeMemoryStore 测试替身提供merge行为。"""
         self.merged.append(payload)
 
 
 class EmptyMemoryDeepSeekClient:
+    # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         self.calls = 0
 
+    # 为测试准备isconfigured数据或断言辅助结果。
     def is_configured(self) -> bool:
-        """判断 `is_configured` 对应的条件是否成立。"""
+        """为测试准备isconfigured数据或断言辅助结果。"""
         return True
 
+    # 为测试准备聊天数据或断言辅助结果。
     def chat(self, messages: list[dict[str, str]]) -> str:
-        """处理 `chat` 对应的业务逻辑。"""
+        """为测试准备聊天数据或断言辅助结果。"""
         self.calls += 1
         if self.calls == 1:
             return json.dumps({"summary": "用户提到了偏好和项目。", "highlights": []}, ensure_ascii=False)
@@ -73,23 +80,26 @@ class EmptyMemoryDeepSeekClient:
 
 
 class FakeMem0MemoryService:
+    # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         self.added_texts: list[str] = []
 
+    # 为 FakeMem0MemoryService 测试替身提供add 记忆 文本行为。
     def add_memory_text(
         self,
         user_id: str,
         text: str,
         metadata: dict[str, object] | None = None,
     ) -> None:
-        """添加 `add_memory_text` 对应的内容。"""
+        """为 FakeMem0MemoryService 测试替身提供add 记忆 文本行为。"""
         self.added_texts.append(text)
 
 
 class SummarizerMemoryUpdateTests(unittest.TestCase):
+    # 验证模型未返回记忆更新时会使用本地抽取并写入 Mem0。
     def test_empty_model_memory_updates_fall_back_to_local_extraction_and_mem0_write(self) -> None:
-        """验证 `test_empty_model_memory_updates_fall_back_to_local_extraction_and_mem0_write` 对应的行为。"""
+        """验证模型未返回记忆更新时会使用本地抽取并写入 Mem0。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_summarizer_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -127,10 +137,11 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         self.assertIn("我喜欢Python项目", merged_text)
         self.assertTrue(mem0_service.added_texts)
 
+    # 验证正式问答摘要缺少记忆更新时会回退为学习主题。
     def test_formal_question_with_empty_model_memory_updates_falls_back_to_learning_topic(
         self,
     ) -> None:
-        """验证 `test_formal_question_with_empty_model_memory_updates_falls_back_to_learning_topic` 对应的行为。"""
+        """验证正式问答摘要缺少记忆更新时会回退为学习主题。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_formal_summarizer_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_formal.json"
@@ -165,8 +176,9 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         merged_text = json.dumps(memory_store.merged[-1], ensure_ascii=False)
         self.assertIn("conda环境和Python虚拟环境", merged_text)
 
+    # 验证question keywords fall back to learning topics场景下的预期结果。
     def test_question_keywords_fall_back_to_learning_topics(self) -> None:
-        """验证 `test_question_keywords_fall_back_to_learning_topics` 对应的行为。"""
+        """验证question keywords fall back to learning topics场景下的预期结果。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_question_keyword_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -204,8 +216,9 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         self.assertIn("请问PySide6透明窗口怎么做？", topics)
         self.assertIn("如何实现桌宠启动时自动问候？", topics)
 
+    # 验证informal 摘要 模式 does not use 正式问答 question 兜底场景下的预期结果。
     def test_informal_summary_mode_does_not_use_formal_question_fallback(self) -> None:
-        """验证 `test_informal_summary_mode_does_not_use_formal_question_fallback` 对应的行为。"""
+        """验证informal 摘要 模式 does not use 正式问答 question 兜底场景下的预期结果。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_informal_summary_mode"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -240,8 +253,9 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
         topics = memory_store.merged[-1]["work_study"]["current_learning_topics"]  # type: ignore[index]
         self.assertEqual([], topics)
 
+    # 验证用户 interaction preference writes relationship 记忆场景下的预期结果。
     def test_user_interaction_preference_writes_relationship_memory(self) -> None:
-        """验证 `test_user_interaction_preference_writes_relationship_memory` 对应的行为。"""
+        """验证用户 interaction preference writes relationship 记忆场景下的预期结果。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_relationship_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -288,8 +302,9 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
             "direct_actionable",
         )
 
+    # 验证助手 claim does not write relationship 记忆场景下的预期结果。
     def test_assistant_claim_does_not_write_relationship_memory(self) -> None:
-        """验证 `test_assistant_claim_does_not_write_relationship_memory` 对应的行为。"""
+        """验证助手 claim does not write relationship 记忆场景下的预期结果。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_no_assistant_relationship_memory"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"

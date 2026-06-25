@@ -13,8 +13,9 @@ from ai.mem0_memory_service import Mem0MemoryService  # noqa: E402
 from storage.json_store import load_json_prefer_primary  # noqa: E402
 
 
+# 根据 obj 递归遍历 JSON 对象，逐条产出非空文本值。
 def iter_text_values(obj: Any) -> Iterator[str]:
-    """处理 `iter_text_values` 对应的业务逻辑。"""
+    """根据 obj 递归遍历 JSON 对象，逐条产出非空文本值。"""
     if isinstance(obj, dict):
         for value in obj.values():
             yield from iter_text_values(value)
@@ -27,6 +28,7 @@ def iter_text_values(obj: Any) -> Iterator[str]:
             yield text
 
 
+# 运行当前模块的主流程。
 def main() -> None:
     """运行当前模块的主流程。"""
     app_config = load_json_prefer_primary(

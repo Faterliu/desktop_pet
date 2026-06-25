@@ -16,8 +16,9 @@ DEFAULT_CONTEXT_BUDGET = {
 }
 
 
+# 根据 config 读取预算配置，返回当前流程使用的限制值。
 def read_context_budget(config: dict[str, Any] | None) -> dict[str, int]:
-    """读取 `read_context_budget` 所需的数据。"""
+    """根据 config 读取预算配置，返回当前流程使用的限制值。"""
     api_config = (config or {}).get("api", {})
     budget: dict[str, int] = {}
     for key, default in DEFAULT_CONTEXT_BUDGET.items():
@@ -25,8 +26,9 @@ def read_context_budget(config: dict[str, Any] | None) -> dict[str, int]:
     return budget
 
 
+# 根据 text、limit 整理clip 文本，并把结果交给调用方或写回状态。
 def clip_text(text: Any, limit: int) -> str:
-    """整理 `clip_text` 对应的文本或数据。"""
+    """根据 text、limit 整理clip 文本，并把结果交给调用方或写回状态。"""
     content = str(text or "").strip()
     if limit <= 0 or len(content) <= limit:
         return content
@@ -36,8 +38,9 @@ def clip_text(text: Any, limit: int) -> str:
     return content[:head] + "..."
 
 
+# 根据 value、default 转换为正整数，失败或小于等于零时返回默认值。
 def _safe_positive_int(value: Any, default: int) -> int:
-    """处理 `_safe_positive_int` 对应的业务逻辑。"""
+    """根据 value、default 转换为正整数，失败或小于等于零时返回默认值。"""
     try:
         parsed = int(value)
     except (TypeError, ValueError):

@@ -33,18 +33,21 @@ class LocalLinesUpdateResult:
 class LocalLinesService:
     """在不改变文件结构的前提下安全读写本地台词。"""
 
+    # 初始化当前对象及其依赖。
     def __init__(self, local_lines_path: str | Path, metadata_path: str | Path | None = None) -> None:
         """初始化当前对象及其依赖。"""
         self.local_lines_path = Path(local_lines_path)
         self.metadata_path = Path(metadata_path) if metadata_path is not None else None
 
+    # 读取本地台词 JSON 数据，并在缺失时返回默认结构。
     def payload(self) -> dict[str, Any]:
-        """处理 `payload` 对应的业务逻辑。"""
+        """读取本地台词 JSON 数据，并在缺失时返回默认结构。"""
         payload = load_json(self.local_lines_path, {})
         return payload if isinstance(payload, dict) else {}
 
+    # 读取指定台词组的台词列表，缺失时返回空列表。
     def get_lines(self, group: str) -> list[str]:
-        """读取 `get_lines` 所需的数据。"""
+        """读取指定台词组的台词列表，缺失时返回空列表。"""
         value = self.payload().get(group, [])
         if isinstance(value, list):
             return [line.strip() for line in value if isinstance(line, str) and line.strip()]
@@ -57,13 +60,15 @@ class LocalLinesService:
             return _dedupe_preserve_order(merged)
         return []
 
+    # 从指定台词组中随机选择一条文本，缺失时返回兜底值。
     def pick_line(self, group: str, fallback: str = "") -> str:
-        """选择 `pick_line` 对应的内容。"""
+        """从指定台词组中随机选择一条文本，缺失时返回兜底值。"""
         lines = self.get_lines(group)
         if not lines:
             return fallback
         return random.choice(lines)
 
+    # 把人工台词加入指定分组，去重后写回本地台词文件。
     def append_manual_line(
         self,
         group: str,
@@ -71,7 +76,7 @@ class LocalLinesService:
         *,
         max_chars: int = 80,
     ) -> LocalLinesUpdateResult:
-        """添加 `append_manual_line` 对应的内容。"""
+        """把人工台词加入指定分组，去重后写回本地台词文件。"""
         result = self.validate_lines([line], max_chars=max_chars)
         if not result.accepted:
             return LocalLinesUpdateResult(group, [], result.rejected, False)
@@ -86,6 +91,7 @@ class LocalLinesService:
         save_json(self.local_lines_path, payload)
         return LocalLinesUpdateResult(group, result.accepted, result.rejected, True)
 
+    # 替换指定台词组的生成台词，并写入来源和刷新时间。
     def replace_generated_lines(
         self,
         group: str,
@@ -95,7 +101,7 @@ class LocalLinesService:
         max_chars: int = 80,
         max_items: int = 10,
     ) -> LocalLinesUpdateResult:
-        """处理 `replace_generated_lines` 对应的业务逻辑。"""
+        """替换指定台词组的生成台词，并写入来源和刷新时间。"""
         validation = self.validate_lines(lines, max_chars=max_chars)
         accepted = validation.accepted[: max(max_items, 0)]
         if not accepted:
@@ -109,6 +115,7 @@ class LocalLinesService:
         self._record_generated_metadata(group, accepted, source)
         return LocalLinesUpdateResult(group, accepted, validation.rejected, True)
 
+    # 根据组配置、刷新间隔和上次更新时间判断是否需要刷新生成台词。
     def should_refresh_generated_lines(
         self,
         group: str,
@@ -117,7 +124,7 @@ class LocalLinesService:
         monthly_refresh: bool = True,
         now: datetime | None = None,
     ) -> bool:
-        """判断 `should_refresh_generated_lines` 对应的条件是否成立。"""
+        """根据组配置、刷新间隔和上次更新时间判断是否需要刷新生成台词。"""
         metadata = self.group_metadata(group)
         if not metadata:
             return True
@@ -138,8 +145,9 @@ class LocalLinesService:
             return True
         return current - last_refreshed >= timedelta(days=days)
 
+    # 返回指定本地台词组的刷新来源、时间和统计信息。
     def group_metadata(self, group: str) -> dict[str, Any]:
-        """处理 `group_metadata` 对应的业务逻辑。"""
+        """返回指定本地台词组的刷新来源、时间和统计信息。"""
         if self.metadata_path is None:
             return {}
         metadata = load_json(self.metadata_path, {})
@@ -151,8 +159,9 @@ class LocalLinesService:
         group_metadata = groups.get(group, {})
         return group_metadata if isinstance(group_metadata, dict) else {}
 
+    # 过滤空白、过长或被禁用表达命中的台词文本。
     def validate_lines(self, lines: list[str], *, max_chars: int = 80) -> LocalLinesUpdateResult:
-        """校验 `validate_lines` 对应的数据或状态。"""
+        """过滤空白、过长或被禁用表达命中的台词文本。"""
         accepted: list[str] = []
         rejected: list[str] = []
         seen: set[str] = set()
@@ -174,8 +183,9 @@ class LocalLinesService:
 
         return LocalLinesUpdateResult("", accepted, rejected, False)
 
+    # 读取首次启动台词后标记为已消费，避免下次重复展示。
     def consume_first_start_line(self) -> str:
-        """处理 `consume_first_start_line` 对应的业务逻辑。"""
+        """读取首次启动台词后标记为已消费，避免下次重复展示。"""
         payload = self.payload()
         first_start = payload.get("first_start", {})
         if not isinstance(first_start, dict) or not first_start.get("enable", False):
@@ -194,8 +204,9 @@ class LocalLinesService:
         save_json(self.local_lines_path, payload)
         return line
 
+    # 根据 payload、group 整理list group，并把结果交给调用方或写回状态。
     def _list_group(self, payload: dict[str, Any], group: str) -> list[str]:
-        """处理 `_list_group` 对应的业务逻辑。"""
+        """根据 payload、group 整理list group，并把结果交给调用方或写回状态。"""
         value = payload.get(group, [])
         if isinstance(value, list):
             return [line.strip() for line in value if isinstance(line, str) and line.strip()]
@@ -205,16 +216,18 @@ class LocalLinesService:
                 return [line.strip() for line in lines if isinstance(line, str) and line.strip()]
         return []
 
+    # 根据 payload、group、lines 更新group台词状态，并同步相关缓存或界面。
     def _set_group_lines(self, payload: dict[str, Any], group: str, lines: list[str]) -> None:
-        """更新 `_set_group_lines` 对应的状态。"""
+        """根据 payload、group、lines 更新group台词状态，并同步相关缓存或界面。"""
         value = payload.get(group, [])
         if isinstance(value, dict) and "data" in value:
             payload[group] = {**value, "data": lines}
             return
         payload[group] = lines
 
+    # 根据 group、lines、source 整理record generated metadata，并把结果交给调用方或写回状态。
     def _record_generated_metadata(self, group: str, lines: list[str], source: str) -> None:
-        """处理 `_record_generated_metadata` 对应的业务逻辑。"""
+        """根据 group、lines、source 整理record generated metadata，并把结果交给调用方或写回状态。"""
         if self.metadata_path is None:
             return
 
@@ -238,8 +251,9 @@ class LocalLinesService:
         save_json(self.metadata_path, metadata)
 
 
+# 根据 lines 整理dedupe preserve order，并把结果交给调用方或写回状态。
 def _dedupe_preserve_order(lines: list[str]) -> list[str]:
-    """处理 `_dedupe_preserve_order` 对应的业务逻辑。"""
+    """根据 lines 整理dedupe preserve order，并把结果交给调用方或写回状态。"""
     seen: set[str] = set()
     result: list[str] = []
     for line in lines:
@@ -250,14 +264,16 @@ def _dedupe_preserve_order(lines: list[str]) -> list[str]:
     return result
 
 
+# 根据 line 整理contains blocked expression，并把结果交给调用方或写回状态。
 def _contains_blocked_expression(line: str) -> bool:
-    """处理 `_contains_blocked_expression` 对应的业务逻辑。"""
+    """根据 line 整理contains blocked expression，并把结果交给调用方或写回状态。"""
     lowered = line.lower()
     return any(blocked.lower() in lowered for blocked in BLOCKED_SUBSTRINGS)
 
 
+# 解析 ISO 时间字符串，失败时返回 None。
 def _parse_datetime(value: str) -> datetime | None:
-    """解析 `_parse_datetime` 对应的数据。"""
+    """解析 ISO 时间字符串，失败时返回 None。"""
     if not value:
         return None
     try:

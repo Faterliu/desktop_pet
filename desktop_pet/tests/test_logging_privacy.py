@@ -16,6 +16,7 @@ from utils.log_sanitizer import mask_api_key, safe_exception, truncate_text  # n
 
 
 class LoggingPrivacyTests(unittest.TestCase):
+    # 准备当前测试所需的环境和数据。
     def setUp(self) -> None:
         """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_logging_privacy" / self._testMethodName
@@ -30,6 +31,7 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.original_log_backup_count = self.logger_module.LOG_BACKUP_COUNT
         self.original_configured = self.logger_module._CONFIGURED
 
+    # 清理当前测试产生的环境和数据。
     def tearDown(self) -> None:
         """清理当前测试产生的环境和数据。"""
         for handler in list(self.root_logger.handlers):
@@ -43,8 +45,9 @@ class LoggingPrivacyTests(unittest.TestCase):
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
 
+    # 验证configure logging uses rotating 文件 handler场景下的预期结果。
     def test_configure_logging_uses_rotating_file_handler(self) -> None:
-        """验证 `test_configure_logging_uses_rotating_file_handler` 对应的行为。"""
+        """验证configure logging uses rotating 文件 handler场景下的预期结果。"""
         logger_module = self.logger_module
         logger_module._CONFIGURED = False
         logger_module.PROJECT_ROOT = self.temp_dir
@@ -64,8 +67,9 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertEqual(rotating_handlers[-1].backupCount, 2)
         self.assertTrue((self.temp_dir / "data" / "app.log").exists())
 
+    # 验证log rotation creates 备份 文件场景下的预期结果。
     def test_log_rotation_creates_backup_file(self) -> None:
-        """验证 `test_log_rotation_creates_backup_file` 对应的行为。"""
+        """验证log rotation creates 备份 文件场景下的预期结果。"""
         logger_module = self.logger_module
         logger_module._CONFIGURED = False
         logger_module.PROJECT_ROOT = self.temp_dir
@@ -84,8 +88,9 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertTrue((log_dir / "app.log").exists())
         self.assertTrue((log_dir / "app.log.1").exists())
 
+    # 验证API 密钥 is masked场景下的预期结果。
     def test_api_key_is_masked(self) -> None:
-        """验证 `test_api_key_is_masked` 对应的行为。"""
+        """验证API 密钥 is masked场景下的预期结果。"""
         api_key = "sk-1234567890abcdef"
 
         masked = mask_api_key(api_key)
@@ -95,8 +100,9 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertTrue(masked.endswith("cdef"))
         self.assertIn("...", masked)
 
+    # 验证exception 文本 masks bearer API 密钥场景下的预期结果。
     def test_exception_text_masks_bearer_api_key(self) -> None:
-        """验证 `test_exception_text_masks_bearer_api_key` 对应的行为。"""
+        """验证exception 文本 masks bearer API 密钥场景下的预期结果。"""
         api_key = "sk-1234567890abcdef"
         exc = RuntimeError(f"Authorization failed: Bearer {api_key}")
 
@@ -105,8 +111,9 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertNotIn(api_key, sanitized)
         self.assertIn("Bearer sk-1...cdef", sanitized)
 
+    # 验证long 文本 is truncated场景下的预期结果。
     def test_long_text_is_truncated(self) -> None:
-        """验证 `test_long_text_is_truncated` 对应的行为。"""
+        """验证long 文本 is truncated场景下的预期结果。"""
         text = "a" * 100
 
         truncated = truncate_text(text, max_chars=20)

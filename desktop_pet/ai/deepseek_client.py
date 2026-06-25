@@ -18,22 +18,26 @@ class DeepSeekError(RuntimeError):
 
 
 class DeepSeekClient:
+    # 初始化当前对象及其依赖。
     def __init__(self, config_path: str | Path, fallback_config_path: str | Path | None = None) -> None:
         """初始化当前对象及其依赖。"""
         self.config_path = Path(config_path)
         self.fallback_config_path = Path(fallback_config_path) if fallback_config_path else self.config_path
 
+    # 读取配置片段，缺失时返回安全默认配置。
     def _api_config(self) -> dict[str, Any]:
-        """处理 `_api_config` 对应的业务逻辑。"""
+        """读取配置片段，缺失时返回安全默认配置。"""
         config = load_json_prefer_primary(self.config_path, self.fallback_config_path, {})
         return config.get("api", {})
 
+    # 判断必需配置是否完整，并返回客户端是否可以调用。
     def is_configured(self) -> bool:
-        """判断 `is_configured` 对应的条件是否成立。"""
+        """判断必需配置是否完整，并返回客户端是否可以调用。"""
         return bool(self._api_config().get("api_key", "").strip())
 
+    # 根据 messages 处理聊天消息流程，更新上下文和展示状态。
     def chat(self, messages: list[dict[str, str]]) -> str:
-        """处理 `chat` 对应的业务逻辑。"""
+        """根据 messages 处理聊天消息流程，更新上下文和展示状态。"""
         api = self._api_config()
         api_key = api.get("api_key", "").strip()
         if not api_key:

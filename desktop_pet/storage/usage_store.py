@@ -18,10 +18,12 @@ DEFAULT_DAILY_USAGE = {
 
 
 class UsageStore:
+    # 初始化每日用量存储，并绑定目标 JSON 文件路径。
     def __init__(self, path: str | Path) -> None:
         """初始化每日用量存储，并绑定目标 JSON 文件路径。"""
         self.path = Path(path)
 
+    # 确保统计数据属于今天；跨天时自动重置计数。
     def _ensure_today(self) -> dict[str, Any]:
         """确保统计数据属于今天；跨天时自动重置计数。"""
         payload = load_json(self.path, DEFAULT_DAILY_USAGE)
@@ -32,18 +34,22 @@ class UsageStore:
             save_json(self.path, payload)
         return payload
 
+    # 返回今天的用量统计。
     def get_usage(self) -> dict[str, Any]:
         """返回今天的用量统计。"""
         return self._ensure_today()
 
+    # 判断今天是否还能继续使用本地主动话术。
     def can_use_local(self, max_per_day: int) -> bool:
         """判断今天是否还能继续使用本地主动话术。"""
         return self._ensure_today().get("local_proactive_lines_used", 0) < max_per_day
 
+    # 判断今天是否还能继续使用 API 主动回复额度。
     def can_use_api(self, max_per_day: int) -> bool:
         """判断今天是否还能继续使用 API 主动回复额度。"""
         return self._ensure_today().get("api_proactive_lines_used", 0) < max_per_day
 
+    # 本地主动话术计数加一，并返回最新统计。
     def increment_local_line(self) -> dict[str, Any]:
         """本地主动话术计数加一，并返回最新统计。"""
         payload = self._ensure_today()
@@ -51,6 +57,7 @@ class UsageStore:
         save_json(self.path, payload)
         return payload
 
+    # API 主动回复计数加一，并返回最新统计。
     def increment_api_line(self) -> dict[str, Any]:
         """API 主动回复计数加一，并返回最新统计。"""
         payload = self._ensure_today()

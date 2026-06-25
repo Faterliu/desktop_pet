@@ -21,6 +21,7 @@ from storage.json_store import load_json  # noqa: E402
 
 
 class ChatStoreTests(unittest.TestCase):
+    # 准备当前测试所需的环境和数据。
     def setUp(self) -> None:
         """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_chat_store" / self._testMethodName
@@ -29,11 +30,13 @@ class ChatStoreTests(unittest.TestCase):
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.path = self.temp_dir / "chat_history.json"
 
+    # 清理当前测试产生的环境和数据。
     def tearDown(self) -> None:
         """清理当前测试产生的环境和数据。"""
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
 
+    # 清空聊天记录时同一次写入保留清理时间。
     def test_clear_history_with_timestamp_writes_single_empty_payload(self) -> None:
         """清空聊天记录时同一次写入保留清理时间。"""
         store = ChatStore(self.path)
@@ -45,10 +48,12 @@ class ChatStoreTests(unittest.TestCase):
         self.assertEqual(payload["messages"], [])
         self.assertEqual(payload["last_cleaned_at"], "2026-06-24T21:00:00")
 
+    # 同一路径的多个存储实例并发追加时共享锁，不丢失消息。
     def test_multiple_store_instances_append_without_lost_updates(self) -> None:
         """同一路径的多个存储实例并发追加时共享锁，不丢失消息。"""
         stores = [ChatStore(self.path), ChatStore(self.path)]
 
+        # 追加一组可唯一识别的测试消息。
         def append_messages(store_index: int) -> None:
             """追加一组可唯一识别的测试消息。"""
             store = stores[store_index]

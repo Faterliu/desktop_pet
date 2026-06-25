@@ -14,23 +14,27 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+# 把字符串或 Path 输入转换为展开用户目录后的 Path 对象。
 def _normalize_path(path: str | Path) -> Path:
-    """规范化 `_normalize_path` 对应的数据。"""
+    """把字符串或 Path 输入转换为展开用户目录后的 Path 对象。"""
     return Path(path)
 
 
+# 根据 path 生成 JSON 主文件对应的辅助文件路径。
 def _backup_path(path: Path) -> Path:
-    """处理 `_backup_path` 对应的业务逻辑。"""
+    """根据 path 生成 JSON 主文件对应的辅助文件路径。"""
     return path.with_name(f"{path.name}.bak")
 
 
+# 根据 path 生成 JSON 主文件对应的辅助文件路径。
 def _tmp_path(path: Path) -> Path:
-    """处理 `_tmp_path` 对应的业务逻辑。"""
+    """根据 path 生成 JSON 主文件对应的辅助文件路径。"""
     return path.with_name(f"{path.name}.tmp")
 
 
+# 根据 path 生成 JSON 主文件对应的辅助文件路径。
 def _corrupt_path(path: Path) -> Path:
-    """处理 `_corrupt_path` 对应的业务逻辑。"""
+    """根据 path 生成 JSON 主文件对应的辅助文件路径。"""
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
     candidate = path.with_name(f"{path.name}.corrupt.{timestamp}")
     counter = 1
@@ -40,14 +44,16 @@ def _corrupt_path(path: Path) -> Path:
     return candidate
 
 
+# 根据 path 读取JSON 文件并返回 Any。
 def _read_json_file(path: Path) -> Any:
-    """读取 `_read_json_file` 所需的数据。"""
+    """根据 path 读取JSON 文件并返回 Any。"""
     with path.open("r", encoding="utf-8") as file:
         return json.load(file)
 
 
+# 根据 path 处理文件路径或 JSON 内容，保持读写结果稳定。
 def _move_corrupt_file(path: Path) -> Path | None:
-    """处理 `_move_corrupt_file` 对应的业务逻辑。"""
+    """根据 path 处理文件路径或 JSON 内容，保持读写结果稳定。"""
     if not path.exists():
         return None
 
@@ -56,8 +62,9 @@ def _move_corrupt_file(path: Path) -> Path | None:
     return corrupt
 
 
+# 根据 directory 清理临时文件JSONfiles线程注册和关联引用。
 def cleanup_tmp_json_files(directory: Path) -> None:
-    """处理 `cleanup_tmp_json_files` 对应的业务逻辑。"""
+    """根据 directory 清理临时文件JSONfiles线程注册和关联引用。"""
     target_dir = _normalize_path(directory)
     if not target_dir.exists() or not target_dir.is_dir():
         return
@@ -71,8 +78,9 @@ def cleanup_tmp_json_files(directory: Path) -> None:
             logger.warning("Failed to remove temporary JSON file %s: %s", tmp_file, exc)
 
 
+# 根据 path、default 处理文件路径或 JSON 内容，保持读写结果稳定。
 def ensure_json_file(path: str | Path, default: Any) -> Path:
-    """处理 `ensure_json_file` 对应的业务逻辑。"""
+    """根据 path、default 处理文件路径或 JSON 内容，保持读写结果稳定。"""
     target = _normalize_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
@@ -80,6 +88,7 @@ def ensure_json_file(path: str | Path, default: Any) -> Path:
     return target
 
 
+# 从可用备份恢复主 JSON 文件，并返回恢复后的内容。
 def _restore_from_backup(target: Path, backup: Path) -> Any:
     """从可用备份恢复主 JSON 文件，并返回恢复后的内容。"""
     recovered = _read_json_file(backup)
@@ -88,8 +97,9 @@ def _restore_from_backup(target: Path, backup: Path) -> Any:
     return recovered
 
 
+# 根据 path、default 读取JSON并返回 Any。
 def load_json(path: str | Path, default: Any = None) -> Any:
-    """读取 `load_json` 所需的数据。"""
+    """根据 path、default 读取JSON并返回 Any。"""
     target = _normalize_path(path)
     backup = _backup_path(target)
     if not target.exists() and backup.exists():
@@ -118,12 +128,13 @@ def load_json(path: str | Path, default: Any = None) -> Any:
         return copy.deepcopy(default)
 
 
+# 根据 primary_path、fallback_path、default 读取JSON prefer primary并返回 Any。
 def load_json_prefer_primary(
     primary_path: str | Path,
     fallback_path: str | Path,
     default: Any = None,
 ) -> Any:
-    """读取 `load_json_prefer_primary` 所需的数据。"""
+    """根据 primary_path、fallback_path、default 读取JSON prefer primary并返回 Any。"""
     primary = _normalize_path(primary_path)
     fallback = _normalize_path(fallback_path)
 
@@ -134,8 +145,9 @@ def load_json_prefer_primary(
     return load_json(primary, default)
 
 
+# 根据 path、data 把JSON写入持久化存储并保持数据可恢复。
 def save_json(path: str | Path, data: Any) -> Path:
-    """保存 `save_json` 产生的数据。"""
+    """根据 path、data 把JSON写入持久化存储并保持数据可恢复。"""
     target = _normalize_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     cleanup_tmp_json_files(target.parent)

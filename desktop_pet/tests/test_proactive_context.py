@@ -17,8 +17,9 @@ from character.proactive_context import (  # noqa: E402
 
 
 class ProactiveContextTests(unittest.TestCase):
+    # 验证build 上下文 uses 任务 and relationship 记忆 without full dump场景下的预期结果。
     def test_build_context_uses_task_and_relationship_memory_without_full_dump(self) -> None:
-        """验证 `test_build_context_uses_task_and_relationship_memory_without_full_dump` 对应的行为。"""
+        """验证build 上下文 uses 任务 and relationship 记忆 without full dump场景下的预期结果。"""
         memory = {
             "work_study": {
                 "current_projects": ["桌宠记忆系统", "Mem0 接入", "很久以前的旧任务"],
@@ -74,8 +75,9 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertEqual(context["runtime_state"]["consecutive_unanswered"], 1)
         self.assertTrue(has_scenario_context(context, min_items=2))
 
+    # 验证本地 template 问候 is short natural and not mechanical场景下的预期结果。
     def test_local_template_greeting_is_short_natural_and_not_mechanical(self) -> None:
-        """验证 `test_local_template_greeting_is_short_natural_and_not_mechanical` 对应的行为。"""
+        """验证本地 template 问候 is short natural and not mechanical场景下的预期结果。"""
         context = {
             "recent_task_focus": ["桌宠记忆系统"],
             "runtime_state": {"consecutive_unanswered": 0},
@@ -99,8 +101,9 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertNotIn("你之前说过", line)
         self.assertNotIn("memory.json", line)
 
+    # 验证low interrupt template uses quiet 台词场景下的预期结果。
     def test_low_interrupt_template_uses_quiet_line(self) -> None:
-        """验证 `test_low_interrupt_template_uses_quiet_line` 对应的行为。"""
+        """验证low interrupt template uses quiet 台词场景下的预期结果。"""
         context = {"runtime_state": {"consecutive_unanswered": 3}}
         local_lines = {"low_interrupt": ["看你可能在忙，我先安静一会儿，需要我就点我。"]}
 
@@ -113,8 +116,9 @@ class ProactiveContextTests(unittest.TestCase):
 
         self.assertEqual(line, "看你可能在忙，我先安静一会儿，需要我就点我。")
 
+    # 验证API 提示词 for 场景 问候 hides 记忆 implementation场景下的预期结果。
     def test_api_prompt_for_scenario_greeting_hides_memory_implementation(self) -> None:
-        """验证 `test_api_prompt_for_scenario_greeting_hides_memory_implementation` 对应的行为。"""
+        """验证API 提示词 for 场景 问候 hides 记忆 implementation场景下的预期结果。"""
         context = {
             "time_period": "afternoon",
             "recent_task_focus": ["桌宠记忆系统"],

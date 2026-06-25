@@ -11,8 +11,9 @@ class EmotionState(str, Enum):
     SAD = "sad"
 
 
+# 把配置中的情绪字符串解析为 EmotionState，缺失时返回默认情绪。
 def parse_emotion_state(value: object, default: EmotionState = EmotionState.CALM) -> EmotionState:
-    """解析 `parse_emotion_state` 对应的数据。"""
+    """把配置中的情绪字符串解析为 EmotionState，缺失时返回默认情绪。"""
     if isinstance(value, EmotionState):
         return value
     try:

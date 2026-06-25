@@ -8,6 +8,7 @@ from pathlib import Path
 BOOT_LOG_NAME = "startup_bootstrap.log"
 
 
+# 在程序极早期写入启动日志，便于排查导入前后的静默退出问题。
 def _write_boot_log(project_root: Path, message: str) -> None:
     """在程序极早期写入启动日志，便于排查导入前后的静默退出问题。"""
     data_dir = project_root / "data"
@@ -17,6 +18,7 @@ def _write_boot_log(project_root: Path, message: str) -> None:
         file.write(f"{message}\n")
 
 
+# 初始化应用、创建桌宠主窗口并启动事件循环。
 def main() -> int:
     """初始化应用、创建桌宠主窗口并启动事件循环。"""
     project_root = Path(__file__).resolve().parent

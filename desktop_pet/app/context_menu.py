@@ -6,6 +6,7 @@ from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QMenu, QWidget
 
 
+# 构建桌宠右键菜单，并绑定各项操作回调。
 def build_context_menu(
     parent: QWidget,
     test_action_handler: Callable[[str], None],

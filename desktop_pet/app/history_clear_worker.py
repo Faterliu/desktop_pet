@@ -15,6 +15,7 @@ class ChatHistoryClearWorker(QObject):
     finished = Signal(str)
     failed = Signal(str, str)
 
+    # 初始化当前对象及其依赖。
     def __init__(
         self,
         mode: str,
@@ -29,8 +30,9 @@ class ChatHistoryClearWorker(QObject):
         self.chat_store = chat_store
         self.force_summarize = force_summarize
 
+    # 在线程中执行 ChatHistoryClearWorker 的后台任务，并通过信号返回结果。
     def run(self) -> None:
-        """处理 `run` 对应的业务逻辑。"""
+        """在线程中执行 ChatHistoryClearWorker 的后台任务，并通过信号返回结果。"""
         try:
             if self.force_summarize:
                 self.summarizer.maybe_summarize(0, force=True)

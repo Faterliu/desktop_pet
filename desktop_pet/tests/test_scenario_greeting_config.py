@@ -12,8 +12,9 @@ from storage.json_store import load_json  # noqa: E402
 
 
 class ScenarioGreetingConfigTests(unittest.TestCase):
+    # 验证example 配置 contains conservative 场景 问候 defaults场景下的预期结果。
     def test_example_config_contains_conservative_scenario_greeting_defaults(self) -> None:
-        """验证 `test_example_config_contains_conservative_scenario_greeting_defaults` 对应的行为。"""
+        """验证example 配置 contains conservative 场景 问候 defaults场景下的预期结果。"""
         config = load_json(DESKTOP_PET_ROOT / "config" / "app_config.example.json", {})
         behavior = config["behavior"]
 
@@ -24,8 +25,9 @@ class ScenarioGreetingConfigTests(unittest.TestCase):
         self.assertGreaterEqual(behavior["scenario_greeting_cooldown_minutes"], 60)
         self.assertEqual(behavior["scenario_greeting_low_interrupt_after_ignored"], 2)
 
+    # 验证本地 台词 contains 场景 and low interrupt fallbacks场景下的预期结果。
     def test_local_lines_contains_scenario_and_low_interrupt_fallbacks(self) -> None:
-        """验证 `test_local_lines_contains_scenario_and_low_interrupt_fallbacks` 对应的行为。"""
+        """验证本地 台词 contains 场景 and low interrupt fallbacks场景下的预期结果。"""
         local_lines = load_json(DESKTOP_PET_ROOT / "config" / "local_lines.json", {})
 
         self.assertTrue(local_lines["scenario_greeting_templates"])

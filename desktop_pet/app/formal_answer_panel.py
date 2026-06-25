@@ -15,6 +15,7 @@ from utils.dwm_border import suppress_dwm_border
 
 
 class FormalAnswerPanel(QWidget):
+    # 初始化可拖动、可复制、可关闭的正式问答面板。
     def __init__(self, title: str = "正式问答") -> None:
         """初始化可拖动、可复制、可关闭的正式问答面板。"""
         super().__init__(
@@ -89,6 +90,7 @@ class FormalAnswerPanel(QWidget):
 
         self.resize(420, 320)
 
+    # 设置问答标题和正文，并初始显示在角色旁边。
     def set_content(
         self,
         title: str,
@@ -103,6 +105,7 @@ class FormalAnswerPanel(QWidget):
         self.show()
         self.raise_()
 
+    # 移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。
     def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
         """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""
         ok, result = suppress_dwm_border(eventType, message)
@@ -110,6 +113,7 @@ class FormalAnswerPanel(QWidget):
             return True, result
         return super().nativeEvent(eventType, message)
 
+    # 把新的正式回答追加到现有面板中，不覆盖旧内容。
     def append_entry(self, question: str, answer: str) -> None:
         """把新的正式回答追加到现有面板中，不覆盖旧内容。"""
         entry = self.format_entry(question, answer)
@@ -119,12 +123,14 @@ class FormalAnswerPanel(QWidget):
         self.show()
         self.raise_()
 
+    # 把正式回答格式化为适合直接阅读和复制的纯文本。
     @staticmethod
     def format_entry(question: str, answer: str) -> str:
         """把正式回答格式化为适合直接阅读和复制的纯文本。"""
         _ = question
         return answer.strip()
 
+    # 把正式问答面板初始摆放在角色附近，并错开多个面板。
     def _place_near(self, anchor_rect: QRect, offset_index: int = 0) -> None:
         """把正式问答面板初始摆放在角色附近，并错开多个面板。"""
         stagger = min(max(offset_index, 0), 5) * 28
@@ -132,6 +138,7 @@ class FormalAnswerPanel(QWidget):
         y = max(0, anchor_rect.y() - 20 + stagger)
         self.move(x, y)
 
+    # 按下非文本区域时开始拖动面板。
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """按下非文本区域时开始拖动面板。"""
         if event.button() == Qt.MouseButton.LeftButton and not self.text_edit.geometry().contains(
@@ -141,12 +148,14 @@ class FormalAnswerPanel(QWidget):
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
         super().mousePressEvent(event)
 
+    # 拖动正式问答面板到任意位置。
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """拖动正式问答面板到任意位置。"""
         if self._dragging and event.buttons() & Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_offset)
         super().mouseMoveEvent(event)
 
+    # 结束面板拖动。
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """结束面板拖动。"""
         if event.button() == Qt.MouseButton.LeftButton:

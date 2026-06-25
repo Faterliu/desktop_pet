@@ -8,17 +8,19 @@ from PySide6.QtCore import QPoint, QRect
 class BubblePositionService:
     """计算桌宠窗口周围的浮动气泡位置。"""
 
+    # 初始化当前对象及其依赖。
     def __init__(self, application: Any) -> None:
         """初始化当前对象及其依赖。"""
         self.application = application
 
+    # 根据 bubble_size、anchor_rect、exclusion_rects 计算窗口或气泡位置，保证结果落在可见屏幕内。
     def speech_bubble_position(
         self,
         bubble_size: tuple[int, int],
         anchor_rect: QRect,
         exclusion_rects: list[QRect] | None = None,
     ) -> QPoint:
-        """处理 `speech_bubble_position` 对应的业务逻辑。"""
+        """根据 bubble_size、anchor_rect、exclusion_rects 计算窗口或气泡位置，保证结果落在可见屏幕内。"""
         bubble_width, bubble_height = bubble_size
         candidates = [
             QPoint(anchor_rect.x() + anchor_rect.width() - bubble_width + 20, anchor_rect.y() - bubble_height - 10),
@@ -30,13 +32,14 @@ class BubblePositionService:
         ]
         return self._find_position(bubble_width, bubble_height, anchor_rect, candidates, exclusion_rects)
 
+    # 根据 bubble_size、anchor_rect、exclusion_rects 计算窗口或气泡位置，保证结果落在可见屏幕内。
     def reply_bubble_position(
         self,
         bubble_size: tuple[int, int],
         anchor_rect: QRect,
         exclusion_rects: list[QRect] | None = None,
     ) -> QPoint:
-        """处理 `reply_bubble_position` 对应的业务逻辑。"""
+        """根据 bubble_size、anchor_rect、exclusion_rects 计算窗口或气泡位置，保证结果落在可见屏幕内。"""
         bubble_width, bubble_height = bubble_size
         center_x = anchor_rect.x() + anchor_rect.width() // 2
         center_y = anchor_rect.y() + anchor_rect.height() // 2
@@ -48,6 +51,7 @@ class BubblePositionService:
         ]
         return self._find_position(bubble_width, bubble_height, anchor_rect, candidates, exclusion_rects)
 
+    # 按候选方向寻找不越界且避开占用区域的气泡位置。
     def _find_position(
         self,
         bubble_width: int,
@@ -56,7 +60,7 @@ class BubblePositionService:
         candidates: list[QPoint],
         exclusion_rects: list[QRect] | None = None,
     ) -> QPoint:
-        """查找 `_find_position` 对应的结果。"""
+        """按候选方向寻找不越界且避开占用区域的气泡位置。"""
         available = self._available_geometry(anchor_rect)
         if available is None:
             return candidates[0] if candidates else QPoint(0, 0)
@@ -80,8 +84,9 @@ class BubblePositionService:
         y = max(available.y(), min(first.y(), available.y() + available.height() - bubble_height))
         return QPoint(max(0, x), max(0, y))
 
+    # 根据 anchor_rect 计算窗口或气泡位置，保证结果落在可见屏幕内。
     def _available_geometry(self, anchor_rect: QRect) -> QRect | None:
-        """处理 `_available_geometry` 对应的业务逻辑。"""
+        """根据 anchor_rect 计算窗口或气泡位置，保证结果落在可见屏幕内。"""
         screen = self.application.screenAt(anchor_rect.center())
         if screen is None:
             screen = self.application.primaryScreen()

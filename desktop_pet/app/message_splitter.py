@@ -6,13 +6,14 @@ import re
 SENTENCE_END_RE = re.compile(r"([。！？!?；;])")
 
 
+# 根据 text、min_first_chars、max_parts 整理split 知识问候 气泡 文本，并把结果交给调用方或写回状态。
 def split_knowledge_bubble_text(
     text: str,
     *,
     min_first_chars: int = 8,
     max_parts: int = 2,
 ) -> list[str]:
-    """整理 `split_knowledge_bubble_text` 对应的文本或数据。"""
+    """根据 text、min_first_chars、max_parts 整理split 知识问候 气泡 文本，并把结果交给调用方或写回状态。"""
     cleaned = _normalize_text(text)
     if not cleaned:
         return []
@@ -43,13 +44,15 @@ def split_knowledge_bubble_text(
     return [first, second]
 
 
+# 合并文本空白字符，返回适合气泡分句的内容。
 def _normalize_text(text: str) -> str:
-    """规范化 `_normalize_text` 对应的数据。"""
+    """合并文本空白字符，返回适合气泡分句的内容。"""
     return re.sub(r"\s+", " ", text.strip())
 
 
+# 根据 text 按中英文标点拆分句子，过滤空白片段。
 def _sentences(text: str) -> list[str]:
-    """处理 `_sentences` 对应的业务逻辑。"""
+    """根据 text 按中英文标点拆分句子，过滤空白片段。"""
     parts = SENTENCE_END_RE.split(text)
     sentences: list[str] = []
     index = 0

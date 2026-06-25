@@ -15,6 +15,7 @@ from storage.json_store import save_json  # noqa: E402
 
 
 class PromptBuilderMemorySectionsTests(unittest.TestCase):
+    # 准备当前测试所需的环境和数据。
     def setUp(self) -> None:
         """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / self._testMethodName
@@ -75,8 +76,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
             },
         )
 
+    # 为测试准备builder数据或断言辅助结果。
     def _builder(self) -> PromptBuilder:
-        """处理 `_builder` 对应的业务逻辑。"""
+        """为测试准备builder数据或断言辅助结果。"""
         return PromptBuilder(
             self.character_path,
             self.safety_path,
@@ -86,8 +88,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
             self.config_path,
         )
 
+    # 验证提示词会分离事实、关系和语义记忆段落。
     def test_build_messages_splits_fact_relationship_and_semantic_memory_sections(self) -> None:
-        """验证 `test_build_messages_splits_fact_relationship_and_semantic_memory_sections` 对应的行为。"""
+        """验证提示词会分离事实、关系和语义记忆段落。"""
         messages = self._builder().build_messages(
             "这个功能怎么做？",
             relevant_memories="- 用户在开发桌宠。",
@@ -103,8 +106,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertIn("【当前问题相关的长期语义记忆】", prompt)
         self.assertIn("只在与当前问题直接相关时参考", prompt)
 
+    # 验证正式问答 模式 keeps style 记忆 focused on answer preferences场景下的预期结果。
     def test_formal_mode_keeps_style_memory_focused_on_answer_preferences(self) -> None:
-        """验证 `test_formal_mode_keeps_style_memory_focused_on_answer_preferences` 对应的行为。"""
+        """验证正式问答 模式 keeps style 记忆 focused on answer preferences场景下的预期结果。"""
         messages = self._builder().build_messages("请解释这个架构。", formal_qa_mode=True)
         prompt = "\n".join(item["content"] for item in messages if item["role"] == "system")
 
@@ -115,8 +119,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertIn("角色风格不能降低专业性", prompt)
         self.assertNotIn("陪伴角色", prompt)
 
+    # 验证new 人格 sections are compiled into executable guidance场景下的预期结果。
     def test_new_persona_sections_are_compiled_into_executable_guidance(self) -> None:
-        """验证 `test_new_persona_sections_are_compiled_into_executable_guidance` 对应的行为。"""
+        """验证new 人格 sections are compiled into executable guidance场景下的预期结果。"""
         save_json(
             self.character_path,
             {
@@ -169,8 +174,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertIn("mood=thinking, energy=high, mode=task", prompt)
         self.assertNotIn('"core_identity"', prompt)
 
+    # 验证legacy character fields still build a complete 提示词场景下的预期结果。
     def test_legacy_character_fields_still_build_a_complete_prompt(self) -> None:
-        """验证 `test_legacy_character_fields_still_build_a_complete_prompt` 对应的行为。"""
+        """验证legacy character fields still build a complete 提示词场景下的预期结果。"""
         save_json(
             self.character_path,
             {
@@ -192,8 +198,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertIn("口头禅只能偶尔自然使用：慢慢来", prompt)
         self.assertIn("保持事实准确", prompt)
 
+    # 验证正式问答 模式 omits catchphrases and uses 任务 style场景下的预期结果。
     def test_formal_mode_omits_catchphrases_and_uses_task_style(self) -> None:
-        """验证 `test_formal_mode_omits_catchphrases_and_uses_task_style` 对应的行为。"""
+        """验证正式问答 模式 omits catchphrases and uses 任务 style场景下的预期结果。"""
         save_json(
             self.character_path,
             {
@@ -215,8 +222,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertNotIn("好哒～", prompt)
         self.assertIn("减少闲聊、口头禅、撒娇", prompt)
 
+    # 验证long 用户 消息 is clipped by 预算场景下的预期结果。
     def test_long_user_message_is_clipped_by_budget(self) -> None:
-        """验证 `test_long_user_message_is_clipped_by_budget` 对应的行为。"""
+        """验证long 用户 消息 is clipped by 预算场景下的预期结果。"""
         save_json(self.config_path, {"api": {"max_user_message_chars": 80}})
         messages = self._builder().build_messages("A" * 200, [])
 
@@ -224,8 +232,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertLessEqual(len(messages[-1]["content"]), 80)
         self.assertTrue(messages[-1]["content"].endswith("..."))
 
+    # 验证long 历史记录 and 记忆 do not exceed 提示词 预算场景下的预期结果。
     def test_long_history_and_memory_do_not_exceed_prompt_budget(self) -> None:
-        """验证 `test_long_history_and_memory_do_not_exceed_prompt_budget` 对应的行为。"""
+        """验证long 历史记录 and 记忆 do not exceed 提示词 预算场景下的预期结果。"""
         save_json(
             self.config_path,
             {
@@ -275,8 +284,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertLessEqual(total_chars, 900)
         self.assertEqual("user", messages[-1]["role"])
 
+    # 验证tiny 提示词 预算 is still enforced场景下的预期结果。
     def test_tiny_prompt_budget_is_still_enforced(self) -> None:
-        """验证 `test_tiny_prompt_budget_is_still_enforced` 对应的行为。"""
+        """验证tiny 提示词 预算 is still enforced场景下的预期结果。"""
         save_json(
             self.config_path,
             {
@@ -296,8 +306,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
 
         self.assertLessEqual(sum(len(item["content"]) for item in messages), 240)
 
+    # 验证missing 预算 配置 uses defaults场景下的预期结果。
     def test_missing_budget_config_uses_defaults(self) -> None:
-        """验证 `test_missing_budget_config_uses_defaults` 对应的行为。"""
+        """验证missing 预算 配置 uses defaults场景下的预期结果。"""
         save_json(self.config_path, {"api": {}})
         messages = self._builder().build_messages("你好", [{"role": "assistant", "content": "A" * 50}])
 
@@ -306,8 +317,9 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
 
 
 class PersonaStateTests(unittest.TestCase):
+    # 验证defaults are stable场景下的预期结果。
     def test_defaults_are_stable(self) -> None:
-        """验证 `test_defaults_are_stable` 对应的行为。"""
+        """验证defaults are stable场景下的预期结果。"""
         state = read_persona_state()
 
         self.assertEqual(state.mood, EmotionState.CALM)
@@ -315,8 +327,9 @@ class PersonaStateTests(unittest.TestCase):
         self.assertEqual(state.closeness, 0.5)
         self.assertEqual(state.mode, "companion")
 
+    # 验证invalid values fall back and closeness is clamped场景下的预期结果。
     def test_invalid_values_fall_back_and_closeness_is_clamped(self) -> None:
-        """验证 `test_invalid_values_fall_back_and_closeness_is_clamped` 对应的行为。"""
+        """验证invalid values fall back and closeness is clamped场景下的预期结果。"""
         state = PersonaState.from_mapping(
             {
                 "mood": "unknown",
@@ -331,8 +344,9 @@ class PersonaStateTests(unittest.TestCase):
         self.assertEqual(state.closeness, 1.0)
         self.assertEqual(state.mode, "companion")
 
+    # 验证情绪 parser accepts enum or 文本 without raising场景下的预期结果。
     def test_emotion_parser_accepts_enum_or_text_without_raising(self) -> None:
-        """验证 `test_emotion_parser_accepts_enum_or_text_without_raising` 对应的行为。"""
+        """验证情绪 parser accepts enum or 文本 without raising场景下的预期结果。"""
         self.assertEqual(parse_emotion_state("sleepy"), EmotionState.SLEEPY)
         self.assertEqual(parse_emotion_state(EmotionState.HAPPY), EmotionState.HAPPY)
         self.assertEqual(parse_emotion_state(None), EmotionState.CALM)

@@ -19,48 +19,57 @@ except ModuleNotFoundError:
     qt_core = types.ModuleType("PySide6.QtCore")
 
     class _FakeSignal:
+        # 初始化当前对象及其依赖。
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
             """初始化当前对象及其依赖。"""
             self._callbacks = []
 
+        # 模拟 _FakeSignal 的信号connect行为，记录或触发测试回调。
         def connect(self, callback) -> None:  # type: ignore[no-untyped-def]
-            """处理 `connect` 对应的业务逻辑。"""
+            """模拟 _FakeSignal 的信号connect行为，记录或触发测试回调。"""
             self._callbacks.append(callback)
 
+        # 模拟 _FakeSignal 的信号emit行为，记录或触发测试回调。
         def emit(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
-            """处理 `emit` 对应的业务逻辑。"""
+            """模拟 _FakeSignal 的信号emit行为，记录或触发测试回调。"""
             for callback in list(self._callbacks):
                 callback(*args, **kwargs)
 
     class _FakeQObject:
+        # 初始化当前对象及其依赖。
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
             """初始化当前对象及其依赖。"""
             pass
 
     class _FakeQTimer:
+        # 初始化当前对象及其依赖。
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
             """初始化当前对象及其依赖。"""
             self.timeout = _FakeSignal()
             self.running = False
 
+        # 为 _FakeQTimer 测试替身提供start行为。
         def start(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
-            """处理 `start` 对应的业务逻辑。"""
+            """为 _FakeQTimer 测试替身提供start行为。"""
             self.running = True
 
+        # 为 _FakeQTimer 测试替身提供stop行为。
         def stop(self) -> None:
-            """处理 `stop` 对应的业务逻辑。"""
+            """为 _FakeQTimer 测试替身提供stop行为。"""
             self.running = False
 
     class QCoreApplication:  # type: ignore[no-redef]
         _instance = None
 
+        # 初始化当前对象及其依赖。
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
             """初始化当前对象及其依赖。"""
             QCoreApplication._instance = self
 
+        # 为测试准备instance数据或断言辅助结果。
         @staticmethod
         def instance():  # type: ignore[no-untyped-def]
-            """处理 `instance` 对应的业务逻辑。"""
+            """为测试准备instance数据或断言辅助结果。"""
             return QCoreApplication._instance
 
     qt_core.QObject = _FakeQObject
@@ -76,36 +85,43 @@ from utils.time_utils import now_local  # noqa: E402
 
 
 class FakeUsageStore:
+    # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         self.max_values: list[int] = []
         self.local_count = 0
         self.api_count = 0
 
+    # 为 FakeUsageStore 测试替身提供canuse本地行为。
     def can_use_local(self, max_per_day: int) -> bool:
-        """判断 `can_use_local` 对应的条件是否成立。"""
+        """为 FakeUsageStore 测试替身提供canuse本地行为。"""
         self.max_values.append(max_per_day)
         return True
 
+    # 为 FakeUsageStore 测试替身提供canuseAPI行为。
     def can_use_api(self, max_per_day: int) -> bool:
-        """判断 `can_use_api` 对应的条件是否成立。"""
+        """为 FakeUsageStore 测试替身提供canuseAPI行为。"""
         return True
 
+    # 为 FakeUsageStore 测试替身提供increment本地台词行为。
     def increment_local_line(self) -> None:
-        """处理 `increment_local_line` 对应的业务逻辑。"""
+        """为 FakeUsageStore 测试替身提供increment本地台词行为。"""
         self.local_count += 1
 
+    # 为 FakeUsageStore 测试替身提供incrementAPI台词行为。
     def increment_api_line(self) -> None:
-        """处理 `increment_api_line` 对应的业务逻辑。"""
+        """为 FakeUsageStore 测试替身提供incrementAPI台词行为。"""
         self.api_count += 1
 
 
 class BehaviorControllerTests(unittest.TestCase):
+    # 准备当前测试类共用的环境和数据。
     @classmethod
     def setUpClass(cls) -> None:
         """准备当前测试类共用的环境和数据。"""
         cls.app = QCoreApplication.instance() or QCoreApplication([])
 
+    # 为测试准备控制器数据或断言辅助结果。
     def _controller(
         self,
         temp_dir: Path,
@@ -115,7 +131,7 @@ class BehaviorControllerTests(unittest.TestCase):
         memory: dict | None = None,
         character: dict | None = None,
     ) -> BehaviorController:
-        """处理 `_controller` 对应的业务逻辑。"""
+        """为测试准备控制器数据或断言辅助结果。"""
         config_dir = temp_dir / "config"
         data_dir = temp_dir / "data"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -151,8 +167,9 @@ class BehaviorControllerTests(unittest.TestCase):
         controller.period_check_timer.stop()
         return controller
 
+    # 验证invalid daily limit falls back to 默认值场景下的预期结果。
     def test_invalid_daily_limit_falls_back_to_default(self) -> None:
-        """验证 `test_invalid_daily_limit_falls_back_to_default` 对应的行为。"""
+        """验证invalid daily limit falls back to 默认值场景下的预期结果。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {
@@ -172,8 +189,9 @@ class BehaviorControllerTests(unittest.TestCase):
 
             self.assertEqual(usage.max_values[-1], 10)
 
+    # 验证主动行为 ratio adjustment calls save callback场景下的预期结果。
     def test_proactive_ratio_adjustment_calls_save_callback(self) -> None:
-        """验证 `test_proactive_ratio_adjustment_calls_save_callback` 对应的行为。"""
+        """验证主动行为 ratio adjustment calls save callback场景下的预期结果。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "proactive_content_ratio": {
@@ -183,8 +201,9 @@ class BehaviorControllerTests(unittest.TestCase):
             }
             saved = 0
 
+            # 为测试准备saver数据或断言辅助结果。
             def saver() -> None:
-                """处理 `saver` 对应的业务逻辑。"""
+                """为测试准备saver数据或断言辅助结果。"""
                 nonlocal saved
                 saved += 1
 
@@ -195,8 +214,9 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertEqual(saved, 1)
             self.assertGreater(config["proactive_content_ratio"]["extra_knowledge"], 0.35)
 
+    # 验证场景 问候 响应 does not add ratio bucket场景下的预期结果。
     def test_scenario_greeting_response_does_not_add_ratio_bucket(self) -> None:
-        """验证 `test_scenario_greeting_response_does_not_add_ratio_bucket` 对应的行为。"""
+        """验证场景 问候 响应 does not add ratio bucket场景下的预期结果。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "proactive_content_ratio": {
@@ -212,8 +232,9 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertNotIn("memory_context_greeting", config["proactive_content_ratio"])
             self.assertEqual(config["proactive_content_ratio"]["regular_greeting"], 0.65)
 
+    # 验证low interrupt 问候 takes priority after ignored prompts场景下的预期结果。
     def test_low_interrupt_greeting_takes_priority_after_ignored_prompts(self) -> None:
-        """验证 `test_low_interrupt_greeting_takes_priority_after_ignored_prompts` 对应的行为。"""
+        """验证low interrupt 问候 takes priority after ignored prompts场景下的预期结果。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {
@@ -243,8 +264,9 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertEqual(spoken[0][0], "看你可能在忙，我先安静一会儿，需要我就点我。")
             self.assertEqual(controller._last_proactive_type, "low_interrupt_greeting")
 
+    # 验证场景 问候 emits API 请求 when 记忆 上下文 exists场景下的预期结果。
     def test_scenario_greeting_emits_api_request_when_memory_context_exists(self) -> None:
-        """验证 `test_scenario_greeting_emits_api_request_when_memory_context_exists` 对应的行为。"""
+        """验证场景 问候 emits API 请求 when 记忆 上下文 exists场景下的预期结果。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {
@@ -295,8 +317,9 @@ class BehaviorControllerTests(unittest.TestCase):
             )
             self.assertEqual(controller._last_proactive_type, "memory_context_greeting")
 
+    # 验证场景 问候 uses 本地 template when API disabled场景下的预期结果。
     def test_scenario_greeting_uses_local_template_when_api_disabled(self) -> None:
-        """验证 `test_scenario_greeting_uses_local_template_when_api_disabled` 对应的行为。"""
+        """验证场景 问候 uses 本地 template when API disabled场景下的预期结果。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {

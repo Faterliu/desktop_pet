@@ -29,6 +29,7 @@ class SpritePlayer(QObject):
     frame_changed = Signal(QPixmap)
     action_changed = Signal(str)
 
+    # 初始化精灵播放器，加载配置并准备动画计时器。
     def __init__(self, config_path: str | Path, scale: float = 1.0) -> None:
         """初始化精灵播放器，加载配置并准备动画计时器。"""
         super().__init__()
@@ -46,6 +47,7 @@ class SpritePlayer(QObject):
         self.force_single_cycle = False
         self.load()
 
+    # 重新读取精灵配置与帧数据，并切回默认动作。
     def load(self) -> None:
         """重新读取精灵配置与帧数据，并切回默认动作。"""
         self.config = load_json(self.config_path, DEFAULT_SPRITE_CONFIG)
@@ -57,11 +59,13 @@ class SpritePlayer(QObject):
         self._restart_timer_for_action(self.current_action)
         self.frame_changed.emit(self.current_pixmap())
 
+    # 更新精灵显示缩放比例并立即刷新当前帧。
     def set_scale(self, scale: float) -> None:
         """更新精灵显示缩放比例并立即刷新当前帧。"""
         self.scale = max(scale, 0.2)
         self.frame_changed.emit(self.current_pixmap())
 
+    # 切换当前动作，并可选择强制只播放一轮后回退。
     def set_action(
         self,
         action_name: str,
@@ -80,6 +84,7 @@ class SpritePlayer(QObject):
         self.action_changed.emit(self.current_action)
         self.frame_changed.emit(self.current_pixmap())
 
+    # 返回当前动作下应显示的帧图像。
     def current_pixmap(self) -> QPixmap:
         """返回当前动作下应显示的帧图像。"""
         frames = self.frames_by_action.get(self.current_action) or [self._placeholder_frame()]
@@ -93,12 +98,14 @@ class SpritePlayer(QObject):
             Qt.TransformationMode.FastTransformation,
         )
 
+    # 返回按当前缩放计算后的基础显示尺寸。
     def base_size(self) -> tuple[int, int]:
         """返回按当前缩放计算后的基础显示尺寸。"""
         width = int(self.config.get("frame_width", 192) * self.scale)
         height = int(self.config.get("frame_height", 208) * self.scale)
         return width, height
 
+    # 返回指定动作完整播放一轮大约需要的时间。
     def action_duration_ms(self, action_name: str, force_single_cycle: bool = False) -> int:
         """返回指定动作完整播放一轮大约需要的时间。"""
         action_config = self.config.get("actions", {}).get(action_name, {})
@@ -109,6 +116,7 @@ class SpritePlayer(QObject):
             return interval_ms
         return max(interval_ms, frame_count * interval_ms)
 
+    # 推进到下一帧；非循环动作结束后自动回退。
     def _advance_frame(self) -> None:
         """推进到下一帧；非循环动作结束后自动回退。"""
         frames = self.frames_by_action.get(self.current_action, [])
@@ -127,6 +135,7 @@ class SpritePlayer(QObject):
             self.current_index += 1
         self.frame_changed.emit(self.current_pixmap())
 
+    # 根据动作帧率重新启动播放计时器。
     def _restart_timer_for_action(self, action_name: str) -> None:
         """根据动作帧率重新启动播放计时器。"""
         action_config = self.config.get("actions", {}).get(action_name, {})
@@ -134,6 +143,7 @@ class SpritePlayer(QObject):
         interval_ms = max(400, int(1000 / max(fps, 1)))
         self.timer.start(interval_ms)
 
+    # 从图集裁切出每个动作对应的帧列表。
     def _load_frames(self) -> dict[str, list[QPixmap]]:
         """从图集裁切出每个动作对应的帧列表。"""
         sprite_rel_path = self.config.get("sprite_file", "assets/spritesheet.webp")
@@ -159,6 +169,7 @@ class SpritePlayer(QObject):
             frames_by_action[action_name] = frames or [self._placeholder_frame()]
         return frames_by_action
 
+    # 兜底修复被读成白底的素材帧，只移除从画面边缘连通的浅色背景。
     def _restore_edge_transparency(self, pixmap: QPixmap) -> QPixmap:
         """兜底修复被读成白底的素材帧，只移除从画面边缘连通的浅色背景。"""
         image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
@@ -203,6 +214,7 @@ class SpritePlayer(QObject):
             return pixmap
         return QPixmap.fromImage(image)
 
+    # 检查帧边缘是否已经存在透明像素。
     def _edge_has_transparency(self, image: QImage) -> bool:
         """检查帧边缘是否已经存在透明像素。"""
         width = image.width()
@@ -219,6 +231,7 @@ class SpritePlayer(QObject):
                 return True
         return False
 
+    # 判断一个边缘连通像素是否属于需要被还原为透明的浅色背景。
     def _is_edge_background_color(self, color: QColor) -> bool:
         """判断一个边缘连通像素是否属于需要被还原为透明的浅色背景。"""
         if color.alpha() < 16:
@@ -228,6 +241,7 @@ class SpritePlayer(QObject):
         blue = color.blue()
         return min(red, green, blue) >= 230 and max(red, green, blue) - min(red, green, blue) <= 32
 
+    # 在素材缺失时，为每个动作生成占位帧。
     def _placeholder_actions(self) -> dict[str, list[QPixmap]]:
         """在素材缺失时，为每个动作生成占位帧。"""
         return {
@@ -235,6 +249,7 @@ class SpritePlayer(QObject):
             for action_name in self.config.get("actions", {"idle": {}}).keys()
         }
 
+    # 生成一张带文字的占位图，避免素材缺失时界面空白。
     def _placeholder_frame(self, text: str = "小桃") -> QPixmap:
         """生成一张带文字的占位图，避免素材缺失时界面空白。"""
         width = int(self.config.get("frame_width", 192))

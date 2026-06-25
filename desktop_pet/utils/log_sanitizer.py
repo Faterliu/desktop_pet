@@ -8,8 +8,9 @@ from typing import Any
 DEFAULT_TEXT_LIMIT = 300
 
 
+# 根据 value、visible_prefix、visible_suffix 脱敏或截断API密钥，避免日志暴露敏感内容。
 def mask_api_key(value: Any, visible_prefix: int = 4, visible_suffix: int = 4) -> str:
-    """处理 `mask_api_key` 对应的业务逻辑。"""
+    """根据 value、visible_prefix、visible_suffix 脱敏或截断API密钥，避免日志暴露敏感内容。"""
     text = str(value or "").strip()
     if not text:
         return ""
@@ -21,16 +22,19 @@ def mask_api_key(value: Any, visible_prefix: int = 4, visible_suffix: int = 4) -
     return f"{text[:visible_prefix]}...{text[-visible_suffix:]}"
 
 
+# 根据 value 脱敏或截断secrets，避免日志暴露敏感内容。
 def redact_secrets(value: Any) -> str:
-    """处理 `redact_secrets` 对应的业务逻辑。"""
+    """根据 value 脱敏或截断secrets，避免日志暴露敏感内容。"""
     text = str(value or "")
 
+    # 根据 match 脱敏或截断bearer，避免日志暴露敏感内容。
     def mask_bearer(match: re.Match[str]) -> str:
-        """处理 `mask_bearer` 对应的业务逻辑。"""
+        """根据 match 脱敏或截断bearer，避免日志暴露敏感内容。"""
         return f"{match.group(1)}{mask_api_key(match.group(2))}"
 
+    # 根据 match 脱敏或截断named密钥，避免日志暴露敏感内容。
     def mask_named_key(match: re.Match[str]) -> str:
-        """处理 `mask_named_key` 对应的业务逻辑。"""
+        """根据 match 脱敏或截断named密钥，避免日志暴露敏感内容。"""
         return f"{match.group(1)}{mask_api_key(match.group(2))}"
 
     text = re.sub(r"(Bearer\s+)([A-Za-z0-9._\-]{8,})", mask_bearer, text)
@@ -43,8 +47,9 @@ def redact_secrets(value: Any) -> str:
     return text
 
 
+# 根据 value、max_chars 脱敏或截断文本，避免日志暴露敏感内容。
 def truncate_text(value: Any, max_chars: int = DEFAULT_TEXT_LIMIT) -> str:
-    """处理 `truncate_text` 对应的业务逻辑。"""
+    """根据 value、max_chars 脱敏或截断文本，避免日志暴露敏感内容。"""
     text = redact_secrets(value)
     if max_chars <= 0:
         return ""
@@ -57,13 +62,15 @@ def truncate_text(value: Any, max_chars: int = DEFAULT_TEXT_LIMIT) -> str:
     return f"{text[: max_chars - len(marker)]}{marker}"
 
 
+# 把异常类型和消息脱敏后截断为可安全写入日志的文本。
 def safe_exception(exc: BaseException, max_chars: int = DEFAULT_TEXT_LIMIT) -> str:
-    """处理 `safe_exception` 对应的业务逻辑。"""
+    """把异常类型和消息脱敏后截断为可安全写入日志的文本。"""
     return truncate_text(f"{exc.__class__.__name__}: {exc}", max_chars=max_chars)
 
 
+# 提取 API 响应的键、choices 和 message 结构，避免记录原始内容。
 def response_shape(data: Any) -> dict[str, Any]:
-    """处理 `response_shape` 对应的业务逻辑。"""
+    """提取 API 响应的键、choices 和 message 结构，避免记录原始内容。"""
     if not isinstance(data, Mapping):
         return {"type": type(data).__name__}
 
@@ -87,8 +94,9 @@ def response_shape(data: Any) -> dict[str, Any]:
     return shape
 
 
+# 统计消息数量、角色分布和内容长度，返回隐私安全的结构摘要。
 def messages_shape(messages: list[dict[str, Any]]) -> dict[str, Any]:
-    """处理 `messages_shape` 对应的业务逻辑。"""
+    """统计消息数量、角色分布和内容长度，返回隐私安全的结构摘要。"""
     role_counts: dict[str, int] = {}
     total_chars = 0
     for message in messages:

@@ -45,6 +45,7 @@ class MemoryTextItem:
 
 
 class MemoryEmbeddingClient:
+    # 初始化当前对象及其依赖。
     def __init__(self, memory_config: dict[str, Any]) -> None:
         """初始化当前对象及其依赖。"""
         self.memory_config = memory_config
@@ -65,16 +66,19 @@ class MemoryEmbeddingClient:
             30,
         )
 
+    # 判断必需配置是否完整，并返回客户端是否可以调用。
     def is_configured(self) -> bool:
-        """判断 `is_configured` 对应的条件是否成立。"""
+        """判断必需配置是否完整，并返回客户端是否可以调用。"""
         return bool(self.api_key and self.base_url and self.model)
 
+    # 用向量接口地址、模型、维度和编码格式生成配置签名。
     def signature(self) -> str:
-        """处理 `signature` 对应的业务逻辑。"""
+        """用向量接口地址、模型、维度和编码格式生成配置签名。"""
         return "|".join([self.base_url, self.model, str(self.dimensions), self.encoding_format])
 
+    # 把多段文本按批次提交给向量接口，并返回对应向量列表。
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """处理 `embed_texts` 对应的业务逻辑。"""
+        """把多段文本按批次提交给向量接口，并返回对应向量列表。"""
         if not self.is_configured():
             return []
 
@@ -85,8 +89,9 @@ class MemoryEmbeddingClient:
             embeddings.extend(self._embed_batch(batch))
         return embeddings
 
+    # 根据 texts 调用 DashScope 向量接口，并按返回索引组装向量列表。
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """处理 `_embed_batch` 对应的业务逻辑。"""
+        """根据 texts 调用 DashScope 向量接口，并按返回索引组装向量列表。"""
         if requests is None:
             raise RuntimeError("requests is not installed")
         response = requests.post(
@@ -119,8 +124,9 @@ class MemoryEmbeddingClient:
             raise ValueError("Embedding response count does not match input count")
         return vectors
 
+    # 根据 memory_config 从环境变量或配置中读取 DashScope API 密钥。
     def _dashscope_api_key(self, memory_config: dict[str, Any]) -> str:
-        """处理 `_dashscope_api_key` 对应的业务逻辑。"""
+        """根据 memory_config 从环境变量或配置中读取 DashScope API 密钥。"""
         configured_key = str(memory_config.get("dashscope_api_key", "") or "").strip()
         if configured_key:
             return configured_key
@@ -129,8 +135,9 @@ class MemoryEmbeddingClient:
         env_name = env_name or "DASHSCOPE_API_KEY"
         return str(os.getenv(env_name, "") or "").strip()
 
+    # 根据 value、default 转换为正整数，失败或小于等于零时返回默认值。
     def _positive_int(self, value: Any, default: int) -> int:
-        """处理 `_positive_int` 对应的业务逻辑。"""
+        """根据 value、default 转换为正整数，失败或小于等于零时返回默认值。"""
         try:
             parsed = int(value)
         except (TypeError, ValueError):
@@ -139,17 +146,20 @@ class MemoryEmbeddingClient:
 
 
 class MemoryVectorStore:
+    # 初始化当前对象及其依赖。
     def __init__(self, path: str | Path, app_config: dict[str, Any]) -> None:
         """初始化当前对象及其依赖。"""
         self.path = Path(path)
         self.app_config = app_config
 
+    # 替换运行中的应用配置，供后续向量同步读取。
     def update_config(self, app_config: dict[str, Any]) -> None:
-        """更新 `update_config` 对应的状态。"""
+        """替换运行中的应用配置，供后续向量同步读取。"""
         self.app_config = app_config
 
+    # 根据当前记忆内容刷新向量索引，并在配置缺失时跳过同步。
     def sync_memory(self, memory: dict[str, Any]) -> None:
-        """同步并刷新 `sync_memory` 对应的状态。"""
+        """根据当前记忆内容刷新向量索引，并在配置缺失时跳过同步。"""
         memory_config = self._memory_config()
         if not memory_config.get("enable_memory_vectors", True):
             return
@@ -218,8 +228,9 @@ class MemoryVectorStore:
             index["last_synced_at"] = now_iso()
             self._save_index(index)
 
+    # 到期时执行记忆语义去重，并保存合并后的记忆文件。
     def run_due_semantic_merge(self, memory_path: str | Path) -> dict[str, Any]:
-        """执行 `run_due_semantic_merge` 对应的流程。"""
+        """到期时执行记忆语义去重，并保存合并后的记忆文件。"""
         memory_config = self._memory_config()
         if not memory_config.get("enable_semantic_memory_merge", True):
             return {"status": "disabled", "merged_count": 0}
@@ -237,8 +248,9 @@ class MemoryVectorStore:
         self._mark_semantic_merge_finished()
         return result
 
+    # 根据上次合并时间判断是否该执行语义去重。
     def is_semantic_merge_due(self) -> bool:
-        """判断 `is_semantic_merge_due` 对应的条件是否成立。"""
+        """根据上次合并时间判断是否该执行语义去重。"""
         index = self._load_index()
         last_run = str(index.get("last_semantic_merge_at", "") or "").strip()
         if not last_run:
@@ -254,8 +266,9 @@ class MemoryVectorStore:
         )
         return datetime.now() - last_dt >= timedelta(days=interval_days)
 
+    # 根据 memory_path 按语义相似度合并重复记忆，并保存精简结果。
     def _merge_semantic_duplicates(self, memory_path: str | Path) -> dict[str, Any]:
-        """处理 `_merge_semantic_duplicates` 对应的业务逻辑。"""
+        """根据 memory_path 按语义相似度合并重复记忆，并保存精简结果。"""
         threshold = self._float_value(
             self._memory_config().get("semantic_duplicate_similarity_threshold", 0.96),
             0.96,
@@ -277,8 +290,9 @@ class MemoryVectorStore:
             self.sync_memory(memory)
         return {"status": "completed", "merged_count": merged_count}
 
+    # 根据 items、threshold 根据相似度阈值把重复记忆划分为分组。
     def _duplicate_groups(self, items: list[dict[str, Any]], threshold: float) -> list[list[dict[str, Any]]]:
-        """处理 `_duplicate_groups` 对应的业务逻辑。"""
+        """根据 items、threshold 根据相似度阈值把重复记忆划分为分组。"""
         groups_by_path: dict[str, list[dict[str, Any]]] = {}
         for item in items:
             path = str(item.get("path", "") or "")
@@ -291,15 +305,17 @@ class MemoryVectorStore:
         for path_items in groups_by_path.values():
             parent = list(range(len(path_items)))
 
+            # 查找并返回并查集节点的根索引。
             def find(index: int) -> int:
-                """处理 `find` 对应的业务逻辑。"""
+                """查找并返回并查集节点的根索引。"""
                 while parent[index] != index:
                     parent[index] = parent[parent[index]]
                     index = parent[index]
                 return index
 
+            # 合并两个并查集分组，保持语义重复项属于同一集合。
             def union(left: int, right: int) -> None:
-                """处理 `union` 对应的业务逻辑。"""
+                """合并两个并查集分组，保持语义重复项属于同一集合。"""
                 left_root = find(left)
                 right_root = find(right)
                 if left_root != right_root:
@@ -317,13 +333,14 @@ class MemoryVectorStore:
             duplicate_groups.extend(cluster for cluster in clusters.values() if len(cluster) > 1)
         return duplicate_groups
 
+    # 根据 left_item、right_item、threshold 判断语义duplicate是否满足条件并返回布尔结果。
     def _is_semantic_duplicate(
         self,
         left_item: dict[str, Any],
         right_item: dict[str, Any],
         threshold: float,
     ) -> bool:
-        """判断 `_is_semantic_duplicate` 对应的条件是否成立。"""
+        """根据 left_item、right_item、threshold 判断语义duplicate是否满足条件并返回布尔结果。"""
         left_text = str(left_item.get("text", "") or "").strip()
         right_text = str(right_item.get("text", "") or "").strip()
         if not left_text or not right_text or left_text == right_text:
@@ -334,12 +351,13 @@ class MemoryVectorStore:
         score = self._cosine_similarity(left_item.get("embedding"), right_item.get("embedding"))
         return score >= threshold
 
+    # 根据 memory、duplicate_groups 整理apply duplicate groups，并把结果交给调用方或写回状态。
     def _apply_duplicate_groups(
         self,
         memory: dict[str, Any],
         duplicate_groups: list[list[dict[str, Any]]],
     ) -> int:
-        """更新 `_apply_duplicate_groups` 对应的状态。"""
+        """根据 memory、duplicate_groups 整理apply duplicate groups，并把结果交给调用方或写回状态。"""
         by_path: dict[str, list[list[dict[str, Any]]]] = {}
         for group in duplicate_groups:
             path = str(group[0].get("path", "") or "")
@@ -376,8 +394,9 @@ class MemoryVectorStore:
                 node[:] = new_values
         return merged_count
 
+    # 根据 items 从重复分组中选择信息量最高的代表文本。
     def _representative_text(self, items: list[dict[str, Any]]) -> str:
-        """处理 `_representative_text` 对应的业务逻辑。"""
+        """根据 items 从重复分组中选择信息量最高的代表文本。"""
         ordered = sorted(
             items,
             key=lambda item: (
@@ -387,21 +406,24 @@ class MemoryVectorStore:
         )
         return str(ordered[0].get("text", "") or "").strip()
 
+    # 记录语义合并完成时间，避免短时间内重复维护。
     def _mark_semantic_merge_finished(self) -> None:
-        """处理 `_mark_semantic_merge_finished` 对应的业务逻辑。"""
+        """记录语义合并完成时间，避免短时间内重复维护。"""
         with MEMORY_IO_LOCK:
             index = self._load_index()
             index["last_semantic_merge_at"] = now_iso()
             self._save_index(index)
 
+    # 根据 memory 遍历嵌套数据中的文本项，过滤空值后逐条返回。
     def _iter_memory_texts(self, memory: dict[str, Any]) -> list[MemoryTextItem]:
-        """处理 `_iter_memory_texts` 对应的业务逻辑。"""
+        """根据 memory 遍历嵌套数据中的文本项，过滤空值后逐条返回。"""
         items: list[MemoryTextItem] = []
         seen: set[tuple[str, str]] = set()
         min_text_length = self._memory_vector_min_text_length()
 
+        # 根据 node、path 整理visit，并把结果交给调用方或写回状态。
         def visit(node: Any, path: list[str]) -> None:
-            """处理 `visit` 对应的业务逻辑。"""
+            """根据 node、path 整理visit，并把结果交给调用方或写回状态。"""
             if isinstance(node, dict):
                 for key, value in node.items():
                     if key in {"schema_version", "last_updated"}:
@@ -431,8 +453,9 @@ class MemoryVectorStore:
         visit(memory, [])
         return items
 
+    # 根据 memory、path 处理文件路径或 JSON 内容，保持读写结果稳定。
     def _node_for_path(self, memory: dict[str, Any], path: str) -> Any:
-        """处理 `_node_for_path` 对应的业务逻辑。"""
+        """根据 memory、path 处理文件路径或 JSON 内容，保持读写结果稳定。"""
         node: Any = memory
         for part in path.split("."):
             if not isinstance(node, dict):
@@ -440,8 +463,9 @@ class MemoryVectorStore:
             node = node.get(part)
         return node
 
+    # 读取记忆向量索引，缺失或损坏时返回默认索引。
     def _load_index(self) -> dict[str, Any]:
-        """读取 `_load_index` 所需的数据。"""
+        """读取记忆向量索引，缺失或损坏时返回默认索引。"""
         index = load_json(self.path, DEFAULT_VECTOR_INDEX)
         if not isinstance(index, dict):
             return dict(DEFAULT_VECTOR_INDEX)
@@ -452,8 +476,9 @@ class MemoryVectorStore:
         index.setdefault("last_semantic_merge_at", "")
         return index
 
+    # 把记忆向量索引写入 JSON 文件。
     def _save_index(self, index: dict[str, Any]) -> None:
-        """保存 `_save_index` 产生的数据。"""
+        """把记忆向量索引写入 JSON 文件。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.path.with_name(f"{self.path.name}.tmp")
         try:
@@ -470,17 +495,20 @@ class MemoryVectorStore:
                 logger.warning("Failed to remove temporary memory vector file %s: %s", tmp_path, exc)
             raise
 
+    # 根据 client 读取向量客户端签名，用于判断索引是否需要重建。
     def _embedding_signature(self, client: MemoryEmbeddingClient) -> str:
-        """处理 `_embedding_signature` 对应的业务逻辑。"""
+        """根据 client 读取向量客户端签名，用于判断索引是否需要重建。"""
         return f"{client.signature()}|precision={self._memory_vector_precision()}"
 
+    # 根据 embedding 按配置精度压缩向量数值，减小 JSON 索引体积。
     def _compress_embedding(self, embedding: list[float]) -> list[float]:
-        """处理 `_compress_embedding` 对应的业务逻辑。"""
+        """根据 embedding 按配置精度压缩向量数值，减小 JSON 索引体积。"""
         precision = self._memory_vector_precision()
         return [round(float(value), precision) for value in embedding]
 
+    # 根据 items 按重要度和时间排序裁剪向量索引条目。
     def _limit_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """处理 `_limit_items` 对应的业务逻辑。"""
+        """根据 items 按重要度和时间排序裁剪向量索引条目。"""
         max_items = self._memory_vector_max_items()
         valid_items = [item for item in items if isinstance(item, dict)]
         if len(valid_items) <= max_items:
@@ -498,8 +526,9 @@ class MemoryVectorStore:
         keep_ids = {str(item.get("id")) for item in ranked[:max_items]}
         return [item for item in valid_items if str(item.get("id")) in keep_ids]
 
+    # 根据 path 处理记忆数据，保持本地记忆和外部索引一致。
     def _memory_item_importance(self, path: str) -> int:
-        """处理 `_memory_item_importance` 对应的业务逻辑。"""
+        """根据 path 处理记忆数据，保持本地记忆和外部索引一致。"""
         if path.startswith("relationship_memory."):
             return 30
         if path.startswith("work_study.current_projects"):
@@ -512,45 +541,52 @@ class MemoryVectorStore:
             return 15
         return 10
 
+    # 根据 value 把 ISO 时间转换为排序分数，无法解析时返回零。
     def _timestamp_score(self, value: str) -> float:
-        """处理 `_timestamp_score` 对应的业务逻辑。"""
+        """根据 value 把 ISO 时间转换为排序分数，无法解析时返回零。"""
         try:
             return datetime.fromisoformat(value).timestamp()
         except ValueError:
             return 0.0
 
+    # 处理记忆数据，保持本地记忆和外部索引一致。
     def _memory_vector_precision(self) -> int:
-        """处理 `_memory_vector_precision` 对应的业务逻辑。"""
+        """处理记忆数据，保持本地记忆和外部索引一致。"""
         return self._positive_int(
             self._memory_config().get("memory_vector_precision", DEFAULT_VECTOR_PRECISION),
             DEFAULT_VECTOR_PRECISION,
         )
 
+    # 处理记忆数据，保持本地记忆和外部索引一致。
     def _memory_vector_min_text_length(self) -> int:
-        """处理 `_memory_vector_min_text_length` 对应的业务逻辑。"""
+        """处理记忆数据，保持本地记忆和外部索引一致。"""
         return self._positive_int(
             self._memory_config().get("memory_vector_min_text_length", DEFAULT_VECTOR_MIN_TEXT_LENGTH),
             DEFAULT_VECTOR_MIN_TEXT_LENGTH,
         )
 
+    # 处理记忆数据，保持本地记忆和外部索引一致。
     def _memory_vector_max_items(self) -> int:
-        """处理 `_memory_vector_max_items` 对应的业务逻辑。"""
+        """处理记忆数据，保持本地记忆和外部索引一致。"""
         return self._positive_int(
             self._memory_config().get("memory_vector_max_items", DEFAULT_VECTOR_MAX_ITEMS),
             DEFAULT_VECTOR_MAX_ITEMS,
         )
 
+    # 读取配置片段，缺失时返回安全默认配置。
     def _memory_config(self) -> dict[str, Any]:
-        """处理 `_memory_config` 对应的业务逻辑。"""
+        """读取配置片段，缺失时返回安全默认配置。"""
         return self.app_config.setdefault("memory", {})
 
+    # 根据 path、text 用记忆路径和文本生成稳定哈希 ID。
     def _item_id(self, path: str, text: str) -> str:
-        """处理 `_item_id` 对应的业务逻辑。"""
+        """根据 path、text 用记忆路径和文本生成稳定哈希 ID。"""
         raw = f"{path}\n{text}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
 
+    # 根据 left、right 计算两个向量的余弦相似度并返回分数。
     def _cosine_similarity(self, left: Any, right: Any) -> float:
-        """处理 `_cosine_similarity` 对应的业务逻辑。"""
+        """根据 left、right 计算两个向量的余弦相似度并返回分数。"""
         if not isinstance(left, list) or not isinstance(right, list) or len(left) != len(right):
             return 0.0
         left_values = [float(value) for value in left]
@@ -562,23 +598,26 @@ class MemoryVectorStore:
             return 0.0
         return dot / (left_norm * right_norm)
 
+    # 根据 left、right 判断negationmismatch是否满足条件并返回布尔结果。
     def _has_negation_mismatch(self, left: str, right: str) -> bool:
-        """判断 `_has_negation_mismatch` 对应的条件是否成立。"""
+        """根据 left、right 判断negationmismatch是否满足条件并返回布尔结果。"""
         negations = ["不", "别", "不要", "不想", "不喜欢", "讨厌", "避免", "拒绝", "no", "not", "never"]
         left_has = any(word in left.lower() for word in negations)
         right_has = any(word in right.lower() for word in negations)
         return left_has != right_has
 
+    # 根据 value、default 转换为正整数，失败或小于等于零时返回默认值。
     def _positive_int(self, value: Any, default: int) -> int:
-        """处理 `_positive_int` 对应的业务逻辑。"""
+        """根据 value、default 转换为正整数，失败或小于等于零时返回默认值。"""
         try:
             parsed = int(value)
         except (TypeError, ValueError):
             return default
         return parsed if parsed > 0 else default
 
+    # 根据 value、default 转换为浮点数，失败时返回默认值。
     def _float_value(self, value: Any, default: float) -> float:
-        """处理 `_float_value` 对应的业务逻辑。"""
+        """根据 value、default 转换为浮点数，失败时返回默认值。"""
         try:
             parsed = float(value)
         except (TypeError, ValueError):

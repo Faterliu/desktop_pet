@@ -41,6 +41,7 @@ _DWMSBT_NONE = 1
 _DWMWA_COLOR_NONE = 0xFFFFFFFE
 
 
+# 在 nativeEvent 中调用，移除 Windows DWM 为无边框窗口添加的边框。
 def suppress_dwm_border(event_type: object, message: object) -> tuple[bool, int]:
     """在 nativeEvent 中调用，移除 Windows DWM 为无边框窗口添加的边框。
 
@@ -71,6 +72,7 @@ def suppress_dwm_border(event_type: object, message: object) -> tuple[bool, int]
     return False, 0
 
 
+# 对透明无边框窗口应用 Windows 侧修正，移除矩形边框、圆角和系统背景。
 def apply_transparent_window_fixes(widget: object) -> None:
     """对透明无边框窗口应用 Windows 侧修正，移除矩形边框、圆角和系统背景。"""
     if sys.platform != "win32":
@@ -90,6 +92,7 @@ def apply_transparent_window_fixes(widget: object) -> None:
     _set_dwm_color_attribute(hwnd, _DWMWA_TEXT_COLOR, _DWMWA_COLOR_NONE)
 
 
+# 去掉可能让窗口出现浅色外框的扩展边缘样式。
 def _remove_extended_edge_styles(hwnd: int) -> None:
     """去掉可能让窗口出现浅色外框的扩展边缘样式。"""
     try:
@@ -120,6 +123,7 @@ def _remove_extended_edge_styles(hwnd: int) -> None:
         return
 
 
+# 设置 DWM 整数属性；旧系统不支持时静默跳过。
 def _set_dwm_int_attribute(hwnd: int, attribute: int, value: int) -> None:
     """设置 DWM 整数属性；旧系统不支持时静默跳过。"""
     try:
@@ -134,6 +138,7 @@ def _set_dwm_int_attribute(hwnd: int, attribute: int, value: int) -> None:
         return
 
 
+# 使用 Windows API 直接设置窗口的 WS_EX_TOPMOST 样式并调整 Z-order。
 def force_window_topmost(hwnd: int, enabled: bool = True) -> None:
     """使用 Windows API 直接设置窗口的 WS_EX_TOPMOST 样式并调整 Z-order。
 
@@ -164,6 +169,7 @@ def force_window_topmost(hwnd: int, enabled: bool = True) -> None:
         return
 
 
+# 设置 DWM 颜色属性；用于声明边框、标题栏等颜色不存在。
 def _set_dwm_color_attribute(hwnd: int, attribute: int, value: int) -> None:
     """设置 DWM 颜色属性；用于声明边框、标题栏等颜色不存在。"""
     try:

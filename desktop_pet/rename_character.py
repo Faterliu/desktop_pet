@@ -25,8 +25,9 @@ BINARY_EXTENSIONS = {
 }
 
 
+# 根据文件扩展名判断路径是否属于可替换文本文件。
 def is_text_file(path: Path) -> bool:
-    """判断 `is_text_file` 对应的条件是否成立。"""
+    """根据文件扩展名判断路径是否属于可替换文本文件。"""
     suffix = path.suffix.lower()
     if suffix in BINARY_EXTENSIONS:
         return False
@@ -36,6 +37,7 @@ def is_text_file(path: Path) -> bool:
     return False
 
 
+# 扫描目标目录，预览每个文件中旧名字的出现次数。
 def scan_and_preview(new_name: str) -> dict[Path, int]:
     """扫描目标目录，预览每个文件中旧名字的出现次数。"""
     results: dict[Path, int] = {}
@@ -66,6 +68,7 @@ def scan_and_preview(new_name: str) -> dict[Path, int]:
     return results
 
 
+# 在指定文件中执行替换。
 def execute_replace(new_name: str, files: dict[Path, int]) -> None:
     """在指定文件中执行替换。"""
     replaced = 0
@@ -78,6 +81,7 @@ def execute_replace(new_name: str, files: dict[Path, int]) -> None:
     print(f"已完成 {replaced} 个文件的替换。")
 
 
+# 运行当前模块的主流程。
 def main() -> None:
     """运行当前模块的主流程。"""
     if len(sys.argv) < 2:

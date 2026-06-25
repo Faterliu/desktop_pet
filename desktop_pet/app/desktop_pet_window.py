@@ -91,8 +91,9 @@ LOCAL_LINE_REFRESH_LABELS = {
 }
 
 
+# 根据 value、default 转换为正整数，失败或小于等于零时返回默认值。
 def _positive_int(value: Any, default: int) -> int:
-    """处理 `_positive_int` 对应的业务逻辑。"""
+    """根据 value、default 转换为正整数，失败或小于等于零时返回默认值。"""
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -104,6 +105,7 @@ class ChatWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
 
+    # 初始化后台聊天任务，持有本次请求所需依赖。
     def __init__(
         self,
         user_message: str,
@@ -126,6 +128,7 @@ class ChatWorker(QObject):
         self.user_id = user_id
         self.app_config = app_config or {}
 
+    # 在工作线程中构建消息并请求模型回复。
     def run(self) -> None:
         """在工作线程中构建消息并请求模型回复。"""
         try:
@@ -151,8 +154,9 @@ class ChatWorker(QObject):
             logger.exception("Unexpected chat worker failure")
             self.failed.emit(f"我刚刚走神了一下：{exc}")
 
+    # 检索与当前消息相关的长期记忆文本并返回。
     def _relevant_memories(self) -> str:
-        """处理 `_relevant_memories` 对应的业务逻辑。"""
+        """检索与当前消息相关的长期记忆文本并返回。"""
         memory_config = self.app_config.get("memory", {})
         if (
             not memory_config.get("enable_mem0", False)
@@ -176,6 +180,7 @@ class ProactiveSpeakWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
 
+    # 初始化 API 主动说话测试任务。
     def __init__(
         self,
         client: DeepSeekClient,
@@ -186,6 +191,7 @@ class ProactiveSpeakWorker(QObject):
         self.client = client
         self.prompt_builder = prompt_builder
 
+    # 请求模型生成一条简短、温柔的主动问候。
     def run(self) -> None:
         """请求模型生成一条简短、温柔的主动问候。"""
         try:
@@ -206,6 +212,7 @@ class ScenarioGreetingWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
 
+    # 初始化当前对象及其依赖。
     def __init__(
         self,
         client: DeepSeekClient,
@@ -220,8 +227,9 @@ class ScenarioGreetingWorker(QObject):
         self.fallback_line = fallback_line
         self.max_chars = max_chars
 
+    # 在线程中执行 ScenarioGreetingWorker 的后台任务，并通过信号返回结果。
     def run(self) -> None:
-        """处理 `run` 对应的业务逻辑。"""
+        """在线程中执行 ScenarioGreetingWorker 的后台任务，并通过信号返回结果。"""
         try:
             messages = build_scenario_greeting_messages(self.context, self.max_chars)
             reply = sanitize_scenario_greeting(self.client.chat(messages), self.max_chars)
@@ -239,6 +247,7 @@ class KnowledgeSpeakWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
 
+    # 初始化记忆增强的知识问候 API 任务。
     def __init__(
         self,
         client: DeepSeekClient,
@@ -259,6 +268,7 @@ class KnowledgeSpeakWorker(QObject):
         self.use_mem0 = use_mem0
         self.mem0_memory_context = mem0_memory_context
 
+    # 基于用户记忆随机选取一个偏好方向，生成 2-3 句针对性知识问候。
     def run(self) -> None:
         """基于用户记忆随机选取一个偏好方向，生成 2-3 句针对性知识问候。"""
         try:
@@ -293,8 +303,9 @@ class KnowledgeSpeakWorker(QObject):
             logger.exception("Unexpected knowledge worker failure")
             self.failed.emit(f"知识问候走神了：{exc}")
 
+    # 处理记忆数据，保持本地记忆和外部索引一致。
     def _mem0_memory_context(self) -> str:
-        """处理 `_mem0_memory_context` 对应的业务逻辑。"""
+        """处理记忆数据，保持本地记忆和外部索引一致。"""
         if self.mem0_memory_context:
             return self.mem0_memory_context
         if not self.use_mem0 or self.mem0_memory_service is None:
@@ -318,6 +329,7 @@ class Mem0InitializationWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
 
+    # 初始化当前对象及其依赖。
     def __init__(
         self,
         app_config: dict[str, Any],
@@ -328,8 +340,9 @@ class Mem0InitializationWorker(QObject):
         self.app_config = app_config
         self.existing_service = existing_service
 
+    # 在线程中执行 Mem0InitializationWorker 的后台任务，并通过信号返回结果。
     def run(self) -> None:
-        """处理 `run` 对应的业务逻辑。"""
+        """在线程中执行 Mem0InitializationWorker 的后台任务，并通过信号返回结果。"""
         try:
             if self.existing_service is not None:
                 self.existing_service.close()
@@ -343,6 +356,7 @@ class Mem0SearchWorker(QObject):
     finished = Signal(str)
     failed = Signal(str)
 
+    # 初始化当前对象及其依赖。
     def __init__(
         self,
         mem0_memory_service: Mem0MemoryService,
@@ -357,8 +371,9 @@ class Mem0SearchWorker(QObject):
         self.query = query
         self.top_k = top_k
 
+    # 在线程中执行 Mem0SearchWorker 的后台任务，并通过信号返回结果。
     def run(self) -> None:
-        """处理 `run` 对应的业务逻辑。"""
+        """在线程中执行 Mem0SearchWorker 的后台任务，并通过信号返回结果。"""
         try:
             context = self.mem0_memory_service.format_for_prompt(
                 user_id=self.user_id,
@@ -375,6 +390,7 @@ class MemorySemanticMergeWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
 
+    # 初始化当前对象及其依赖。
     def __init__(
         self,
         vector_store: MemoryVectorStore,
@@ -385,8 +401,9 @@ class MemorySemanticMergeWorker(QObject):
         self.vector_store = vector_store
         self.memory_path = memory_path
 
+    # 在线程中执行 MemorySemanticMergeWorker 的后台任务，并通过信号返回结果。
     def run(self) -> None:
-        """处理 `run` 对应的业务逻辑。"""
+        """在线程中执行 MemorySemanticMergeWorker 的后台任务，并通过信号返回结果。"""
         try:
             self.finished.emit(self.vector_store.run_due_semantic_merge(self.memory_path))
         except Exception as exc:  # noqa: BLE001
@@ -398,6 +415,7 @@ class LocalLinesRefreshWorker(QObject):
     finished = Signal(object)
     failed = Signal(str)
 
+    # 初始化当前对象及其依赖。
     def __init__(
         self,
         client: DeepSeekClient,
@@ -410,8 +428,9 @@ class LocalLinesRefreshWorker(QObject):
         self.local_lines_service = local_lines_service
         self.targets = targets
 
+    # 在线程中执行 LocalLinesRefreshWorker 的后台任务，并通过信号返回结果。
     def run(self) -> None:
-        """处理 `run` 对应的业务逻辑。"""
+        """在线程中执行 LocalLinesRefreshWorker 的后台任务，并通过信号返回结果。"""
         try:
             if not self.targets:
                 self.finished.emit({"refreshed": False, "reason": "no_enabled_groups", "results": []})
@@ -468,6 +487,7 @@ class LocalLinesRefreshWorker(QObject):
             logger.exception("Local lines refresh worker failed")
             self.failed.emit(str(exc))
 
+    # 根据 group、label、max_items 限制消息数量和长度，返回符合预算的消息列表。
     def _messages(
         self,
         group: str,
@@ -475,7 +495,7 @@ class LocalLinesRefreshWorker(QObject):
         max_items: int,
         max_chars: int,
     ) -> list[dict[str, str]]:
-        """处理 `_messages` 对应的业务逻辑。"""
+        """根据 group、label、max_items 限制消息数量和长度，返回符合预算的消息列表。"""
         return [
             {
                 "role": "system",
@@ -495,8 +515,9 @@ class LocalLinesRefreshWorker(QObject):
             },
         ]
 
+    # 解析用户输入的多行台词，并过滤空白行。
     def _parse_lines(self, text: str) -> list[str]:
-        """解析 `_parse_lines` 对应的数据。"""
+        """解析用户输入的多行台词，并过滤空白行。"""
         lines: list[str] = []
         for raw_line in text.splitlines():
             line = raw_line.strip()
@@ -510,6 +531,7 @@ class LocalLinesRefreshWorker(QObject):
 
 
 class DesktopPetWindow(QWidget):
+    # 初始化桌宠主窗口、依赖模块与 UI 组件。
     def __init__(self, project_root: Path) -> None:
         """初始化桌宠主窗口、依赖模块与 UI 组件。"""
         super().__init__()
@@ -664,6 +686,7 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("idle")
         self._start_mem0_initialization(close_existing=False)
 
+    # 设置主窗口的透明、无边框和置顶属性。
     def _setup_window(self) -> None:
         """设置主窗口的透明、无边框和置顶属性。"""
         flags = (
@@ -680,6 +703,7 @@ class DesktopPetWindow(QWidget):
         self.setAutoFillBackground(False)
         self.setStyleSheet("DesktopPetWindow { background: transparent; border: none; }")
 
+    # 创建用于显示精灵帧的标签并设置初始尺寸。
     def _setup_ui(self) -> None:
         """创建用于显示精灵帧的标签并设置初始尺寸。"""
         self.sprite_label = QLabel(self)
@@ -692,6 +716,7 @@ class DesktopPetWindow(QWidget):
         self.resize(width, height)
         self.sprite_label.setGeometry(0, 0, width, height)
 
+    # 连接动画、输入框和主动行为等信号。
     def _connect_signals(self) -> None:
         """连接动画、输入框和主动行为等信号。"""
         self.sprite_player.frame_changed.connect(self._update_sprite)
@@ -703,6 +728,7 @@ class DesktopPetWindow(QWidget):
         )
         self.reply_bubble.clicked.connect(self._handle_reply_bubble_clicked)
 
+    # 窗口首次显示时启动主动行为控制器和置顶强制计时器。
     def showEvent(self, event) -> None:  # noqa: N802
         """窗口首次显示时启动主动行为控制器和置顶强制计时器。"""
         super().showEvent(event)
@@ -723,6 +749,7 @@ class DesktopPetWindow(QWidget):
         if pixmap:
             self._apply_sprite_window_mask(pixmap)
 
+    # 移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。
     def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
         """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""
         ok, result = suppress_dwm_border(eventType, message)
@@ -730,6 +757,7 @@ class DesktopPetWindow(QWidget):
             return True, result
         return super().nativeEvent(eventType, message)
 
+    # 处理鼠标按下事件，用于拖拽和右键菜单。
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """处理鼠标按下事件，用于拖拽和右键菜单。"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -743,6 +771,7 @@ class DesktopPetWindow(QWidget):
             self._show_context_menu(event.globalPosition().toPoint())
         super().mousePressEvent(event)
 
+    # 处理鼠标移动事件，实现拖拽桌宠。
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """处理鼠标移动事件，实现拖拽桌宠。"""
         if event.buttons() & Qt.MouseButton.LeftButton:
@@ -752,11 +781,13 @@ class DesktopPetWindow(QWidget):
                 self.move(event.globalPosition().toPoint() - self.drag_start_offset)
         super().mouseMoveEvent(event)
 
+    # 窗口位置变化时同步悬浮气泡和输入框的位置。
     def moveEvent(self, event) -> None:  # noqa: N802
         """窗口位置变化时同步悬浮气泡和输入框的位置。"""
         super().moveEvent(event)
         self._sync_floating_widgets()
 
+    # 处理鼠标释放事件，区分点击聊天和拖拽结束；双击通过计时器抑制单击。
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """处理鼠标释放事件，区分点击聊天和拖拽结束；双击通过计时器抑制单击。"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -769,6 +800,7 @@ class DesktopPetWindow(QWidget):
                     self._click_timer.start(QApplication.doubleClickInterval())
         super().mouseReleaseEvent(event)
 
+    # 双击人物视为回复/打招呼；若在主动问候后窗口内则回复 feedback 话术。
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """双击人物视为回复/打招呼；若在主动问候后窗口内则回复 feedback 话术。"""
         if event.button() == Qt.MouseButton.LeftButton:
@@ -785,6 +817,7 @@ class DesktopPetWindow(QWidget):
                 self._display_message(reply, 7000, "system")
         super().mouseDoubleClickEvent(event)
 
+    # 关闭窗口前保存位置并安全回收后台线程。
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """关闭窗口前保存位置并安全回收后台线程。"""
         self._is_closing = True
@@ -812,6 +845,7 @@ class DesktopPetWindow(QWidget):
         if app is not None:
             app.quit()
 
+    # 在指定屏幕坐标位置弹出右键菜单。
     def _show_context_menu(self, global_pos: QPoint) -> None:
         """在指定屏幕坐标位置弹出右键菜单。"""
         menu = build_context_menu(
@@ -850,6 +884,7 @@ class DesktopPetWindow(QWidget):
         )
         menu.exec(global_pos)
 
+    # 响应菜单中的测试动作切换请求。
     def _handle_test_action(self, action_name: str) -> None:
         """响应菜单中的测试动作切换请求。"""
         if action_name == "idle":
@@ -857,6 +892,7 @@ class DesktopPetWindow(QWidget):
             return
         self.sprite_player.set_action(action_name, fallback_action="idle", force_single_cycle=True)
 
+    # 请求优雅退出：播放 waving 并显示道别语，再关闭窗口。
     def request_exit(self) -> None:
         """请求优雅退出：播放 waving 并显示道别语，再关闭窗口。"""
         if self.allow_immediate_close or self.exit_animation_in_progress:
@@ -873,17 +909,20 @@ class DesktopPetWindow(QWidget):
             self.bubble.hide()
         QTimer.singleShot(duration_ms + 50, self._finalize_exit)
 
+    # 在退出动作播放完成后真正关闭程序。
     def _finalize_exit(self) -> None:
         """在退出动作播放完成后真正关闭程序。"""
         self.allow_immediate_close = True
         self.close()
 
+    # 手动触发一次主动说话，便于测试气泡与动作。
     def _test_proactive_speak_once(self) -> None:
         """手动触发一次主动说话，便于测试气泡与动作。"""
         if self.behavior_controller.trigger_test_speak():
             return
         self._display_message("本地话术里暂时没有可测试的内容。", 3200, "system")
 
+    # 手动触发一次空闲问候逻辑，测试内容比例分流（普通/知识）。
     def _test_idle_prompt_once(self) -> None:
         """手动触发一次空闲问候逻辑，测试内容比例分流（普通/知识）。"""
         if self._chat_in_progress():
@@ -893,18 +932,22 @@ class DesktopPetWindow(QWidget):
         if result.startswith("未触发"):
             self._display_message(result, 3500, "system")
 
+    # 手动测试人物向左平滑移动。
     def _test_move_left(self) -> None:
         """手动测试人物向左平滑移动。"""
         QTimer.singleShot(120, lambda: self._start_horizontal_move_test(-140))
 
+    # 手动测试人物向右平滑移动。
     def _test_move_right(self) -> None:
         """手动测试人物向右平滑移动。"""
         QTimer.singleShot(120, lambda: self._start_horizontal_move_test(140))
 
+    # 手动测试人物原地跳跃。
     def _test_jump(self) -> None:
         """手动测试人物原地跳跃。"""
         QTimer.singleShot(120, self._run_jump_test)
 
+    # 在菜单关闭后真正执行一次原地跳跃测试。
     def _run_jump_test(self) -> None:
         """在菜单关闭后真正执行一次原地跳跃测试。"""
         if self._movement_locked():
@@ -914,6 +957,7 @@ class DesktopPetWindow(QWidget):
             return
         self._start_jump_auto_move(self.pos(), screen.availableGeometry())
 
+    # 手动触发一次 API 主动说话，便于测试联网和主动气泡。
     def _test_api_proactive_speak_once(self) -> None:
         """手动触发一次 API 主动说话，便于测试联网和主动气泡。"""
         if self._chat_in_progress():
@@ -931,6 +975,7 @@ class DesktopPetWindow(QWidget):
         self._display_message("我在努力思考，想要和你打个招呼。", 2800, "system")
         self._start_proactive_api_worker()
 
+    # 手动触发一次知识问候，便于测试记忆增强内容和气泡。
     def _test_knowledge_speak_once(self) -> None:
         """手动触发一次知识问候，便于测试记忆增强内容和气泡。"""
         if self._chat_in_progress():
@@ -938,6 +983,7 @@ class DesktopPetWindow(QWidget):
             return
         self._handle_knowledge_speak()
 
+    # 念一首诗，将换行诗文字展示为气泡消息。
     def _test_poetry(self) -> None:
         """念一首诗，将换行诗文字展示为气泡消息。"""
         line = self.behavior_controller.pick_poetry_line()
@@ -945,6 +991,7 @@ class DesktopPetWindow(QWidget):
             self.sprite_player.set_action("running", force_single_cycle=True)
             self._display_message(line, 12000, "system")
 
+    # 设置人物显示缩放比例并持久化到配置文件。
     def _set_scale(self, scale: float) -> None:
         """设置人物显示缩放比例并持久化到配置文件。"""
         normalized_scale = max(0.3, min(scale, 3.0))
@@ -954,6 +1001,7 @@ class DesktopPetWindow(QWidget):
         self._save_app_config()
         self._display_message(f"人物大小已调整为 {normalized_scale:.2f}x。", 2800, "system")
 
+    # 弹出自定义缩放输入框，让用户手动设置人物大小。
     def _open_scale_dialog(self) -> None:
         """弹出自定义缩放输入框，让用户手动设置人物大小。"""
         current_scale = self._ui_scale()
@@ -969,6 +1017,7 @@ class DesktopPetWindow(QWidget):
         if accepted:
             self._set_scale(new_scale)
 
+    # 切换免打扰模式并保存配置。
     def _toggle_do_not_disturb(self, enabled: bool) -> None:
         """切换免打扰模式并保存配置。"""
         self.app_config.setdefault("behavior", {})["do_not_disturb"] = enabled
@@ -977,6 +1026,7 @@ class DesktopPetWindow(QWidget):
             self.bubble.hide()
         self._display_message("小桃接下来不会说话了。" if enabled else "来和小桃聊天吧。", 3000, "system")
 
+    # 切换自主移动功能并刷新定时器。
     def _toggle_auto_move(self, enabled: bool) -> None:
         """切换自主移动功能并刷新定时器。"""
         self.app_config.setdefault("ui", {})["enable_free_move"] = enabled
@@ -984,12 +1034,14 @@ class DesktopPetWindow(QWidget):
         self._refresh_auto_move_timer()
         self._display_message("小桃跑起来了！" if enabled else "我不会乱动啦。", 3000, "system")
 
+    # 切换用户聊天时是否调用外部 API。
     def _toggle_api_chat(self, enabled: bool) -> None:
         """切换用户聊天时是否调用外部 API。"""
         self.app_config.setdefault("api", {})["enable_chat_api"] = enabled
         self._save_app_config()
         self._display_message("我变的更聪明了。" if enabled else "我好像变笨了。", 3200, "system")
 
+    # 切换正式问答模式。
     def _toggle_formal_qa_mode(self, enabled: bool) -> None:
         """切换正式问答模式。"""
         self._chat_config()["formal_qa_mode"] = enabled
@@ -1002,6 +1054,7 @@ class DesktopPetWindow(QWidget):
             "system",
         )
 
+    # 切换正式问答多回答显示方式。
     def _set_formal_answer_display(self, mode: str) -> None:
         """切换正式问答多回答显示方式。"""
         normalized_mode = mode if mode in {"new_panel", "append"} else "new_panel"
@@ -1014,6 +1067,7 @@ class DesktopPetWindow(QWidget):
         )
         self._display_message(message, 3600, "system")
 
+    # 切换窗口置顶状态，开启时回复 return_after_idle，关闭时回复 ignored。
     def _toggle_always_on_top(self, enabled: bool) -> None:
         """切换窗口置顶状态，开启时回复 return_after_idle，关闭时回复 ignored。"""
         self._ui_config()["always_on_top"] = enabled
@@ -1033,6 +1087,7 @@ class DesktopPetWindow(QWidget):
         if reply:
             self._display_message(reply, 5000, "system")
 
+    # 根据当前配置重建窗口标志，不依赖 setWindowFlag 的单属性切换。
     def _reapply_window_flags(self) -> None:
         """根据当前配置重建窗口标志，不依赖 setWindowFlag 的单属性切换。"""
         flags = (
@@ -1046,6 +1101,7 @@ class DesktopPetWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
+    # 清空正式与非正式聊天历史及对应摘要数据。
     def _clear_chat_history(self) -> None:
         """清空正式与非正式聊天历史及对应摘要数据。"""
         default_summary = {
@@ -1062,6 +1118,7 @@ class DesktopPetWindow(QWidget):
             save_json(summary_path, default_summary)
         self._display_message("我会用心记住你说过的话哦", 3500, "system")
 
+    # 清空非正式聊天历史；若配置开启则在清空前强制总结。
     def _clear_informal_chat_history(self) -> None:
         """清空非正式聊天历史；若配置开启则在清空前强制总结。"""
         self._start_clear_history_worker(
@@ -1070,6 +1127,7 @@ class DesktopPetWindow(QWidget):
             self.chat_store_informal,
         )
 
+    # 清空正式问答聊天历史；若配置开启则在清空前强制总结。
     def _clear_formal_chat_history(self) -> None:
         """清空正式问答聊天历史；若配置开启则在清空前强制总结。"""
         self._start_clear_history_worker(
@@ -1078,13 +1136,14 @@ class DesktopPetWindow(QWidget):
             self.chat_store_formal,
         )
 
+    # 创建聊天历史清理后台任务并注册生命周期回调。
     def _start_clear_history_worker(
         self,
         mode: str,
         summarizer: Summarizer,
         chat_store: ChatStore,
     ) -> None:
-        """执行 `_start_clear_history_worker` 对应的流程。"""
+        """创建聊天历史清理后台任务并注册生命周期回调。"""
         if self.background_tasks.is_registered("clear_history"):
             return
 
@@ -1119,20 +1178,23 @@ class DesktopPetWindow(QWidget):
             return
         self.clear_history_thread.start()
 
+    # 显示聊天历史清理成功提示，并释放后台任务引用。
     def _on_clear_history_success(self, mode: str) -> None:
-        """处理 `_on_clear_history_success` 对应的事件或数据。"""
+        """显示聊天历史清理成功提示，并释放后台任务引用。"""
         if self._closing_or_closed():
             return
         label = "这些知识真有趣呢" if mode == "formal" else "我会好好保存我们聊天的回忆哦"
         self._display_message(f"{label}", 3500, "system")
 
+    # 显示聊天历史清理失败提示，并释放后台任务引用。
     def _on_clear_history_failure(self, mode: str, error_message: str) -> None:
-        """处理 `_on_clear_history_failure` 对应的事件或数据。"""
+        """显示聊天历史清理失败提示，并释放后台任务引用。"""
         if self._closing_or_closed():
             return
         label = "正式问答记录" if mode == "formal" else "非正式聊天记录"
         self._display_message(f"{label}清理失败：{error_message}", 5000, "assistant")
 
+    # 重新读取配置文件，并刷新动画和行为控制状态。
     def _reload_config(self) -> None:
         """重新读取配置文件，并刷新动画和行为控制状态。"""
         self.app_config = self._load_app_config()
@@ -1152,6 +1214,7 @@ class DesktopPetWindow(QWidget):
         self.behavior_controller.reload()
         self._display_message("嘿嘿，我更了解你了。", 3500, "system")
 
+    # 在宠物附近打开输入框；若有主动气泡则先关闭。
     def _open_chat_input(self) -> None:
         """在宠物附近打开输入框；若有主动气泡则先关闭。"""
         if self.bubble.source == "proactive":
@@ -1170,6 +1233,7 @@ class DesktopPetWindow(QWidget):
 
     _poetry_keywords = {"诗", "诗歌", "写诗", "念诗", "吟诗", "背诗", "来首", "作诗", "赋诗"}
 
+    # 处理用户提交的消息，并决定走占位回复还是 API 回复。
     def _handle_user_message(self, message: str) -> None:
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
         self._waiting_timer.stop()
@@ -1210,10 +1274,12 @@ class DesktopPetWindow(QWidget):
 
         self._start_chat_worker(message)
 
+    # 检查用户消息是否包含念诗/写诗相关的关键词。
     def _is_poetry_request(self, message: str) -> bool:
         """检查用户消息是否包含念诗/写诗相关的关键词。"""
         return any(kw in message for kw in self._poetry_keywords)
 
+    # 在本地模式下按当前问答风格生成回复。
     def _generate_local_reply(self, message: str, formal_qa_mode: bool = False) -> str:
         """在本地模式下按当前问答风格生成回复。"""
         stripped_message = message.strip()
@@ -1238,6 +1304,7 @@ class DesktopPetWindow(QWidget):
             return "抱抱你呀，先别急，我们可以一点点来。虽然我现在没接 API，但我会认真陪着你。"
         return f"我收到啦：{stripped_message[:30]}。现在我先用本地模式陪你，如果你想要更完整的回答，可以再打开 API。"
 
+    # 创建后台线程执行模型请求，避免阻塞界面。
     def _start_chat_worker(self, message: str) -> None:
         """创建后台线程执行模型请求，避免阻塞界面。"""
         if not self.chat_flow_controller.can_start_chat(
@@ -1278,6 +1345,7 @@ class DesktopPetWindow(QWidget):
             return
         self.chat_thread.start()
 
+    # 创建后台线程执行 API 主动说话测试。
     def _start_proactive_api_worker(self) -> None:
         """创建后台线程执行 API 主动说话测试。"""
         if self.background_tasks.is_registered("chat"):
@@ -1309,46 +1377,55 @@ class DesktopPetWindow(QWidget):
             return
         self.chat_thread.start()
 
+    # 在线程结束后清理工作对象和线程对象。
     def _cleanup_chat_thread(self) -> None:
         """在线程结束后清理工作对象和线程对象。"""
         self.background_tasks.unregister("chat", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    # 清理聊天记录后台线程。
     def _cleanup_clear_history_thread(self) -> None:
         """清理聊天记录后台线程。"""
         self.background_tasks.unregister("clear_history", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    # 清空聊天线程和 worker 引用，避免回调重复清理。
     def _clear_chat_task_refs(self) -> None:
-        """移除 `_clear_chat_task_refs` 对应的内容。"""
+        """清空聊天线程和 worker 引用，避免回调重复清理。"""
         self.chat_worker = None
         self.chat_thread = None
 
+    # 清空历史清理线程和 worker 引用。
     def _clear_history_task_refs(self) -> None:
-        """移除 `_clear_history_task_refs` 对应的内容。"""
+        """清空历史清理线程和 worker 引用。"""
         self.clear_history_worker = None
         self.clear_history_thread = None
 
+    # 清空 Mem0 初始化线程和 worker 引用。
     def _clear_mem0_init_task_refs(self) -> None:
-        """移除 `_clear_mem0_init_task_refs` 对应的内容。"""
+        """清空 Mem0 初始化线程和 worker 引用。"""
         self.mem0_init_worker = None
         self.mem0_init_thread = None
 
+    # 清空 Mem0 搜索线程和 worker 引用。
     def _clear_mem0_search_task_refs(self) -> None:
-        """移除 `_clear_mem0_search_task_refs` 对应的内容。"""
+        """清空 Mem0 搜索线程和 worker 引用。"""
         self.mem0_search_worker = None
         self.mem0_search_thread = None
 
+    # 清空记忆维护线程和 worker 引用。
     def _clear_memory_maintenance_task_refs(self) -> None:
-        """移除 `_clear_memory_maintenance_task_refs` 对应的内容。"""
+        """清空记忆维护线程和 worker 引用。"""
         self.memory_maintenance_worker = None
         self.memory_maintenance_thread = None
 
+    # 清空本地台词刷新线程和 worker 引用。
     def _clear_local_lines_refresh_task_refs(self) -> None:
-        """移除 `_clear_local_lines_refresh_task_refs` 对应的内容。"""
+        """清空本地台词刷新线程和 worker 引用。"""
         self.local_lines_refresh_worker = None
         self.local_lines_refresh_thread = None
 
+    # 把线程和 worker 注册到后台任务表，并绑定清理回调。
     def _register_background_task(
         self,
         name: str,
@@ -1357,7 +1434,7 @@ class DesktopPetWindow(QWidget):
         cleanup,
         wait_timeout_ms: int | None = None,
     ) -> bool:
-        """添加 `_register_background_task` 对应的内容。"""
+        """把线程和 worker 注册到后台任务表，并绑定清理回调。"""
         return self.background_tasks.register(
             name,
             thread,
@@ -1366,8 +1443,9 @@ class DesktopPetWindow(QWidget):
             wait_timeout_ms=wait_timeout_ms,
         )
 
+    # 根据 thread、worker、cleanup 丢弃未注册完成的线程和 worker 引用。
     def _discard_unregistered_task(self, thread: QThread, worker: QObject, cleanup) -> None:
-        """处理 `_discard_unregistered_task` 对应的业务逻辑。"""
+        """根据 thread、worker、cleanup 丢弃未注册完成的线程和 worker 引用。"""
         try:
             worker.deleteLater()
             thread.deleteLater()
@@ -1375,8 +1453,9 @@ class DesktopPetWindow(QWidget):
             pass
         cleanup()
 
+    # 整理mem 0 init wait timeout ms，并把结果交给调用方或写回状态。
     def _mem0_init_wait_timeout_ms(self) -> int:
-        """处理 `_mem0_init_wait_timeout_ms` 对应的业务逻辑。"""
+        """整理mem 0 init wait timeout ms，并把结果交给调用方或写回状态。"""
         try:
             timeout_seconds = float(
                 self.config_service.get("memory.mem0_init_timeout_seconds", 10)
@@ -1385,18 +1464,21 @@ class DesktopPetWindow(QWidget):
             timeout_seconds = 10.0
         return max(0, int(timeout_seconds * 1000))
 
+    # 判断主窗口是否正在关闭或已经关闭。
     def _closing_or_closed(self) -> bool:
-        """处理 `_closing_or_closed` 对应的业务逻辑。"""
+        """判断主窗口是否正在关闭或已经关闭。"""
         return self._is_closing or self._close_after_workers_finished
 
+    # 根据 service 更新mem0记忆服务状态，并同步相关缓存或界面。
     def _set_mem0_memory_service(self, service: Mem0MemoryService | None) -> None:
-        """更新 `_set_mem0_memory_service` 对应的状态。"""
+        """根据 service 更新mem0记忆服务状态，并同步相关缓存或界面。"""
         self.mem0_memory_service = service
         self.summarizer_formal.mem0_memory_service = service
         self.summarizer_informal.mem0_memory_service = service
 
+    # 启动 Mem0 初始化后台任务，避免阻塞主界面。
     def _start_mem0_initialization(self, close_existing: bool) -> None:
-        """执行 `_start_mem0_initialization` 对应的流程。"""
+        """启动 Mem0 初始化后台任务，避免阻塞主界面。"""
         if self.background_tasks.is_registered("mem0_init"):
             return
 
@@ -1432,8 +1514,9 @@ class DesktopPetWindow(QWidget):
             return
         self.mem0_init_thread.start()
 
+    # 保存初始化完成的 Mem0 服务并释放任务引用。
     def _on_mem0_initialization_success(self, service: object) -> None:
-        """处理 `_on_mem0_initialization_success` 对应的事件或数据。"""
+        """保存初始化完成的 Mem0 服务并释放任务引用。"""
         if self._closing_or_closed():
             if isinstance(service, Mem0MemoryService):
                 service.close()
@@ -1441,20 +1524,23 @@ class DesktopPetWindow(QWidget):
         if isinstance(service, Mem0MemoryService):
             self._set_mem0_memory_service(service)
 
+    # 记录 Mem0 初始化失败并释放初始化任务引用。
     def _on_mem0_initialization_failure(self, error_message: str) -> None:
-        """处理 `_on_mem0_initialization_failure` 对应的事件或数据。"""
+        """记录 Mem0 初始化失败并释放初始化任务引用。"""
         logger.warning("Mem0 initialization failed: %s", error_message)
         if self._closing_or_closed():
             return
         self._set_mem0_memory_service(None)
 
+    # 清理mem0init线程线程注册和关联引用。
     def _cleanup_mem0_init_thread(self) -> None:
-        """处理 `_cleanup_mem0_init_thread` 对应的业务逻辑。"""
+        """清理mem0init线程线程注册和关联引用。"""
         self.background_tasks.unregister("mem0_init", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    # 启动 Mem0 检索后台任务，为知识问候准备语义上下文。
     def _start_mem0_search_worker(self) -> None:
-        """执行 `_start_mem0_search_worker` 对应的流程。"""
+        """启动 Mem0 检索后台任务，为知识问候准备语义上下文。"""
         if self.background_tasks.is_registered("mem0_search"):
             return
         if self.mem0_memory_service is None or not self.mem0_memory_service.is_available():
@@ -1488,8 +1574,9 @@ class DesktopPetWindow(QWidget):
             return
         self.mem0_search_thread.start()
 
+    # 保存 Mem0 检索文本，并继续知识问候生成流程。
     def _on_mem0_search_success(self, context: str) -> None:
-        """处理 `_on_mem0_search_success` 对应的事件或数据。"""
+        """保存 Mem0 检索文本，并继续知识问候生成流程。"""
         if self._closing_or_closed():
             return
         self._pending_knowledge_mem0_context = context
@@ -1498,20 +1585,23 @@ class DesktopPetWindow(QWidget):
         self.behavior_controller.notify_proactive_shown("extra_knowledge")
         self._handle_knowledge_speak()
 
+    # 记录 Mem0 检索失败，并继续使用空记忆上下文。
     def _on_mem0_search_failure(self, error_message: str) -> None:
-        """处理 `_on_mem0_search_failure` 对应的事件或数据。"""
+        """记录 Mem0 检索失败，并继续使用空记忆上下文。"""
         logger.warning("Mem0 knowledge search failed: %s", error_message)
         if self._closing_or_closed():
             return
         self._pending_knowledge_mem0_context = ""
 
+    # 清理mem0search线程线程注册和关联引用。
     def _cleanup_mem0_search_thread(self) -> None:
-        """处理 `_cleanup_mem0_search_thread` 对应的业务逻辑。"""
+        """清理mem0search线程线程注册和关联引用。"""
         self.background_tasks.unregister("mem0_search", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    # 启动记忆维护后台任务，同步向量索引和语义去重。
     def _start_memory_maintenance_worker(self) -> None:
-        """执行 `_start_memory_maintenance_worker` 对应的流程。"""
+        """启动记忆维护后台任务，同步向量索引和语义去重。"""
         if self.background_tasks.is_registered("memory_maintenance"):
             return
         self.memory_vector_store.update_config(self.app_config)
@@ -1544,26 +1634,30 @@ class DesktopPetWindow(QWidget):
             return
         self.memory_maintenance_thread.start()
 
+    # 记录记忆维护完成，并释放维护任务引用。
     def _on_memory_maintenance_success(self, result: object) -> None:
-        """处理 `_on_memory_maintenance_success` 对应的事件或数据。"""
+        """记录记忆维护完成，并释放维护任务引用。"""
         if self._closing_or_closed():
             return
         if isinstance(result, dict) and int(result.get("merged_count", 0) or 0) > 0:
             logger.info("Semantic memory merge completed: %s", result)
 
+    # 记录记忆维护失败，并释放维护任务引用。
     def _on_memory_maintenance_failure(self, error_message: str) -> None:
-        """处理 `_on_memory_maintenance_failure` 对应的事件或数据。"""
+        """记录记忆维护失败，并释放维护任务引用。"""
         if self._closing_or_closed():
             return
         logger.warning("Semantic memory maintenance failed: %s", error_message)
 
+    # 清理记忆maintenance线程线程注册和关联引用。
     def _cleanup_memory_maintenance_thread(self) -> None:
-        """处理 `_cleanup_memory_maintenance_thread` 对应的业务逻辑。"""
+        """清理记忆maintenance线程线程注册和关联引用。"""
         self.background_tasks.unregister("memory_maintenance", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    # 为待刷新台词组创建 API 刷新后台任务。
     def _start_local_lines_refresh_worker(self) -> None:
-        """执行 `_start_local_lines_refresh_worker` 对应的流程。"""
+        """为待刷新台词组创建 API 刷新后台任务。"""
         if self.background_tasks.is_registered("local_lines_refresh"):
             return
         if not self.config_service.get_bool("local_lines_refresh.enabled", True):
@@ -1600,8 +1694,9 @@ class DesktopPetWindow(QWidget):
             return
         self.local_lines_refresh_thread.start()
 
+    # 筛选需要 API 刷新的本地台词组名称。
     def _local_lines_refresh_targets(self) -> list[dict[str, Any]]:
-        """处理 `_local_lines_refresh_targets` 对应的业务逻辑。"""
+        """筛选需要 API 刷新的本地台词组名称。"""
         refresh_config = self.app_config.get("local_lines_refresh", {})
         if not isinstance(refresh_config, dict):
             return []
@@ -1637,24 +1732,28 @@ class DesktopPetWindow(QWidget):
             )
         return targets
 
+    # 处理本地台词刷新结果，并提示用户刷新数量。
     def _on_local_lines_refresh_success(self, result: object) -> None:
-        """处理 `_on_local_lines_refresh_success` 对应的事件或数据。"""
+        """处理本地台词刷新结果，并提示用户刷新数量。"""
         if self._closing_or_closed():
             return
         if isinstance(result, dict) and result.get("refreshed"):
             logger.info("Local lines refresh completed: %s", result)
 
+    # 记录本地台词刷新失败，并释放刷新任务引用。
     def _on_local_lines_refresh_failure(self, error_message: str) -> None:
-        """处理 `_on_local_lines_refresh_failure` 对应的事件或数据。"""
+        """记录本地台词刷新失败，并释放刷新任务引用。"""
         if self._closing_or_closed():
             return
         logger.warning("Local lines refresh failed: %s", error_message)
 
+    # 清理本地台词refresh线程线程注册和关联引用。
     def _cleanup_local_lines_refresh_thread(self) -> None:
-        """处理 `_cleanup_local_lines_refresh_thread` 对应的业务逻辑。"""
+        """清理本地台词refresh线程线程注册和关联引用。"""
         self.background_tasks.unregister("local_lines_refresh", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    # 处理模型成功返回后的界面更新与消息落盘。
     def _on_chat_success(self, reply: str) -> None:
         """处理模型成功返回后的界面更新与消息落盘。"""
         if self._closing_or_closed():
@@ -1669,6 +1768,7 @@ class DesktopPetWindow(QWidget):
         )
         self._start_summary_task(completion.formal_qa_mode)
 
+    # 处理模型请求失败后的动作和气泡提示。
     def _on_chat_failure(self, error_message: str) -> None:
         """处理模型请求失败后的动作和气泡提示。"""
         if self._closing_or_closed():
@@ -1678,6 +1778,7 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("failed")
         self._display_message(failure.error_message, 12000, "assistant")
 
+    # 处理 API 主动说话测试成功后的界面更新。
     def _on_proactive_api_success(self, reply: str) -> None:
         """处理 API 主动说话测试成功后的界面更新。"""
         if self._closing_or_closed():
@@ -1686,6 +1787,7 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("idle")
         self._display_message(cleaned_reply, 12000, "assistant")
 
+    # 处理 API 主动说话测试失败后的界面更新。
     def _on_proactive_api_failure(self, error_message: str) -> None:
         """处理 API 主动说话测试失败后的界面更新。"""
         if self._closing_or_closed():
@@ -1693,6 +1795,7 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("failed")
         self._display_message(error_message, 12000, "assistant")
 
+    # 在后台线程中尝试触发对应模式的聊天摘要。
     def _maybe_summarize(self, formal_qa_mode: bool = False) -> None:
         """在后台线程中尝试触发对应模式的聊天摘要。"""
         try:
@@ -1704,15 +1807,17 @@ class DesktopPetWindow(QWidget):
         except Exception:  # noqa: BLE001
             logger.exception("Background summarization failed")
 
+    # 在线程中执行摘要压缩任务，避免阻塞界面。
     def _start_summary_task(self, formal_qa_mode: bool) -> None:
-        """执行 `_start_summary_task` 对应的流程。"""
+        """在线程中执行摘要压缩任务，避免阻塞界面。"""
         mode = "formal" if formal_qa_mode else "informal"
         if mode in self._summaries_running or self._closing_or_closed():
             return
         self._summaries_running.add(mode)
 
+        # 整理run 摘要，并把结果交给调用方或写回状态。
         def run_summary() -> None:
-            """执行 `run_summary` 对应的流程。"""
+            """整理run 摘要，并把结果交给调用方或写回状态。"""
             try:
                 self._maybe_summarize(formal_qa_mode)
             finally:
@@ -1720,6 +1825,7 @@ class DesktopPetWindow(QWidget):
 
         threading.Thread(target=run_summary, daemon=True).start()
 
+    # 响应主动行为控制器的说话请求。
     def _handle_behavior_speak(self, text: str, duration_ms: int, action_name: str) -> None:
         """响应主动行为控制器的说话请求。"""
         if self._chat_in_progress() or self.chat_input.isVisible():
@@ -1727,8 +1833,9 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action(action_name)
         self._display_message(text, duration_ms, "proactive")
 
+    # 接收场景问候请求，并按上下文决定本地或 API 生成。
     def _handle_scenario_greeting(self, payload: dict[str, Any]) -> None:
-        """处理 `_handle_scenario_greeting` 对应的事件或数据。"""
+        """接收场景问候请求，并按上下文决定本地或 API 生成。"""
         if self._chat_in_progress() or self.chat_input.isVisible():
             return
         fallback_line = str(payload.get("fallback_line", "")).strip()
@@ -1740,8 +1847,9 @@ class DesktopPetWindow(QWidget):
             return
         self._start_scenario_greeting_worker(payload)
 
+    # 创建场景问候生成后台任务并绑定成功失败回调。
     def _start_scenario_greeting_worker(self, payload: dict[str, Any]) -> None:
-        """执行 `_start_scenario_greeting_worker` 对应的流程。"""
+        """创建场景问候生成后台任务并绑定成功失败回调。"""
         self.chat_thread = QThread(self)
         self._pending_scenario_fallback_line = str(payload.get("fallback_line", ""))
         self.chat_worker = ScenarioGreetingWorker(
@@ -1778,17 +1886,19 @@ class DesktopPetWindow(QWidget):
             return
         self.chat_thread.start()
 
+    # 展示模型生成的场景问候，并记录主动展示状态。
     @Slot(str)
     def _on_scenario_greeting_success(self, reply: str) -> None:
-        """处理 `_on_scenario_greeting_success` 对应的事件或数据。"""
+        """展示模型生成的场景问候，并记录主动展示状态。"""
         if self._closing_or_closed():
             return
         self._pending_scenario_fallback_line = ""
         self._show_scenario_greeting_line(reply)
 
+    # 在场景问候生成失败时展示本地兜底台词。
     @Slot(str)
     def _on_scenario_greeting_failure(self, error_message: str) -> None:
-        """处理 `_on_scenario_greeting_failure` 对应的事件或数据。"""
+        """在场景问候生成失败时展示本地兜底台词。"""
         logger.warning("Scenario greeting API failed; using local fallback: %s", error_message)
         if self._closing_or_closed():
             self._pending_scenario_fallback_line = ""
@@ -1798,8 +1908,9 @@ class DesktopPetWindow(QWidget):
         if fallback:
             self._show_scenario_greeting_line(fallback)
 
+    # 根据 line 显示场景问候台词内容并安排后续气泡状态。
     def _show_scenario_greeting_line(self, line: str) -> None:
-        """处理 `_show_scenario_greeting_line` 对应的业务逻辑。"""
+        """根据 line 显示场景问候台词内容并安排后续气泡状态。"""
         if not line or self.chat_input.isVisible():
             return
         self.sprite_player.set_action("waving")
@@ -1809,6 +1920,7 @@ class DesktopPetWindow(QWidget):
             "proactive",
         )
 
+    # 响应主动知识问候请求：基于 memory 调用 API 生成额外内容。
     def _handle_knowledge_speak(self) -> None:
         """响应主动知识问候请求：基于 memory 调用 API 生成额外内容。"""
         if self._chat_in_progress() or self.chat_input.isVisible():
@@ -1822,6 +1934,7 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("waving")
         self._start_knowledge_worker()
 
+    # 创建后台线程执行记忆增强的知识问候 API 请求。
     def _start_knowledge_worker(self) -> None:
         """创建后台线程执行记忆增强的知识问候 API 请求。"""
         if self.background_tasks.is_registered("chat"):
@@ -1860,6 +1973,7 @@ class DesktopPetWindow(QWidget):
             return
         self.chat_thread.start()
 
+    # 知识问候 API 成功返回后，展示内容并在右侧弹出可点击的应答气泡。
     def _on_knowledge_speak_success(self, reply: str) -> None:
         """知识问候 API 成功返回后，展示内容并在右侧弹出可点击的应答气泡。"""
         if self._closing_or_closed():
@@ -1875,15 +1989,17 @@ class DesktopPetWindow(QWidget):
         self._display_message(parts[0], 7000, "proactive")
         QTimer.singleShot(5200, lambda second=parts[1]: self._show_knowledge_second_part(second))
 
+    # 根据 text 显示知识问候secondpart内容并安排后续气泡状态。
     def _show_knowledge_second_part(self, text: str) -> None:
-        """处理 `_show_knowledge_second_part` 对应的业务逻辑。"""
+        """根据 text 显示知识问候secondpart内容并安排后续气泡状态。"""
         if self._closing_or_closed() or self.chat_input.isVisible():
             return
         self._display_message(text, 12000, "proactive")
         self._show_knowledge_reply_ack()
 
+    # 显示知识问候回复ack内容并安排后续气泡状态。
     def _show_knowledge_reply_ack(self) -> None:
-        """处理 `_show_knowledge_reply_ack` 对应的业务逻辑。"""
+        """显示知识问候回复ack内容并安排后续气泡状态。"""
         ack = self.behavior_controller.pick_reply_ack_line()
         if ack:
             self.reply_bubble.set_always_on_top(
@@ -1892,6 +2008,7 @@ class DesktopPetWindow(QWidget):
             self.reply_bubble.show_message(ack, self.geometry(), 8000)
             self._sync_floating_widgets()
 
+    # 知识问候 API 失败后展示错误提示。
     def _on_knowledge_speak_failure(self, error_message: str) -> None:
         """知识问候 API 失败后展示错误提示。"""
         if self._closing_or_closed():
@@ -1899,17 +2016,20 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("failed")
         self._display_message(error_message, 8000, "assistant")
 
+    # 用户点击右侧应答气泡，视为回应主动问候并更新间隔。
     def _handle_reply_bubble_clicked(self) -> None:
         """用户点击右侧应答气泡，视为回应主动问候并更新间隔。"""
         self.behavior_controller.notify_user_interaction()
         self.behavior_controller.notify_proactive_response()
 
+    # 通过气泡组件显示一条消息。
     def _display_message(self, text: str, duration_ms: int, source: str = "system") -> None:
         """通过气泡组件显示一条消息。"""
         self.bubble.set_always_on_top(self.config_service.get_bool("ui.always_on_top", True))
         self.bubble.show_message(text, self.geometry(), duration_ms, source)
         self._sync_floating_widgets()
 
+    # 聊天输入框打开后长时间未回复时，显示 waiting 话术并重启计时器。
     def _show_waiting_prompt(self) -> None:
         """聊天输入框打开后长时间未回复时，显示 waiting 话术并重启计时器。"""
         if not self.chat_input.isVisible():
@@ -1919,6 +2039,7 @@ class DesktopPetWindow(QWidget):
             self._display_message(reply, 6000, "system")
         self._waiting_timer.start(25_000)
 
+    # 根据当前模式决定用气泡还是正式问答面板展示回答。
     def _show_answer_output(self, text: str, source: str, question: str = "") -> None:
         """根据当前模式决定用气泡还是正式问答面板展示回答。"""
         if source == "assistant" and self._formal_qa_enabled():
@@ -1927,6 +2048,7 @@ class DesktopPetWindow(QWidget):
         duration_ms = self._assistant_reply_bubble_duration_ms() if source == "assistant" else 9000
         self._display_message(text, duration_ms, source)
 
+    # 按正式问答显示方式展示回答，支持新建面板或追加内容。
     def _show_formal_answer_panel(self, question: str, answer: str) -> None:
         """按正式问答显示方式展示回答，支持新建面板或追加内容。"""
         display_mode = self._formal_answer_display_mode()
@@ -1950,6 +2072,7 @@ class DesktopPetWindow(QWidget):
         self.formal_answer_panels.append(panel)
         self.active_formal_answer_panel = panel
 
+    # 关闭并销毁所有正式问答面板。
     def _destroy_formal_answer_panels(self) -> None:
         """关闭并销毁所有正式问答面板。"""
         panels = list(self.formal_answer_panels)
@@ -1958,6 +2081,7 @@ class DesktopPetWindow(QWidget):
         for panel in panels:
             panel.close()
 
+    # 在正式问答面板销毁后移除引用，避免关闭后残留对象。
     def _on_formal_answer_panel_destroyed(self, panel_id: int) -> None:
         """在正式问答面板销毁后移除引用，避免关闭后残留对象。"""
         self.formal_answer_panels = [
@@ -1968,11 +2092,13 @@ class DesktopPetWindow(QWidget):
                 self.formal_answer_panels[-1] if self.formal_answer_panels else None
             )
 
+    # 把最新精灵帧绘制到主窗口标签上。
     def _update_sprite(self, pixmap) -> None:
         """把最新精灵帧绘制到主窗口标签上。"""
         self.sprite_label.setPixmap(pixmap)
         self._resize_for_sprite()
 
+    # 根据当前精灵帧尺寸同步调整窗口大小。
     def _resize_for_sprite(self) -> None:
         """根据当前精灵帧尺寸同步调整窗口大小。"""
         pixmap = self.sprite_label.pixmap()
@@ -1983,6 +2109,7 @@ class DesktopPetWindow(QWidget):
         self._apply_sprite_window_mask(pixmap)
         self._sync_floating_widgets()
 
+    # 按精灵帧的透明区域裁剪窗口，避免系统沿矩形外接框绘制边框。
     def _apply_sprite_window_mask(self, pixmap: QPixmap) -> None:
         """按精灵帧的透明区域裁剪窗口，避免系统沿矩形外接框绘制边框。"""
         mask = pixmap.mask()
@@ -1993,6 +2120,7 @@ class DesktopPetWindow(QWidget):
         self.setMask(mask)
         self.sprite_label.setMask(mask)
 
+    # 恢复上次窗口位置；首次启动则放到屏幕右下角。
     def _restore_position(self) -> None:
         """恢复上次窗口位置；首次启动则放到屏幕右下角。"""
         position = self.window_position_service.restore_position(
@@ -2002,10 +2130,12 @@ class DesktopPetWindow(QWidget):
         )
         self.move(position)
 
+    # 保存当前窗口位置到本地状态文件。
     def _save_window_position(self) -> None:
         """保存当前窗口位置到本地状态文件。"""
         self.window_position_service.save_position(self.pos())
 
+    # 判断窗口放在给定坐标后，是否至少有一部分仍位于某个屏幕可见区域内。
     def _position_visible_on_any_screen(self, position: QPoint) -> bool:
         """判断窗口放在给定坐标后，是否至少有一部分仍位于某个屏幕可见区域内。"""
         return self.window_position_service.position_visible_on_any_screen(
@@ -2013,6 +2143,7 @@ class DesktopPetWindow(QWidget):
             self.size(),
         )
 
+    # 在 Windows API 级别强制置顶主窗口，防止 WS_EX_TOPMOST 被系统清除。
     def _enforce_topmost(self) -> None:
         """在 Windows API 级别强制置顶主窗口，防止 WS_EX_TOPMOST 被系统清除。"""
         if not self.config_service.get_bool("ui.always_on_top", True):
@@ -2024,6 +2155,7 @@ class DesktopPetWindow(QWidget):
         except Exception:
             pass
 
+    # 根据配置决定是否开启自主移动定时器。
     def _refresh_auto_move_timer(self) -> None:
         """根据配置决定是否开启自主移动定时器。"""
         if self.config_service.get_bool("ui.enable_free_move", False):
@@ -2031,6 +2163,7 @@ class DesktopPetWindow(QWidget):
         else:
             self.auto_move_timer.stop()
 
+    # 随机触发一次桌宠横向移动动画。
     def _trigger_auto_move(self) -> None:
         """随机触发一次桌宠横向移动动画。"""
         self._refresh_auto_move_timer()
@@ -2049,6 +2182,7 @@ class DesktopPetWindow(QWidget):
         delta = random.choice([-140, -100]) if move_kind == "left" else random.choice([100, 140])
         self._start_horizontal_move_test(delta, available=available)
 
+    # 执行一次平滑的左右移动测试或自主移动。
     def _start_horizontal_move_test(self, delta_x: int, available: QRect | None = None) -> None:
         """执行一次平滑的左右移动测试或自主移动。"""
         if self._movement_locked():
@@ -2078,6 +2212,7 @@ class DesktopPetWindow(QWidget):
         self.move_animation.finished.connect(self._finish_auto_move)
         self.move_animation.start()
 
+    # 执行一次带 jumping 动作的自主跳跃。
     def _start_jump_auto_move(self, current: QPoint, available: QRect) -> None:
         """执行一次带 jumping 动作的自主跳跃。"""
         self._stop_active_move_animation()
@@ -2097,6 +2232,7 @@ class DesktopPetWindow(QWidget):
         self.move_animation.finished.connect(self._finish_auto_move)
         self.move_animation.start()
 
+    # 在自主移动结束后恢复 idle 动作并保存位置。
     def _finish_auto_move(self) -> None:
         """在自主移动结束后恢复 idle 动作并保存位置。"""
         self.sprite_player.set_action("idle")
@@ -2104,22 +2240,26 @@ class DesktopPetWindow(QWidget):
         self._save_window_position()
         self._sync_floating_widgets()
 
+    # 停止当前移动动画并清空动画引用。
     def _stop_active_move_animation(self) -> None:
-        """结束 `_stop_active_move_animation` 对应的流程并清理资源。"""
+        """停止当前移动动画并清空动画引用。"""
         if self.move_animation and self.move_animation.state() == QPropertyAnimation.State.Running:
             self.move_animation.stop()
         self.move_animation = None
 
+    # 判断当前窗口是否处于禁止自动移动的状态。
     def _movement_locked(self) -> bool:
-        """处理 `_movement_locked` 对应的业务逻辑。"""
+        """判断当前窗口是否处于禁止自动移动的状态。"""
         return self.dragging or self.exit_animation_in_progress
 
+    # 根据窗口当前位置查找所在屏幕，缺失时回退主屏幕。
     def _current_screen(self):
-        """处理 `_current_screen` 对应的业务逻辑。"""
+        """根据窗口当前位置查找所在屏幕，缺失时回退主屏幕。"""
         anchor_point = self.frameGeometry().center()
         screen = QApplication.screenAt(anchor_point)
         return screen or QApplication.primaryScreen()
 
+    # 让气泡和输入框跟随角色当前位置，两个气泡互相避让。
     def _sync_floating_widgets(self) -> None:
         """让气泡和输入框跟随角色当前位置，两个气泡互相避让。"""
         anchor_rect = self.geometry()
@@ -2146,28 +2286,34 @@ class DesktopPetWindow(QWidget):
         if self.chat_input.isVisible():
             self.chat_input.reposition(anchor_rect)
 
+    # 判断当前是否仍有聊天请求在后台执行。
     def _chat_in_progress(self) -> bool:
         """判断当前是否仍有聊天请求在后台执行。"""
         return self.background_tasks.is_running("chat")
 
+    # 判断是否正在后台整理并清空聊天记录。
     def _clear_history_in_progress(self) -> bool:
         """判断是否正在后台整理并清空聊天记录。"""
         return self.background_tasks.is_running("clear_history")
 
+    # 检查后台任务注册表中是否仍有线程在运行。
     def _background_workers_running(self) -> bool:
-        """处理 `_background_workers_running` 对应的业务逻辑。"""
+        """检查后台任务注册表中是否仍有线程在运行。"""
         return self.background_tasks.any_running()
 
+    # 请求所有后台任务退出，并返回仍未结束的任务名称。
     def _request_background_workers_quit(self) -> None:
-        """处理 `_request_background_workers_quit` 对应的业务逻辑。"""
+        """请求所有后台任务退出，并返回仍未结束的任务名称。"""
         self.background_tasks.request_quit_all(timeout_ms=1000)
 
+    # 请求后台任务退出，返回仍需等待自然结束的任务名。
     def _stop_background_workers(self) -> list[str]:
         """请求后台任务退出，返回仍需等待自然结束的任务名。"""
         return self.background_tasks.stop_all()
 
+    # 在后台任务全部结束后继续执行被延迟的窗口关闭。
     def _maybe_close_after_workers_finished(self) -> None:
-        """处理 `_maybe_close_after_workers_finished` 对应的业务逻辑。"""
+        """在后台任务全部结束后继续执行被延迟的窗口关闭。"""
         if not self._close_after_workers_finished:
             return
         if self._background_workers_running():
@@ -2175,19 +2321,23 @@ class DesktopPetWindow(QWidget):
         self._close_after_workers_finished = False
         QTimer.singleShot(0, self.close)
 
+    # 判断当前用户聊天是否允许接入外部 API。
     def _api_chat_enabled(self) -> bool:
         """判断当前用户聊天是否允许接入外部 API。"""
         return self.config_service.get_bool("api.enable_chat_api", True)
 
+    # 判断当前是否开启正式问答模式。
     def _formal_qa_enabled(self) -> bool:
         """判断当前是否开启正式问答模式。"""
         return self.config_service.get_bool("chat.formal_qa_mode", False)
 
+    # 读取正式问答多回答显示方式。
     def _formal_answer_display_mode(self) -> str:
         """读取正式问答多回答显示方式。"""
         mode = self.config_service.get_str("chat.formal_answer_display", "new_panel")
         return mode if mode in {"new_panel", "append"} else "new_panel"
 
+    # 读取并返回当前 UI 缩放比例。
     def _ui_scale(self) -> float:
         """读取并返回当前 UI 缩放比例。"""
         try:
@@ -2195,32 +2345,39 @@ class DesktopPetWindow(QWidget):
         except (TypeError, ValueError):
             return 1.0
 
+    # 返回 UI 配置字典，不存在时自动补默认节点。
     def _ui_config(self) -> dict[str, Any]:
         """返回 UI 配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("ui", {})
 
+    # 返回行为配置字典，不存在时自动补默认节点。
     def _behavior_config(self) -> dict[str, Any]:
         """返回行为配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("behavior", {})
 
+    # 返回 API 配置字典，不存在时自动补默认节点。
     def _api_config(self) -> dict[str, Any]:
         """返回 API 配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("api", {})
 
+    # 返回聊天配置字典，不存在时自动补默认节点。
     def _chat_config(self) -> dict[str, Any]:
         """返回聊天配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("chat", {})
 
+    # 读取配置片段，缺失时返回安全默认配置。
     def _memory_config(self) -> dict[str, Any]:
-        """处理 `_memory_config` 对应的业务逻辑。"""
+        """读取配置片段，缺失时返回安全默认配置。"""
         return self.app_config.setdefault("memory", {})
 
+    # 处理记忆数据，保持本地记忆和外部索引一致。
     def _memory_user_id(self) -> str:
-        """处理 `_memory_user_id` 对应的业务逻辑。"""
+        """处理记忆数据，保持本地记忆和外部索引一致。"""
         return self.config_service.get_str("memory.mem0_user_id", "default_user")
 
+    # 判断本地记忆中是否存在可用于知识问候的主题或偏好。
     def _has_knowledge_memory(self) -> bool | None:
-        """判断 `_has_knowledge_memory` 对应的条件是否成立。"""
+        """判断本地记忆中是否存在可用于知识问候的主题或偏好。"""
         if not self.config_service.get_bool("memory.use_mem0_for_knowledge_speak", False):
             return False
         if self._pending_knowledge_mem0_context:
@@ -2234,33 +2391,40 @@ class DesktopPetWindow(QWidget):
         self._start_mem0_search_worker()
         return None
 
+    # 读取助手回复气泡展示时长，配置无效时使用默认毫秒数。
     def _assistant_reply_bubble_duration_ms(self) -> int:
-        """处理 `_assistant_reply_bubble_duration_ms` 对应的业务逻辑。"""
+        """读取助手回复气泡展示时长，配置无效时使用默认毫秒数。"""
         value = self.config_service.get_int("ui.bubble_durations_ms.assistant_reply", 15000)
         return value if value > 0 else 15000
 
+    # 读取主动问候气泡展示时长，配置无效时使用默认毫秒数。
     def _proactive_greeting_duration_ms(self) -> int:
-        """处理 `_proactive_greeting_duration_ms` 对应的业务逻辑。"""
+        """读取主动问候气泡展示时长，配置无效时使用默认毫秒数。"""
         value = self.config_service.get_int("ui.bubble_durations_ms.proactive_greeting", 6000)
         return value if value > 0 else 6000
 
+    # 同步聊天流程控制器的待处理状态到窗口字段。
     def _sync_chat_flow_state(self) -> None:
-        """同步并刷新 `_sync_chat_flow_state` 对应的状态。"""
+        """同步聊天流程控制器的待处理状态到窗口字段。"""
         self.pending_formal_question = self.chat_flow_controller.pending_question
         self._pending_was_formal = self.chat_flow_controller.pending_was_formal
 
+    # 返回当前模式对应的聊天存储实例。
     def _active_chat_store(self) -> ChatStore:
         """返回当前模式对应的聊天存储实例。"""
         return self.chat_flow_controller.active_store()
 
+    # 返回当前内存中的配置快照。
     def _config_snapshot(self) -> dict[str, Any]:
         """返回当前内存中的配置快照。"""
         return self.app_config
 
+    # 优先读取 app_config.json，缺失时回退到 app_config.example.json。
     def _load_app_config(self) -> dict[str, Any]:
         """优先读取 app_config.json，缺失时回退到 app_config.example.json。"""
         return load_json_prefer_primary(self.config_path, self.example_config_path, {})
 
+    # 把当前内存配置写回配置文件。
     def _save_app_config(self) -> None:
         """把当前内存配置写回配置文件。"""
         save_json(self.config_path, self.app_config)

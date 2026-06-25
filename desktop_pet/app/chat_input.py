@@ -9,6 +9,7 @@ from utils.dwm_border import suppress_dwm_border
 class ChatInput(QWidget):
     message_submitted = Signal(str)
 
+    # 初始化悬浮聊天输入框及发送控件。
     def __init__(self) -> None:
         """初始化悬浮聊天输入框及发送控件。"""
         super().__init__(
@@ -48,6 +49,7 @@ class ChatInput(QWidget):
         self._last_anchor_rect = QRect()
         self._always_on_top = True
 
+    # 同步输入框窗口的置顶状态与主窗口一致。
     def set_always_on_top(self, enabled: bool) -> None:
         """同步输入框窗口的置顶状态与主窗口一致。"""
         if self._always_on_top == enabled:
@@ -60,6 +62,7 @@ class ChatInput(QWidget):
         if was_visible:
             self.show()
 
+    # 移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。
     def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
         """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""
         ok, result = suppress_dwm_border(eventType, message)
@@ -67,6 +70,7 @@ class ChatInput(QWidget):
             return True, result
         return super().nativeEvent(eventType, message)
 
+    # 把输入框显示在宠物附近，并聚焦到文本框。
     def show_near(self, anchor_rect: QRect) -> None:
         """把输入框显示在宠物附近，并聚焦到文本框。"""
         self._last_anchor_rect = QRect(anchor_rect)
@@ -77,6 +81,7 @@ class ChatInput(QWidget):
         self.input.setFocus()
         self.input.selectAll()
 
+    # 根据角色当前位置重新摆放输入框。
     def reposition(self, anchor_rect: QRect | None = None) -> None:
         """根据角色当前位置重新摆放输入框。"""
         if anchor_rect is not None:
@@ -88,6 +93,7 @@ class ChatInput(QWidget):
         y = self._last_anchor_rect.y() + self._last_anchor_rect.height() + 4
         self.move(x, max(0, y))
 
+    # 提交输入内容；为空时仅关闭输入框。
     def _submit(self) -> None:
         """提交输入内容；为空时仅关闭输入框。"""
         text = self.input.text().strip()

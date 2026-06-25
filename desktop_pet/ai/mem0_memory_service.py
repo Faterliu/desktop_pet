@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 class Mem0MemoryService:
     """提供可选的 Mem0 长期语义记忆服务。"""
 
+    # 初始化当前对象及其依赖。
     def __init__(self, app_config: dict[str, Any]) -> None:
         """初始化当前对象及其依赖。"""
         self.app_config = app_config
@@ -48,12 +49,14 @@ class Mem0MemoryService:
             self.enabled = False
             self._memory = None
 
+    # 判断available是否满足条件并返回布尔结果。
     def is_available(self) -> bool:
-        """判断 `is_available` 对应的条件是否成立。"""
+        """判断available是否满足条件并返回布尔结果。"""
         return self.enabled and self._memory is not None
 
+    # 停止Mem0MemoryService持有的资源并释放后台状态。
     def close(self) -> None:
-        """处理 `close` 对应的业务逻辑。"""
+        """停止Mem0MemoryService持有的资源并释放后台状态。"""
         if self._memory is None:
             return
 
@@ -67,8 +70,9 @@ class Mem0MemoryService:
             self._memory = None
             self.enabled = False
 
+    # 根据 app_config 读取配置片段，缺失时返回安全默认配置。
     def _build_mem0_config(self, app_config: dict[str, Any]) -> dict[str, Any]:
-        """构建 `_build_mem0_config` 所需的结果。"""
+        """根据 app_config 读取配置片段，缺失时返回安全默认配置。"""
         api_config = app_config.get("api", {})
         memory_config = app_config.get("memory", {})
         use_app_deepseek = bool(memory_config.get("mem0_use_app_deepseek_config", True))
@@ -152,12 +156,14 @@ class Mem0MemoryService:
 
         return config
 
+    # 根据 memory_config 读取配置片段，缺失时返回安全默认配置。
     def _mem0_config(self, memory_config: dict[str, Any]) -> dict[str, Any]:
-        """处理 `_mem0_config` 对应的业务逻辑。"""
+        """根据 memory_config 读取配置片段，缺失时返回安全默认配置。"""
         app_config = dict(self.app_config)
         app_config["memory"] = memory_config
         return self._build_mem0_config(app_config)
 
+    # 根据 user_id、user_message、assistant_message 把对话加入当前状态或持久化记录。
     def add_dialogue(
         self,
         user_id: str,
@@ -165,7 +171,7 @@ class Mem0MemoryService:
         assistant_message: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """添加 `add_dialogue` 对应的内容。"""
+        """根据 user_id、user_message、assistant_message 把对话加入当前状态或持久化记录。"""
         if not self.is_available():
             return
 
@@ -191,13 +197,14 @@ class Mem0MemoryService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to add Mem0 dialogue memory: %s", safe_exception(exc))
 
+    # 根据 user_id、text、metadata 把记忆 文本加入当前状态或持久化记录。
     def add_memory_text(
         self,
         user_id: str,
         text: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """添加 `add_memory_text` 对应的内容。"""
+        """根据 user_id、text、metadata 把记忆 文本加入当前状态或持久化记录。"""
         if not self.is_available():
             return
 
@@ -218,13 +225,14 @@ class Mem0MemoryService:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to add Mem0 text memory: %s", safe_exception(exc))
 
+    # 根据 user_id、query、top_k 整理search，并把结果交给调用方或写回状态。
     def search(
         self,
         user_id: str,
         query: str,
         top_k: int | None = None,
     ) -> list[dict[str, Any]]:
-        """处理 `search` 对应的业务逻辑。"""
+        """根据 user_id、query、top_k 整理search，并把结果交给调用方或写回状态。"""
         if not self.is_available():
             return []
 
@@ -252,13 +260,14 @@ class Mem0MemoryService:
 
         return self._normalize_search_results(results)
 
+    # 根据 user_id、query、top_k 整理format for 提示词，并把结果交给调用方或写回状态。
     def format_for_prompt(
         self,
         user_id: str,
         query: str,
         top_k: int | None = None,
     ) -> str:
-        """格式化 `format_for_prompt` 对应的内容。"""
+        """根据 user_id、query、top_k 整理format for 提示词，并把结果交给调用方或写回状态。"""
         lines: list[str] = []
         seen: set[str] = set()
         for item in self.search(user_id=user_id, query=query, top_k=top_k):
@@ -275,8 +284,9 @@ class Mem0MemoryService:
                 lines.append(f"- {text}")
         return "\n".join(lines)
 
+    # 根据 user_id 判断any记忆是否满足条件并返回布尔结果。
     def has_any_memory(self, user_id: str) -> bool:
-        """判断 `has_any_memory` 对应的条件是否成立。"""
+        """根据 user_id 判断any记忆是否满足条件并返回布尔结果。"""
         return bool(
             self.search(
                 user_id=user_id,
@@ -285,8 +295,9 @@ class Mem0MemoryService:
             )
         )
 
+    # 把 Mem0 检索返回值整理为统一的字典列表。
     def _normalize_search_results(self, results: Any) -> list[dict[str, Any]]:
-        """规范化 `_normalize_search_results` 对应的数据。"""
+        """把 Mem0 检索返回值整理为统一的字典列表。"""
         if isinstance(results, dict):
             raw_items = results.get("results") or results.get("memories") or []
         else:
@@ -303,23 +314,26 @@ class Mem0MemoryService:
                 normalized.append({"memory": item})
         return normalized
 
+    # 根据 value、default 转换为正整数，失败或小于等于零时返回默认值。
     def _positive_int(self, value: Any, default: int) -> int:
-        """处理 `_positive_int` 对应的业务逻辑。"""
+        """根据 value、default 转换为正整数，失败或小于等于零时返回默认值。"""
         try:
             parsed = int(value)
         except (TypeError, ValueError):
             return default
         return parsed if parsed > 0 else default
 
+    # 根据 value、default 转换为浮点数，失败时返回默认值。
     def _float_value(self, value: Any, default: float) -> float:
-        """处理 `_float_value` 对应的业务逻辑。"""
+        """根据 value、default 转换为浮点数，失败时返回默认值。"""
         try:
             return float(value)
         except (TypeError, ValueError):
             return default
 
+    # 根据 memory_config 从环境变量或配置中读取 DashScope API 密钥。
     def _dashscope_api_key(self, memory_config: dict[str, Any]) -> str:
-        """处理 `_dashscope_api_key` 对应的业务逻辑。"""
+        """根据 memory_config 从环境变量或配置中读取 DashScope API 密钥。"""
         configured_key = str(memory_config.get("dashscope_api_key", "") or "").strip()
         if configured_key:
             return configured_key
@@ -328,8 +342,9 @@ class Mem0MemoryService:
         env_name = env_name or "DASHSCOPE_API_KEY"
         return str(os.getenv(env_name, "") or "").strip()
 
+    # 根据 memory_config 读取配置片段，缺失时返回安全默认配置。
     def _has_required_embedding_config(self, memory_config: dict[str, Any]) -> bool:
-        """判断 `_has_required_embedding_config` 对应的条件是否成立。"""
+        """根据 memory_config 读取配置片段，缺失时返回安全默认配置。"""
         if self._dashscope_api_key(memory_config):
             return True
 
@@ -339,8 +354,9 @@ class Mem0MemoryService:
         )
         return False
 
+    # 根据 text 判断sensitive文本是否满足条件并返回布尔结果。
     def _is_sensitive_text(self, text: str) -> bool:
-        """判断 `_is_sensitive_text` 对应的条件是否成立。"""
+        """根据 text 判断sensitive文本是否满足条件并返回布尔结果。"""
         sensitive_keywords = [
             "自杀",
             "自残",

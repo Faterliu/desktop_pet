@@ -11,8 +11,9 @@ import requests
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+# 从指定路径读取 JSON 文件，并返回解析后的字典。
 def _load_json(path: Path) -> dict[str, Any]:
-    """读取 `_load_json` 所需的数据。"""
+    """从指定路径读取 JSON 文件，并返回解析后的字典。"""
     if not path.exists():
         return {}
     try:
@@ -21,15 +22,17 @@ def _load_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+# 读取应用配置文件，缺失时回退示例配置。
 def _load_app_config() -> dict[str, Any]:
-    """读取 `_load_app_config` 所需的数据。"""
+    """读取应用配置文件，缺失时回退示例配置。"""
     primary = PROJECT_ROOT / "config" / "app_config.json"
     fallback = PROJECT_ROOT / "config" / "app_config.example.json"
     return _load_json(primary) or _load_json(fallback)
 
 
+# 根据 memory_config 从环境变量或配置中读取 DashScope API 密钥。
 def _dashscope_api_key(memory_config: dict[str, Any]) -> str:
-    """处理 `_dashscope_api_key` 对应的业务逻辑。"""
+    """根据 memory_config 从环境变量或配置中读取 DashScope API 密钥。"""
     configured_key = str(memory_config.get("dashscope_api_key", "") or "").strip()
     if configured_key:
         return configured_key
@@ -39,6 +42,7 @@ def _dashscope_api_key(memory_config: dict[str, Any]) -> str:
     return str(os.getenv(env_name, "") or "").strip()
 
 
+# 运行当前模块的主流程。
 def main() -> int:
     """运行当前模块的主流程。"""
     app_config = _load_app_config()

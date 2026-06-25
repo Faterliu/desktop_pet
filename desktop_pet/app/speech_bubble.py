@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QWidget
 from utils.dwm_border import apply_transparent_window_fixes, suppress_dwm_border
 
 
+# 从候选位置中选取第一个完全在屏幕内且不与角色窗口重叠的位置。
 def _find_bubble_position(
     bubble_width: int,
     bubble_height: int,
@@ -45,6 +46,7 @@ def _find_bubble_position(
 
 
 class SpeechBubble(QWidget):
+    # 初始化悬浮气泡窗口与自动关闭计时器。
     def __init__(self) -> None:
         """初始化悬浮气泡窗口与自动关闭计时器。"""
         super().__init__(
@@ -75,6 +77,7 @@ class SpeechBubble(QWidget):
         self._last_anchor_rect = QRect()
         self._always_on_top = True
 
+    # 同步气泡窗口的置顶状态与主窗口一致。
     def set_always_on_top(self, enabled: bool) -> None:
         """同步气泡窗口的置顶状态与主窗口一致。"""
         if self._always_on_top == enabled:
@@ -88,6 +91,7 @@ class SpeechBubble(QWidget):
             self.show()
         apply_transparent_window_fixes(self)
 
+    # 移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。
     def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
         """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""
         ok, result = suppress_dwm_border(eventType, message)
@@ -95,12 +99,14 @@ class SpeechBubble(QWidget):
             return True, result
         return super().nativeEvent(eventType, message)
 
+    # 窗口显示后再次应用形状和 Windows 透明窗口修正。
     def showEvent(self, event) -> None:  # noqa: N802
         """窗口显示后再次应用形状和 Windows 透明窗口修正。"""
         super().showEvent(event)
         self._apply_bubble_mask()
         apply_transparent_window_fixes(self)
 
+    # 在宠物附近显示一条气泡消息，并按时自动关闭。
     def show_message(
         self,
         text: str,
@@ -126,6 +132,7 @@ class SpeechBubble(QWidget):
         self.raise_()
         self.close_timer.start(duration_ms)
 
+    # 根据角色当前位置，在屏幕内找到不覆盖角色和其他气泡的最佳位置。
     def reposition(
         self,
         anchor_rect: QRect | None = None,
@@ -150,6 +157,7 @@ class SpeechBubble(QWidget):
         ]
         self.move(_find_bubble_position(bw, bh, a, candidates, exclusion_rects))
 
+    # 绘制圆角气泡背景和底部小尾巴。
     def paintEvent(self, event) -> None:  # noqa: N802
         """绘制圆角气泡背景和底部小尾巴。"""
         _ = event
@@ -160,6 +168,7 @@ class SpeechBubble(QWidget):
         painter.setPen(QColor("#d8b27a"))
         painter.drawPath(path)
 
+    # 返回气泡主体和尾巴的轮廓，供绘制和窗口裁剪共用。
     def _bubble_path(self) -> QPainterPath:
         """返回气泡主体和尾巴的轮廓，供绘制和窗口裁剪共用。"""
         path = QPainterPath()
@@ -170,6 +179,7 @@ class SpeechBubble(QWidget):
         path.closeSubpath()
         return path
 
+    # 按气泡轮廓裁剪窗口，避免系统沿矩形外接框补边。
     def _apply_bubble_mask(self) -> None:
         """按气泡轮廓裁剪窗口，避免系统沿矩形外接框补边。"""
         region = QRegion(self._bubble_path().toFillPolygon().toPolygon())
@@ -181,6 +191,7 @@ class ReplyBubble(QWidget):
 
     clicked = Signal()
 
+    # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         super().__init__(
@@ -208,6 +219,7 @@ class ReplyBubble(QWidget):
 
         self._anchor_rect = QRect()
 
+    # 同步气泡窗口置顶状态。
     def set_always_on_top(self, enabled: bool) -> None:
         """同步气泡窗口置顶状态。"""
         was_visible = self.isVisible()
@@ -218,6 +230,7 @@ class ReplyBubble(QWidget):
             self.show()
         apply_transparent_window_fixes(self)
 
+    # 移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。
     def nativeEvent(self, eventType, message) -> tuple:  # noqa: N802
         """移除 Windows DWM 在透明无边框窗口周围绘制的细线边框。"""
         ok, result = suppress_dwm_border(eventType, message)
@@ -225,12 +238,14 @@ class ReplyBubble(QWidget):
             return True, result
         return super().nativeEvent(eventType, message)
 
+    # 窗口显示后应用形状和透明修正。
     def showEvent(self, event) -> None:  # noqa: N802
         """窗口显示后应用形状和透明修正。"""
         super().showEvent(event)
         self._apply_mask()
         apply_transparent_window_fixes(self)
 
+    # 在角色右侧显示可点击的应答气泡。
     def show_message(
         self,
         text: str,
@@ -254,6 +269,7 @@ class ReplyBubble(QWidget):
         self.raise_()
         self.close_timer.start(duration_ms)
 
+    # 更新锚点并重新摆放气泡位置，可传入其他气泡作为避让区域。
     def reposition(
         self,
         anchor_rect: QRect,
@@ -263,6 +279,7 @@ class ReplyBubble(QWidget):
         self._anchor_rect = QRect(anchor_rect)
         self._reposition(exclusion_rects)
 
+    # 在角色四周找到屏幕内不覆盖角色和其他气泡的最佳应答气泡位置。
     def _reposition(
         self,
         exclusion_rects: list[QRect] | None = None,
@@ -283,12 +300,14 @@ class ReplyBubble(QWidget):
         ]
         self.move(_find_bubble_position(bw, bh, a, candidates, exclusion_rects))
 
+    # 点击气泡视为用户回应知识问候。
     def mousePressEvent(self, event) -> None:  # noqa: N802
         """点击气泡视为用户回应知识问候。"""
         self.clicked.emit()
         self.hide()
         super().mousePressEvent(event)
 
+    # 绘制圆角矩形气泡（无尾巴）。
     def paintEvent(self, event) -> None:  # noqa: N802
         """绘制圆角矩形气泡（无尾巴）。"""
         _ = event
@@ -300,6 +319,7 @@ class ReplyBubble(QWidget):
         painter.setPen(QColor("#81c784"))
         painter.drawPath(path)
 
+    # 按圆角矩形裁剪窗口。
     def _apply_mask(self) -> None:
         """按圆角矩形裁剪窗口。"""
         path = QPainterPath()

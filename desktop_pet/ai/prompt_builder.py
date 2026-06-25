@@ -54,6 +54,7 @@ DEFAULT_SUMMARY = {
 
 
 class PromptBuilder:
+    # 初始化提示词构建器，并绑定角色、安全、记忆与正式/非正式摘要配置。
     def __init__(
         self,
         character_path: str | Path,
@@ -75,6 +76,7 @@ class PromptBuilder:
             Path(fallback_config_path) if fallback_config_path else self.config_path
         )
 
+    # 组装发送给模型的完整 messages 列表。
     def build_messages(
         self,
         user_message: str,
@@ -224,20 +226,22 @@ class PromptBuilder:
 
         return self._force_fit_messages(final_messages, max_prompt_chars)
 
+    # 读取配置片段，缺失时返回安全默认配置。
     def _config(self) -> dict[str, Any]:
-        """处理 `_config` 对应的业务逻辑。"""
+        """读取配置片段，缺失时返回安全默认配置。"""
         if self.config_path is None:
             return {}
         fallback = self.fallback_config_path or self.config_path
         return load_json_prefer_primary(self.config_path, fallback, {})
 
+    # 根据 messages、max_messages、max_message_chars 整理trim conversation 消息，并把结果交给调用方或写回状态。
     def _trim_conversation_messages(
         self,
         messages: list[dict[str, Any]],
         max_messages: int,
         max_message_chars: int,
     ) -> list[dict[str, str]]:
-        """整理 `_trim_conversation_messages` 对应的文本或数据。"""
+        """根据 messages、max_messages、max_message_chars 整理trim conversation 消息，并把结果交给调用方或写回状态。"""
         trimmed = [
             {
                 "role": str(item.get("role", "user")),
@@ -248,12 +252,13 @@ class PromptBuilder:
         ]
         return trimmed[-max_messages:]
 
+    # 根据 messages、available_chars 读取预算配置，返回当前流程使用的限制值。
     def _trim_history_to_budget(
         self,
         messages: list[dict[str, str]],
         available_chars: int,
     ) -> list[dict[str, str]]:
-        """整理 `_trim_history_to_budget` 对应的文本或数据。"""
+        """根据 messages、available_chars 读取预算配置，返回当前流程使用的限制值。"""
         if available_chars <= 0:
             return []
 
@@ -275,22 +280,25 @@ class PromptBuilder:
         kept.reverse()
         return kept
 
+    # 根据 text、limit 按字符预算裁剪提示词段落，返回可放入 prompt 的文本。
     def _fit_section(self, text: str, limit: int) -> str:
-        """处理 `_fit_section` 对应的业务逻辑。"""
+        """根据 text、limit 按字符预算裁剪提示词段落，返回可放入 prompt 的文本。"""
         if not text:
             return ""
         return clip_text(text, limit)
 
+    # 根据 messages 累计消息内容字符数，用于判断 prompt 预算。
     def _messages_char_count(self, messages: list[dict[str, str]]) -> int:
-        """处理 `_messages_char_count` 对应的业务逻辑。"""
+        """根据 messages 累计消息内容字符数，用于判断 prompt 预算。"""
         return sum(len(item.get("content", "")) for item in messages)
 
+    # 根据 messages、max_prompt_chars 持续裁剪历史消息，直到总 prompt 长度落入预算。
     def _force_fit_messages(
         self,
         messages: list[dict[str, str]],
         max_prompt_chars: int,
     ) -> list[dict[str, str]]:
-        """处理 `_force_fit_messages` 对应的业务逻辑。"""
+        """根据 messages、max_prompt_chars 持续裁剪历史消息，直到总 prompt 长度落入预算。"""
         if max_prompt_chars <= 0:
             return messages
 
@@ -307,8 +315,9 @@ class PromptBuilder:
             used += len(content)
         return fitted
 
+    # 根据正式问答开关生成当前回答模式提示。
     def _format_mode_guidance(self, formal_qa_mode: bool) -> str:
-        """格式化 `_format_mode_guidance` 对应的内容。"""
+        """根据正式问答开关生成当前回答模式提示。"""
         if formal_qa_mode:
             return (
                 "当前处于正式问答模式。请优先保证回答准确、结构清晰、可执行。"
@@ -321,13 +330,14 @@ class PromptBuilder:
             "但不要机械说明你记得什么。除非用户主动询问，否则不要提及记忆系统。"
         )
 
+    # 把角色设定、人格状态和正式模式要求组合成提示词片段。
     def _format_character_guidance(
         self,
         character: dict[str, Any],
         formal_qa_mode: bool,
         runtime_state: dict[str, Any] | PersonaState | None,
     ) -> str:
-        """格式化 `_format_character_guidance` 对应的内容。"""
+        """把角色设定、人格状态和正式模式要求组合成提示词片段。"""
         name = self._string_value(character.get("name")) or "小桃"
         role = self._string_value(character.get("role")) or "桌面陪伴小伙伴"
         core = self._mapping(character.get("core_identity"))
@@ -417,8 +427,9 @@ class PromptBuilder:
             )
         return "\n".join(lines)
 
+    # 把场景反应配置格式化为模型可执行的提示词规则。
     def _format_scenario_rules(self, scenarios: dict[str, Any]) -> str:
-        """格式化 `_format_scenario_rules` 对应的内容。"""
+        """把场景反应配置格式化为模型可执行的提示词规则。"""
         labels = {
             "user_tired": "用户疲惫",
             "user_coding": "代码任务",
@@ -432,8 +443,9 @@ class PromptBuilder:
                 fragments.append(f"{label}时{text}")
         return "；".join(fragments)
 
+    # 根据 value 整理legacy style，并把结果交给调用方或写回状态。
     def _legacy_style(self, value: Any, *keys: str) -> str:
-        """处理 `_legacy_style` 对应的业务逻辑。"""
+        """根据 value 整理legacy style，并把结果交给调用方或写回状态。"""
         if isinstance(value, dict):
             for key in keys:
                 text = self._string_value(value.get(key))
@@ -442,12 +454,14 @@ class PromptBuilder:
             return ""
         return self._string_value(value)
 
+    # 根据 value 整理mapping，并把结果交给调用方或写回状态。
     def _mapping(self, value: Any) -> dict[str, Any]:
-        """处理 `_mapping` 对应的业务逻辑。"""
+        """根据 value 整理mapping，并把结果交给调用方或写回状态。"""
         return value if isinstance(value, dict) else {}
 
+    # 把用户事实记忆整理为提示词中的事实记忆段落。
     def _format_fact_memory(self, memory: dict[str, Any]) -> str:
-        """格式化 `_format_fact_memory` 对应的内容。"""
+        """把用户事实记忆整理为提示词中的事实记忆段落。"""
         fragments: list[str] = []
         user_profile = memory.get("user_profile", {})
         work_study = memory.get("work_study", {})
@@ -463,10 +477,11 @@ class PromptBuilder:
         self._append_legacy_preferences(fragments, memory.get("preferences"))
         return "\n".join(f"- {item}" for item in fragments[:8])
 
+    # 把关系记忆按模式筛选后整理为提示词片段。
     def _format_relationship_memory(
         self, memory: dict[str, Any], formal_qa_mode: bool
     ) -> str:
-        """格式化 `_format_relationship_memory` 对应的内容。"""
+        """把关系记忆按模式筛选后整理为提示词片段。"""
         fragments: list[str] = []
         relationship = memory.get("relationship_memory", {})
         communication = relationship.get("communication_style", {})
@@ -522,8 +537,9 @@ class PromptBuilder:
 
         return "\n".join(f"- {item}" for item in fragments[:8])
 
+    # 把语义检索结果整理为可注入 prompt 的短段落。
     def _format_relevant_semantic_memories(self, relevant_memories: str | None) -> str:
-        """格式化 `_format_relevant_semantic_memories` 对应的内容。"""
+        """把语义检索结果整理为可注入 prompt 的短段落。"""
         if not relevant_memories:
             return ""
         lines = [
@@ -533,8 +549,9 @@ class PromptBuilder:
         ]
         return "\n".join(lines[:8])
 
+    # 根据正式或闲聊模式生成记忆使用边界说明。
     def _format_memory_guidelines(self, formal_qa_mode: bool) -> str:
-        """格式化 `_format_memory_guidelines` 对应的内容。"""
+        """根据正式或闲聊模式生成记忆使用边界说明。"""
         mode_line = (
             "- 正式问答模式下，风格记忆只用于让回答更清晰、直接、结构化。"
             if formal_qa_mode
@@ -551,20 +568,23 @@ class PromptBuilder:
             f"{mode_line}"
         )
 
+    # 根据 fragments、label、value 把记忆 items加入当前状态或持久化记录。
     def _append_memory_items(self, fragments: list[str], label: str, value: Any) -> None:
-        """添加 `_append_memory_items` 对应的内容。"""
+        """根据 fragments、label、value 把记忆 items加入当前状态或持久化记录。"""
         items = self._string_items(value)
         if items:
             fragments.append(f"{label}：{'、'.join(items[:3])}")
 
+    # 根据 fragments、label、value 把scalar加入当前状态或持久化记录。
     def _append_scalar(self, fragments: list[str], label: str, value: Any) -> None:
-        """添加 `_append_scalar` 对应的内容。"""
+        """根据 fragments、label、value 把scalar加入当前状态或持久化记录。"""
         text = self._string_value(value)
         if text:
             fragments.append(f"{label}：{text}")
 
+    # 根据 fragments、value 把legacy preferences加入当前状态或持久化记录。
     def _append_legacy_preferences(self, fragments: list[str], value: Any) -> None:
-        """添加 `_append_legacy_preferences` 对应的内容。"""
+        """根据 fragments、value 把legacy preferences加入当前状态或持久化记录。"""
         if isinstance(value, dict):
             for key, item in value.items():
                 items = self._string_items(item)
@@ -573,16 +593,18 @@ class PromptBuilder:
         else:
             self._append_memory_items(fragments, "旧版偏好", value)
 
+    # 根据 value 遍历嵌套数据中的文本项，过滤空值后逐条返回。
     def _string_items(self, value: Any) -> list[str]:
-        """处理 `_string_items` 对应的业务逻辑。"""
+        """根据 value 遍历嵌套数据中的文本项，过滤空值后逐条返回。"""
         if isinstance(value, list):
             return [clip_text(str(item).strip(), 80) for item in value if str(item).strip()]
         if isinstance(value, str) and value.strip():
             return [clip_text(value.strip(), 80)]
         return []
 
+    # 根据 value 提取文本值并去除空白，无法使用时返回空字符串。
     def _string_value(self, value: Any) -> str:
-        """处理 `_string_value` 对应的业务逻辑。"""
+        """根据 value 提取文本值并去除空白，无法使用时返回空字符串。"""
         if value in (None, ""):
             return ""
         return clip_text(str(value).strip(), 80)

@@ -14,14 +14,16 @@ from storage.memory_store import MemoryStore  # noqa: E402
 
 
 class MemorySchemaTests(unittest.TestCase):
+    # 准备当前测试所需的环境和数据。
     def setUp(self) -> None:
         """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / self._testMethodName
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.memory_path = self.temp_dir / "memory.json"
 
+    # 验证load normalizes old 记忆 without dropping existing fields场景下的预期结果。
     def test_load_normalizes_old_memory_without_dropping_existing_fields(self) -> None:
-        """验证 `test_load_normalizes_old_memory_without_dropping_existing_fields` 对应的行为。"""
+        """验证load normalizes old 记忆 without dropping existing fields场景下的预期结果。"""
         self.memory_path.write_text(
             json.dumps(
                 {
@@ -43,8 +45,9 @@ class MemorySchemaTests(unittest.TestCase):
         self.assertIn("companionship_style", memory["relationship_memory"])
         self.assertIn("interaction_patterns", memory["relationship_memory"])
 
+    # 验证merge preserves old 记忆 and saves relationship schema场景下的预期结果。
     def test_merge_preserves_old_memory_and_saves_relationship_schema(self) -> None:
-        """验证 `test_merge_preserves_old_memory_and_saves_relationship_schema` 对应的行为。"""
+        """验证merge preserves old 记忆 and saves relationship schema场景下的预期结果。"""
         self.memory_path.write_text(
             json.dumps(
                 {

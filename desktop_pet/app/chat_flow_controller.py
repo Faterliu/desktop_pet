@@ -24,8 +24,9 @@ class ChatFlowDecision:
     question: str = ""
     reply: str = ""
 
+    # 复制聊天结果上下文并写入新的结果类型。
     def with_kind(self, kind: ChatDecisionKind) -> ChatFlowDecision:
-        """处理 `with_kind` 对应的业务逻辑。"""
+        """复制聊天结果上下文并写入新的结果类型。"""
         return ChatFlowDecision(
             kind=kind,
             message=self.message,
@@ -57,6 +58,7 @@ class ChatFlowController:
         "或者先关闭“聊天接入 API”。"
     )
 
+    # 初始化当前对象及其依赖。
     def __init__(
         self,
         formal_store: Any,
@@ -76,12 +78,14 @@ class ChatFlowController:
         self.pending_question = ""
         self.pending_was_formal = False
 
+    # 根据任务注册表判断指定聊天任务能否开始。
     def can_start_chat(self, chat_task_registered: bool) -> bool:
-        """判断 `can_start_chat` 对应的条件是否成立。"""
+        """根据任务注册表判断指定聊天任务能否开始。"""
         return not chat_task_registered
 
+    # 根据 message 处理聊天消息流程，更新上下文和展示状态。
     def begin_user_message(self, message: str) -> ChatMessageContext:
-        """处理 `begin_user_message` 对应的业务逻辑。"""
+        """根据 message 处理聊天消息流程，更新上下文和展示状态。"""
         formal_qa_mode = self._formal_qa_enabled()
         store = self._store_for_mode(formal_qa_mode)
         store.append_message("user", message)
@@ -94,12 +98,13 @@ class ChatFlowController:
             store=store,
         )
 
+    # 把助手回复追加到当前聊天存储，并写入待处理上下文。
     def append_assistant_reply(
         self,
         context: ChatMessageContext,
         reply: str,
     ) -> ChatFlowDecision:
-        """添加 `append_assistant_reply` 对应的内容。"""
+        """把助手回复追加到当前聊天存储，并写入待处理上下文。"""
         context.store.append_message("assistant", reply)
         return ChatFlowDecision(
             kind="local_reply",
@@ -109,8 +114,9 @@ class ChatFlowController:
             reply=reply,
         )
 
+    # 根据 context 整理decide after thinking，并把结果交给调用方或写回状态。
     def decide_after_thinking(self, context: ChatMessageContext) -> ChatFlowDecision:
-        """处理 `decide_after_thinking` 对应的业务逻辑。"""
+        """根据 context 整理decide after thinking，并把结果交给调用方或写回状态。"""
         if not self._api_chat_enabled():
             reply = self._local_reply_provider(context.message, context.formal_qa_mode)
             return self.append_assistant_reply(context, reply)
@@ -128,6 +134,7 @@ class ChatFlowController:
             question=context.question,
         )
 
+    # 根据 message、client、prompt_builder 处理聊天消息流程，更新上下文和展示状态。
     def chat_worker_kwargs(
         self,
         message: str,
@@ -138,7 +145,7 @@ class ChatFlowController:
         user_id: str,
         app_config: dict[str, Any],
     ) -> dict[str, Any]:
-        """处理 `chat_worker_kwargs` 对应的业务逻辑。"""
+        """根据 message、client、prompt_builder 处理聊天消息流程，更新上下文和展示状态。"""
         return {
             "user_message": message,
             "client": client,
@@ -150,8 +157,9 @@ class ChatFlowController:
             "app_config": app_config,
         }
 
+    # 保存助手回复，清理待处理上下文并返回本轮聊天结果。
     def complete_success(self, reply: str) -> ChatCompletion:
-        """处理 `complete_success` 对应的业务逻辑。"""
+        """保存助手回复，清理待处理上下文并返回本轮聊天结果。"""
         cleaned_reply = reply.strip() or "我在这里哦。"
         store = self._store_for_mode(self.pending_was_formal)
         store.append_message("assistant", cleaned_reply)
@@ -164,8 +172,9 @@ class ChatFlowController:
         self.pending_was_formal = False
         return completion
 
+    # 记录聊天失败信息，清理待处理上下文并返回错误展示内容。
     def complete_failure(self, error_message: str) -> ChatFailure:
-        """处理 `complete_failure` 对应的业务逻辑。"""
+        """记录聊天失败信息，清理待处理上下文并返回错误展示内容。"""
         failure = ChatFailure(
             error_message=error_message,
             question=self.pending_question,
@@ -175,10 +184,12 @@ class ChatFlowController:
         self.pending_was_formal = False
         return failure
 
+    # 返回当前正式或非正式聊天模式对应的消息存储。
     def active_store(self) -> Any:
-        """处理 `active_store` 对应的业务逻辑。"""
+        """返回当前正式或非正式聊天模式对应的消息存储。"""
         return self._store_for_mode(self._formal_qa_enabled())
 
+    # 根据正式问答模式返回对应聊天存储。
     def _store_for_mode(self, formal_qa_mode: bool) -> Any:
-        """保存 `_store_for_mode` 产生的数据。"""
+        """根据正式问答模式返回对应聊天存储。"""
         return self.formal_store if formal_qa_mode else self.informal_store

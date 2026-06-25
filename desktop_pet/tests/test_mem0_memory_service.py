@@ -14,8 +14,9 @@ from ai.mem0_memory_service import Mem0MemoryService  # noqa: E402
 
 
 class Mem0MemoryServiceTests(unittest.TestCase):
+    # 验证enabled mem 0 without DashScope 密钥 skips import and init场景下的预期结果。
     def test_enabled_mem0_without_dashscope_key_skips_import_and_init(self) -> None:
-        """验证 `test_enabled_mem0_without_dashscope_key_skips_import_and_init` 对应的行为。"""
+        """验证enabled mem 0 without DashScope 密钥 skips import and init场景下的预期结果。"""
         config = {
             "api": {"api_key": "deepseek-key"},
             "memory": {
@@ -28,8 +29,9 @@ class Mem0MemoryServiceTests(unittest.TestCase):
         real_import = builtins.__import__
         mem0_import_attempted = False
 
+        # 为测试准备failifmem0imported数据或断言辅助结果。
         def fail_if_mem0_imported(name: str, *args, **kwargs):  # type: ignore[no-untyped-def]
-            """处理 `fail_if_mem0_imported` 对应的业务逻辑。"""
+            """为测试准备failifmem0imported数据或断言辅助结果。"""
             nonlocal mem0_import_attempted
             if name == "mem0":
                 mem0_import_attempted = True

@@ -16,20 +16,24 @@ except ModuleNotFoundError:
     qt_core = types.ModuleType("PySide6.QtCore")
 
     class _FakeSignal:
+        # 初始化当前对象及其依赖。
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
             """初始化当前对象及其依赖。"""
             self._callbacks = []
 
+        # 模拟 _FakeSignal 的信号connect行为，记录或触发测试回调。
         def connect(self, callback) -> None:  # type: ignore[no-untyped-def]
-            """处理 `connect` 对应的业务逻辑。"""
+            """模拟 _FakeSignal 的信号connect行为，记录或触发测试回调。"""
             self._callbacks.append(callback)
 
+        # 模拟 _FakeSignal 的信号emit行为，记录或触发测试回调。
         def emit(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
-            """处理 `emit` 对应的业务逻辑。"""
+            """模拟 _FakeSignal 的信号emit行为，记录或触发测试回调。"""
             for callback in list(self._callbacks):
                 callback(*args, **kwargs)
 
     class _FakeQObject:
+        # 初始化当前对象及其依赖。
         def __init__(self, *args, **kwargs) -> None:  # noqa: D107
             """初始化当前对象及其依赖。"""
             pass
@@ -44,43 +48,51 @@ from app.history_clear_worker import ChatHistoryClearWorker  # noqa: E402
 
 
 class FakeSummarizer:
+    # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         self.calls: list[tuple[int, bool]] = []
 
+    # 为 FakeSummarizer 测试替身提供maybesummarize行为。
     def maybe_summarize(self, trigger_rounds: int, force: bool = False) -> None:
-        """处理 `maybe_summarize` 对应的业务逻辑。"""
+        """为 FakeSummarizer 测试替身提供maybesummarize行为。"""
         self.calls.append((trigger_rounds, force))
 
 
 class FakeChatStore:
+    # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         self.cleared = False
         self.cleaned_at = ""
 
+    # 为 FakeChatStore 测试替身提供clear 历史记录行为。
     def clear_history(self) -> None:
-        """移除 `clear_history` 对应的内容。"""
+        """为 FakeChatStore 测试替身提供clear 历史记录行为。"""
         self.cleared = True
 
+    # 为 FakeChatStore 测试替身提供updatelastcleanedat行为。
     def update_last_cleaned_at(self, timestamp: str) -> None:
-        """更新 `update_last_cleaned_at` 对应的状态。"""
+        """为 FakeChatStore 测试替身提供updatelastcleanedat行为。"""
         self.cleaned_at = timestamp
 
 
 class FakeAtomicChatStore(FakeChatStore):
+    # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         super().__init__()
         self.atomic_clear_calls = 0
         self.update_calls = 0
 
+    # 清空聊天记录并记录清理时间。
     def clear_history_with_timestamp(self, timestamp: str) -> None:
         """清空聊天记录并记录清理时间。"""
         self.atomic_clear_calls += 1
         self.cleared = True
         self.cleaned_at = timestamp
 
+    # 记录旧式更新时间接口是否被调用。
     def update_last_cleaned_at(self, timestamp: str) -> None:
         """记录旧式更新时间接口是否被调用。"""
         self.update_calls += 1
@@ -88,8 +100,9 @@ class FakeAtomicChatStore(FakeChatStore):
 
 
 class HistoryClearWorkerTests(unittest.TestCase):
+    # 验证工作线程 runs 摘要 and clear without ui dependency场景下的预期结果。
     def test_worker_runs_summary_and_clear_without_ui_dependency(self) -> None:
-        """验证 `test_worker_runs_summary_and_clear_without_ui_dependency` 对应的行为。"""
+        """验证工作线程 runs 摘要 and clear without ui dependency场景下的预期结果。"""
         summarizer = FakeSummarizer()
         store = FakeChatStore()
         worker = ChatHistoryClearWorker(
@@ -105,6 +118,7 @@ class HistoryClearWorkerTests(unittest.TestCase):
         self.assertTrue(store.cleared)
         self.assertTrue(store.cleaned_at)
 
+    # 存储支持合并清理时，worker 不再分两次写入。
     def test_worker_prefers_atomic_clear_when_available(self) -> None:
         """存储支持合并清理时，worker 不再分两次写入。"""
         summarizer = FakeSummarizer()

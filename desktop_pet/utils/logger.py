@@ -11,6 +11,7 @@ LOG_MAX_BYTES = 1_000_000
 LOG_BACKUP_COUNT = 5
 
 
+# 配置全局日志输出到控制台和 data/app.log。
 def configure_logging() -> None:
     """配置全局日志输出到控制台和 data/app.log。"""
     global _CONFIGURED
@@ -44,6 +45,7 @@ def configure_logging() -> None:
     _CONFIGURED = True
 
 
+# 获取指定名称的日志记录器，并确保日志系统已初始化。
 def get_logger(name: str) -> logging.Logger:
     """获取指定名称的日志记录器，并确保日志系统已初始化。"""
     configure_logging()

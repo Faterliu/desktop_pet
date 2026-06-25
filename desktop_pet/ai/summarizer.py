@@ -27,6 +27,7 @@ DEFAULT_SUMMARY = {
 
 
 class Summarizer:
+    # 初始化摘要器，关联摘要文件、聊天记录、记忆存储和模型客户端。
     def __init__(
         self,
         summary_path: str | Path,
@@ -51,11 +52,13 @@ class Summarizer:
         )
         self._summary_lock = lock_for_path(self.summary_path)
 
+    # 读取当前对话摘要数据。
     def load_summary(self) -> dict[str, Any]:
         """读取当前对话摘要数据。"""
         with self._summary_lock:
             return load_json(self.summary_path, DEFAULT_SUMMARY)
 
+    # 在达到轮数阈值或强制触发时尝试生成并保存摘要。
     def maybe_summarize(self, trigger_rounds: int, force: bool = False) -> None:
         """在达到轮数阈值或强制触发时尝试生成并保存摘要。"""
         with self._summary_lock:
@@ -83,19 +86,22 @@ class Summarizer:
             self.memory_store.merge(extracted_memory)
             self._write_memory_updates_to_mem0(extracted_memory)
 
+    # 读取配置片段，缺失时返回安全默认配置。
     def _config(self) -> dict[str, Any]:
-        """处理 `_config` 对应的业务逻辑。"""
+        """读取配置片段，缺失时返回安全默认配置。"""
         if self.config_path is None:
             return {}
         fallback = self.fallback_config_path or self.config_path
         return load_json_prefer_primary(self.config_path, fallback, {})
 
+    # 读取预算配置，返回当前流程使用的限制值。
     def _budget(self) -> dict[str, int]:
-        """处理 `_budget` 对应的业务逻辑。"""
+        """读取预算配置，返回当前流程使用的限制值。"""
         return read_context_budget(self._config())
 
+    # 根据 memory_updates 把记忆 updates to mem 0写入持久化存储并保持数据可恢复。
     def _write_memory_updates_to_mem0(self, memory_updates: dict[str, Any]) -> None:
-        """保存 `_write_memory_updates_to_mem0` 产生的数据。"""
+        """根据 memory_updates 把记忆 updates to mem 0写入持久化存储并保持数据可恢复。"""
         if self.mem0_memory_service is None:
             return
 
@@ -114,12 +120,14 @@ class Summarizer:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to shadow-write memory update to Mem0: %s", safe_exception(exc))
 
+    # 根据 value 遍历嵌套数据中的文本项，过滤空值后逐条返回。
     def _iter_memory_texts(self, value: Any) -> list[str]:
-        """处理 `_iter_memory_texts` 对应的业务逻辑。"""
+        """根据 value 遍历嵌套数据中的文本项，过滤空值后逐条返回。"""
         texts: list[str] = []
 
+        # 根据 node 整理visit，并把结果交给调用方或写回状态。
         def visit(node: Any) -> None:
-            """处理 `visit` 对应的业务逻辑。"""
+            """根据 node 整理visit，并把结果交给调用方或写回状态。"""
             if isinstance(node, dict):
                 for item in node.values():
                     visit(item)
@@ -134,12 +142,14 @@ class Summarizer:
         visit(value)
         return texts
 
+    # 根据 value 判断记忆update文本是否满足条件并返回布尔结果。
     def _has_memory_update_text(self, value: Any) -> bool:
-        """判断 `_has_memory_update_text` 对应的条件是否成立。"""
+        """根据 value 判断记忆update文本是否满足条件并返回布尔结果。"""
         return bool(self._iter_memory_texts(value))
 
+    # 根据正式问答开关返回当前摘要写入模式。
     def _summary_mode(self) -> str:
-        """处理 `_summary_mode` 对应的业务逻辑。"""
+        """根据正式问答开关返回当前摘要写入模式。"""
         name = self.summary_path.name.lower()
         if "informal" in name:
             return "informal"
@@ -147,13 +157,14 @@ class Summarizer:
             return "formal"
         return "unknown"
 
+    # 根据 history、trigger_rounds、covered_count 判断summarize是否满足条件并返回布尔结果。
     def _should_summarize(
         self,
         history: list[dict[str, Any]],
         trigger_rounds: int,
         covered_count: int,
     ) -> bool:
-        """判断 `_should_summarize` 对应的条件是否成立。"""
+        """根据 history、trigger_rounds、covered_count 判断summarize是否满足条件并返回布尔结果。"""
         trigger_rounds = max(1, int(trigger_rounds))
         total_user_rounds = self._count_user_messages(history)
         if total_user_rounds < trigger_rounds:
@@ -165,10 +176,12 @@ class Summarizer:
         uncovered_user_rounds = self._count_user_messages(history[covered_count:])
         return uncovered_user_rounds >= trigger_rounds
 
+    # 统计历史消息中的用户发言数量。
     def _count_user_messages(self, history: list[dict[str, Any]]) -> int:
-        """计算 `_count_user_messages` 对应的结果。"""
+        """统计历史消息中的用户发言数量。"""
         return len([item for item in history if item.get("role") == "user"])
 
+    # 只有存在非空用户消息时才允许摘要和记忆更新。
     def _has_summarizable_history(self, history: list[dict[str, Any]]) -> bool:
         """只有存在非空用户消息时才允许摘要和记忆更新。"""
         return any(
@@ -176,8 +189,9 @@ class Summarizer:
             for item in history
         )
 
+    # 根据 history 压缩聊天历史，生成摘要与可合并的记忆更新。
     def _summarize_history(self, history: list[dict[str, Any]]) -> dict[str, Any]:
-        """处理 `_summarize_history` 对应的业务逻辑。"""
+        """根据 history 压缩聊天历史，生成摘要与可合并的记忆更新。"""
         if not self.deepseek_client.is_configured():
             return self._local_summary(history)
 
@@ -188,8 +202,9 @@ class Summarizer:
         summary_payload["memory_updates"] = self._model_memory_updates(history)
         return summary_payload
 
+    # 根据 history 请求模型生成摘要 JSON，失败时交给本地兜底。
     def _model_summary(self, history: list[dict[str, Any]]) -> dict[str, Any] | None:
-        """处理 `_model_summary` 对应的业务逻辑。"""
+        """根据 history 请求模型生成摘要 JSON，失败时交给本地兜底。"""
         try:
             content = self.deepseek_client.chat(self._summary_messages(history))
             parsed = json.loads(content)
@@ -206,6 +221,7 @@ class Summarizer:
             logger.warning("Falling back to local summary after model failure: %s", safe_exception(exc))
         return None
 
+    # 仅从用户消息中提取记忆信息。
     def _model_memory_updates(self, history: list[dict[str, Any]]) -> dict[str, Any]:
         """仅从用户消息中提取记忆信息。避免把助手说过的话当成用户事实。"""
         user_history = self._user_history(history)
@@ -224,6 +240,7 @@ class Summarizer:
 
         return self._extract_memory(self._cap_user_messages(user_history, self._budget()["memory_extract_max_input_chars"]))
 
+    # 从最近对话构建模型摘要输入，保留角色信息以便模型区分用户和助手发言。
     def _summary_messages(self, history: list[dict[str, Any]]) -> list[dict[str, str]]:
         """从最近对话构建模型摘要输入，保留角色信息以便模型区分用户和助手发言。"""
         transcript = self._build_transcript(
@@ -243,6 +260,7 @@ class Summarizer:
             {"role": "user", "content": transcript},
         ]
 
+    # 仅从用户消息中构建记忆提取输入。
     def _memory_messages(self, history: list[dict[str, Any]]) -> list[dict[str, str]]:
         """仅从用户消息中构建记忆提取输入。"""
         transcript = self._build_transcript(
@@ -279,6 +297,7 @@ class Summarizer:
             {"role": "user", "content": transcript},
         ]
 
+    # 在没有模型可用时，根据最近对话生成简化本地摘要。
     def _local_summary(self, history: list[dict[str, Any]]) -> dict[str, Any]:
         """在没有模型可用时，根据最近对话生成简化本地摘要。"""
         budget = self._budget()
@@ -295,6 +314,7 @@ class Summarizer:
             ),
         }
 
+    # 从用户最近几轮消息里提取可保存的偏好和学习工作信息。
     def _extract_memory(self, history: list[dict[str, Any]]) -> dict[str, Any]:
         """从用户最近几轮消息里提取可保存的偏好和学习工作信息。"""
         preferences: list[str] = []
@@ -339,13 +359,14 @@ class Summarizer:
             "relationship_memory": relationship_memory,
         }
 
+    # 根据 history、char_budget、role_prefix 组装transcript对象或消息并返回给调用方。
     def _build_transcript(
         self,
         history: list[dict[str, Any]],
         char_budget: int,
         role_prefix: str,
     ) -> str:
-        """构建 `_build_transcript` 所需的结果。"""
+        """根据 history、char_budget、role_prefix 组装transcript对象或消息并返回给调用方。"""
         messages = self._cap_messages(history, char_budget)
         lines: list[str] = []
         for item in messages:
@@ -358,8 +379,9 @@ class Summarizer:
                 lines.append(f"{item.get('role', 'user')}: {content}")
         return clip_text("\n".join(lines), char_budget)
 
+    # 根据 history、char_budget 限制消息数量和长度，返回符合预算的消息列表。
     def _cap_messages(self, history: list[dict[str, Any]], char_budget: int) -> list[dict[str, Any]]:
-        """处理 `_cap_messages` 对应的业务逻辑。"""
+        """根据 history、char_budget 限制消息数量和长度，返回符合预算的消息列表。"""
         kept: list[dict[str, Any]] = []
         used = 0
         per_message_limit = self._budget()["max_history_message_chars"]
@@ -381,11 +403,13 @@ class Summarizer:
         kept.reverse()
         return kept
 
+    # 根据 history、char_budget 限制消息数量和长度，返回符合预算的消息列表。
     def _cap_user_messages(self, history: list[dict[str, Any]], char_budget: int) -> list[dict[str, Any]]:
-        """处理 `_cap_user_messages` 对应的业务逻辑。"""
+        """根据 history、char_budget 限制消息数量和长度，返回符合预算的消息列表。"""
         users = self._user_history(history)
         return self._cap_messages(users, char_budget)
 
+    # 仅返回非空的用户消息。
     def _user_history(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """仅返回非空的用户消息。"""
         return [
@@ -394,6 +418,7 @@ class Summarizer:
             if item.get("role") == "user" and str(item.get("content", "")).strip()
         ]
 
+    # 标准化记忆更新数据。
     def _normalize_memory_updates(self, payload: dict[str, Any]) -> dict[str, Any]:
         """标准化记忆更新数据。"""
         source = payload.get("memory_updates", payload)
@@ -432,8 +457,9 @@ class Summarizer:
             ),
         }
 
+    # 把关系记忆更新规范为固定分区和列表结构。
     def _normalize_relationship_memory_updates(self, value: Any) -> dict[str, Any]:
-        """规范化 `_normalize_relationship_memory_updates` 对应的数据。"""
+        """把关系记忆更新规范为固定分区和列表结构。"""
         if not isinstance(value, dict):
             return self._empty_relationship_memory_update()
 
@@ -486,8 +512,9 @@ class Summarizer:
             },
         }
 
+    # 处理记忆数据，保持本地记忆和外部索引一致。
     def _empty_relationship_memory_update(self) -> dict[str, Any]:
-        """处理 `_empty_relationship_memory_update` 对应的业务逻辑。"""
+        """处理记忆数据，保持本地记忆和外部索引一致。"""
         return {
             "communication_style": {
                 "preferred_response_style": "",
@@ -511,10 +538,11 @@ class Summarizer:
             },
         }
 
+    # 根据 text、relationship_memory 处理记忆数据，保持本地记忆和外部索引一致。
     def _extract_relationship_memory_from_text(
         self, text: str, relationship_memory: dict[str, Any]
     ) -> None:
-        """处理 `_extract_relationship_memory_from_text` 对应的业务逻辑。"""
+        """根据 text、relationship_memory 处理记忆数据，保持本地记忆和外部索引一致。"""
         stripped = text.strip()
         if not stripped:
             return
@@ -537,11 +565,13 @@ class Summarizer:
             self._append_unique(communication["evidence"], evidence)
             self._append_unique(companionship["evidence"], evidence)
 
+    # 根据 items、value 把unique加入当前状态或持久化记录。
     def _append_unique(self, items: list[str], value: str) -> None:
-        """添加 `_append_unique` 对应的内容。"""
+        """根据 items、value 把unique加入当前状态或持久化记录。"""
         if value and value not in items:
             items.append(value)
 
+    # 将任意输入标准化为去重的非空字符串列表。
     def _string_list(self, value: Any) -> list[str]:
         """将任意输入标准化为去重的非空字符串列表。"""
         if not isinstance(value, list):
@@ -554,6 +584,7 @@ class Summarizer:
                 normalized.append(clip_text(text, 120))
         return normalized
 
+    # 根据 value 提取文本值并去除空白，无法使用时返回空字符串。
     def _string_value(self, value: Any) -> str:
-        """处理 `_string_value` 对应的业务逻辑。"""
+        """根据 value 提取文本值并去除空白，无法使用时返回空字符串。"""
         return clip_text(value, 120) if value not in (None, "") else ""

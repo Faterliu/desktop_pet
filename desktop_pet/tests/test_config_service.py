@@ -12,8 +12,9 @@ from app.config_service import ConfigService  # noqa: E402
 
 
 class ConfigServiceTests(unittest.TestCase):
+    # 验证get returns nested values and defaults场景下的预期结果。
     def test_get_returns_nested_values_and_defaults(self) -> None:
-        """验证 `test_get_returns_nested_values_and_defaults` 对应的行为。"""
+        """验证get returns nested values and defaults场景下的预期结果。"""
         service = ConfigService(
             {
                 "api": {"enabled": True, "timeout": "12"},
@@ -26,8 +27,9 @@ class ConfigServiceTests(unittest.TestCase):
         self.assertEqual(service.get("api.missing", "fallback"), "fallback")
         self.assertEqual(service.get("api.timeout.seconds", 5), 5)
 
+    # 验证typed getters are 安全值 for missing and invalid values场景下的预期结果。
     def test_typed_getters_are_safe_for_missing_and_invalid_values(self) -> None:
-        """验证 `test_typed_getters_are_safe_for_missing_and_invalid_values` 对应的行为。"""
+        """验证typed getters are 安全值 for missing and invalid values场景下的预期结果。"""
         service = ConfigService(
             {
                 "feature": {"enabled": 1},
@@ -44,16 +46,18 @@ class ConfigServiceTests(unittest.TestCase):
         self.assertEqual(service.get_str("text.value", ""), "123")
         self.assertEqual(service.get_str("text.none", "fallback"), "fallback")
 
+    # 验证update points to new 配置场景下的预期结果。
     def test_update_points_to_new_config(self) -> None:
-        """验证 `test_update_points_to_new_config` 对应的行为。"""
+        """验证update points to new 配置场景下的预期结果。"""
         service = ConfigService({"ui": {"always_on_top": True}})
 
         service.update({"ui": {"always_on_top": False}})
 
         self.assertFalse(service.get_bool("ui.always_on_top", True))
 
+    # 验证empty 配置 keeps original mapping reference场景下的预期结果。
     def test_empty_config_keeps_original_mapping_reference(self) -> None:
-        """验证 `test_empty_config_keeps_original_mapping_reference` 对应的行为。"""
+        """验证empty 配置 keeps original mapping reference场景下的预期结果。"""
         config: dict[str, object] = {}
         service = ConfigService(config)
 
