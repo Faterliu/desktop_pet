@@ -73,6 +73,12 @@
     "max_active_reminders": 20,
     "respect_do_not_disturb": false
   },
+  "clipboard": {
+    "enabled": true,
+    "max_chars": 4000,
+    "save_to_chat_history": false,
+    "allow_summary_memory": false
+  },
   "local_lines_refresh": {
     "enabled": true,
     "interval_days": 14,

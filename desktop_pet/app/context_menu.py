@@ -46,6 +46,7 @@ def build_context_menu(
     on_add_custom_minute_reminder: Callable[[], None],
     on_view_current_reminders: Callable[[], None],
     on_clear_completed_reminders: Callable[[], None],
+    on_clipboard_assistant: Callable[[str], None],
 ) -> QMenu:
     """构建桌宠右键菜单，并绑定各项操作回调。"""
     menu = QMenu(parent)
@@ -195,6 +196,20 @@ def build_context_menu(
     clear_completed_reminders_action = QAction("清空已完成提醒", reminder_menu)
     clear_completed_reminders_action.triggered.connect(on_clear_completed_reminders)
     reminder_menu.addAction(clear_completed_reminders_action)
+
+    clipboard_menu = menu.addMenu("剪贴板助手")
+    for mode, title in [
+        ("summarize", "总结剪贴板"),
+        ("translate", "翻译剪贴板"),
+        ("polish", "润色剪贴板"),
+        ("explain", "解释剪贴板"),
+        ("answer", "作为正式问题回答"),
+    ]:
+        action = QAction(title, clipboard_menu)
+        action.triggered.connect(
+            lambda checked=False, value=mode: on_clipboard_assistant(value)
+        )
+        clipboard_menu.addAction(action)
 
     menu.addSeparator()
 

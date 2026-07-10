@@ -32,6 +32,7 @@ from app.background_task_registry import BackgroundTaskRegistry
 from app.bubble_position_service import BubblePositionService
 from app.chat_input import ChatInput
 from app.chat_flow_controller import ChatFlowController
+from app.clipboard_service import ClipboardService
 from app.config_service import ConfigService
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
@@ -93,6 +94,22 @@ LOCAL_LINE_REFRESH_LABELS = {
     "farewell": "退出告别",
     "poetry": "诗歌话术",
     "reply": "知识问候回应气泡",
+}
+
+CLIPBOARD_ASSISTANT_INSTRUCTIONS = {
+    "summarize": "总结下面文本的重点，使用清晰的要点，不补充原文没有的信息。",
+    "translate": "翻译下面文本，准确保留原意；若原文主要是中文，则翻译为自然英文，否则翻译为自然中文。",
+    "polish": "润色下面文本的表达，使其自然、清晰、通顺，并只输出润色后的版本。",
+    "explain": "解释下面文本的含义、关键概念和可能的上下文；信息不足时请明确说明。",
+    "answer": "把下面文本作为用户的问题或材料，给出准确、结构清晰、可执行的正式回答。",
+}
+
+CLIPBOARD_ASSISTANT_LABELS = {
+    "summarize": "总结",
+    "translate": "翻译",
+    "polish": "润色",
+    "explain": "解释",
+    "answer": "正式回答",
 }
 
 
@@ -256,6 +273,52 @@ class ChatWorker(QObject):
             query=self.user_message,
             top_k=top_k,
         )
+
+
+class UtilityPromptWorker(QObject):
+    """在后台执行不写入聊天记录的剪贴板辅助请求。"""
+
+    finished = Signal(str, str)
+    failed = Signal(str)
+
+    # 初始化剪贴板辅助任务所需的模式、文本和模型依赖。
+    def __init__(
+        self,
+        mode: str,
+        clipboard_text: str,
+        client: DeepSeekClient,
+        prompt_builder: PromptBuilder,
+    ) -> None:
+        """初始化剪贴板辅助任务所需的模式、文本和模型依赖。"""
+        super().__init__()
+        self.mode = mode
+        self.clipboard_text = clipboard_text
+        self.client = client
+        self.prompt_builder = prompt_builder
+
+    # 构建独立提示并请求模型，不读取聊天历史、不触发记忆工具。
+    def run(self) -> None:
+        """构建独立提示并请求模型，不读取聊天历史、不触发记忆工具。"""
+        try:
+            instruction = CLIPBOARD_ASSISTANT_INSTRUCTIONS.get(self.mode)
+            if not instruction:
+                raise ValueError("不支持的剪贴板处理模式。")
+            user_message = (
+                f"【剪贴板助手任务】{instruction}\n\n"
+                f"【待处理文本】\n{self.clipboard_text}"
+            )
+            messages = self.prompt_builder.build_messages(
+                user_message,
+                recent_messages=[],
+                formal_qa_mode=True,
+                max_user_message_chars=len(user_message),
+            )
+            self.finished.emit(self.mode, self.client.chat(messages))
+        except DeepSeekError as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Clipboard assistant worker failed: mode=%s", self.mode)
+            self.failed.emit(f"剪贴板处理失败：{exc}")
 
 
 class ProactiveSpeakWorker(QObject):
@@ -654,6 +717,8 @@ class DesktopPetWindow(QWidget):
         self.mouse_press_position = QPoint()
         self.chat_thread: QThread | None = None
         self.chat_worker: QObject | None = None
+        self.clipboard_thread: QThread | None = None
+        self.clipboard_worker: QObject | None = None
         self._pending_scenario_fallback_line = ""
         self.clear_history_thread: QThread | None = None
         self.clear_history_worker: QObject | None = None
@@ -693,6 +758,7 @@ class DesktopPetWindow(QWidget):
         self.chat_store_informal = ChatStore(self.chat_history_informal_path)
         self.usage_store = UsageStore(self.daily_usage_path)
         self.reminder_store = ReminderStore(self.reminders_path)
+        self.clipboard_service = ClipboardService()
         self.reminder_tool = ReminderTool(
             self.reminder_store,
             enabled_provider=self._reminders_enabled,
@@ -990,6 +1056,7 @@ class DesktopPetWindow(QWidget):
             on_add_custom_minute_reminder=self._add_custom_minute_reminder,
             on_view_current_reminders=self._view_current_reminders,
             on_clear_completed_reminders=self._clear_completed_reminders,
+            on_clipboard_assistant=self._handle_clipboard_assistant,
         )
         menu.exec(global_pos)
 
@@ -1198,6 +1265,46 @@ class DesktopPetWindow(QWidget):
             3200,
             "system",
         )
+
+    # 按菜单选择主动读取剪贴板，并启动独立的后台辅助请求。
+    def _handle_clipboard_assistant(self, mode: str) -> None:
+        """按菜单选择主动读取剪贴板，并启动独立的后台辅助请求。"""
+        if mode not in CLIPBOARD_ASSISTANT_INSTRUCTIONS:
+            self._display_message("不支持这个剪贴板处理方式。", 3200, "system")
+            return
+        if not self._clipboard_assistant_enabled():
+            self._display_message("剪贴板助手当前未启用。", 3200, "system")
+            return
+
+        clipboard_text = self.clipboard_service.read_text().strip()
+        if not clipboard_text:
+            self._display_message("剪贴板里没有可处理的文字内容。", 3200, "system")
+            return
+
+        max_chars = self._clipboard_max_chars()
+        truncated = len(clipboard_text) > max_chars
+        if truncated:
+            clipboard_text = clipboard_text[:max_chars]
+        logger.info(
+            "Clipboard assistant requested: mode=%s chars=%s truncated=%s",
+            mode,
+            len(clipboard_text),
+            truncated,
+        )
+
+        if not self._api_chat_enabled():
+            self._display_message("聊天 API 当前已关闭，暂时不能处理剪贴板内容。", 3600, "system")
+            return
+        if not self.deepseek_client.is_configured():
+            self._display_message("还没有配置可用的 API key，暂时不能处理剪贴板内容。", 4200, "system")
+            return
+        if self.background_tasks.is_registered("clipboard_assistant"):
+            self._display_message("我正在处理上一段剪贴板内容，请稍等一下。", 3200, "system")
+            return
+
+        self.sprite_player.set_action("review")
+        self._display_message("我来看看剪贴板里的内容。", 2800, "system")
+        self._start_clipboard_assistant_worker(mode, clipboard_text)
 
     # 接收提醒控制器的到期事件，并用挥手动作和气泡展示提醒。
     def _handle_due_reminder(self, reminder: dict[str, str]) -> None:
@@ -1604,6 +1711,40 @@ class DesktopPetWindow(QWidget):
             return
         self.chat_thread.start()
 
+    # 创建独立后台线程处理剪贴板内容，不接入聊天记录与摘要流程。
+    def _start_clipboard_assistant_worker(self, mode: str, clipboard_text: str) -> None:
+        """创建独立后台线程处理剪贴板内容，不接入聊天记录与摘要流程。"""
+        if self.background_tasks.is_registered("clipboard_assistant"):
+            return
+
+        self.clipboard_thread = QThread(self)
+        self.clipboard_worker = UtilityPromptWorker(
+            mode,
+            clipboard_text,
+            self.deepseek_client,
+            self.prompt_builder,
+        )
+        self.clipboard_worker.moveToThread(self.clipboard_thread)
+        self.clipboard_thread.started.connect(self.clipboard_worker.run)
+        self.clipboard_worker.finished.connect(self._on_clipboard_assistant_success)
+        self.clipboard_worker.failed.connect(self._on_clipboard_assistant_failure)
+        self.clipboard_worker.finished.connect(self.clipboard_thread.quit)
+        self.clipboard_worker.failed.connect(self.clipboard_thread.quit)
+        self.clipboard_thread.finished.connect(self._cleanup_clipboard_assistant_thread)
+        if not self._register_background_task(
+            "clipboard_assistant",
+            self.clipboard_thread,
+            self.clipboard_worker,
+            self._clear_clipboard_assistant_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.clipboard_thread,
+                self.clipboard_worker,
+                self._clear_clipboard_assistant_task_refs,
+            )
+            return
+        self.clipboard_thread.start()
+
     # 在线程结束后清理工作对象和线程对象。
     def _cleanup_chat_thread(self) -> None:
         """在线程结束后清理工作对象和线程对象。"""
@@ -1616,11 +1757,23 @@ class DesktopPetWindow(QWidget):
         self.background_tasks.unregister("clear_history", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    # 清理剪贴板辅助后台线程。
+    def _cleanup_clipboard_assistant_thread(self) -> None:
+        """清理剪贴板辅助后台线程。"""
+        self.background_tasks.unregister("clipboard_assistant", delete_later=True)
+        self._maybe_close_after_workers_finished()
+
     # 清空聊天线程和 worker 引用，避免回调重复清理。
     def _clear_chat_task_refs(self) -> None:
         """清空聊天线程和 worker 引用，避免回调重复清理。"""
         self.chat_worker = None
         self.chat_thread = None
+
+    # 清空剪贴板辅助线程和 worker 引用。
+    def _clear_clipboard_assistant_task_refs(self) -> None:
+        """清空剪贴板辅助线程和 worker 引用。"""
+        self.clipboard_worker = None
+        self.clipboard_thread = None
 
     # 清空历史清理线程和 worker 引用。
     def _clear_history_task_refs(self) -> None:
@@ -2005,6 +2158,26 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("failed")
         self._display_message(failure.error_message, 12000, "assistant")
 
+    # 展示剪贴板辅助结果；此路径不写入聊天记录，也不会触发摘要或记忆更新。
+    def _on_clipboard_assistant_success(self, mode: str, reply: str) -> None:
+        """展示剪贴板辅助结果；此路径不写入聊天记录，也不会触发摘要或记忆更新。"""
+        if self._closing_or_closed():
+            return
+        cleaned_reply = reply.strip() or "没有得到可显示的处理结果。"
+        self.sprite_player.set_action("idle")
+        if len(cleaned_reply) > 360:
+            self._show_clipboard_assistant_panel(mode, cleaned_reply)
+            return
+        self._display_message(cleaned_reply, self._assistant_reply_bubble_duration_ms(), "assistant")
+
+    # 展示剪贴板辅助失败提示，不影响当前聊天状态和历史数据。
+    def _on_clipboard_assistant_failure(self, error_message: str) -> None:
+        """展示剪贴板辅助失败提示，不影响当前聊天状态和历史数据。"""
+        if self._closing_or_closed():
+            return
+        self.sprite_player.set_action("failed")
+        self._display_message(error_message, 10000, "assistant")
+
     # 处理 API 主动说话测试成功后的界面更新。
     def _on_proactive_api_success(self, reply: str) -> None:
         """处理 API 主动说话测试成功后的界面更新。"""
@@ -2299,6 +2472,22 @@ class DesktopPetWindow(QWidget):
         self.formal_answer_panels.append(panel)
         self.active_formal_answer_panel = panel
 
+    # 用正式面板承载较长的剪贴板处理结果，不创建聊天记录条目。
+    def _show_clipboard_assistant_panel(self, mode: str, answer: str) -> None:
+        """用正式面板承载较长的剪贴板处理结果，不创建聊天记录条目。"""
+        label = CLIPBOARD_ASSISTANT_LABELS.get(mode, "处理结果")
+        panel = FormalAnswerPanel(title="剪贴板助手")
+        panel_id = id(panel)
+        panel.destroyed.connect(
+            lambda *_args, owned_panel_id=panel_id: self._on_formal_answer_panel_destroyed(
+                owned_panel_id
+            )
+        )
+        content = FormalAnswerPanel.format_entry(f"剪贴板{label}", answer)
+        panel.set_content("剪贴板助手", content, self.geometry(), len(self.formal_answer_panels))
+        self.formal_answer_panels.append(panel)
+        self.active_formal_answer_panel = panel
+
     # 关闭并销毁所有正式问答面板。
     def _destroy_formal_answer_panels(self) -> None:
         """关闭并销毁所有正式问答面板。"""
@@ -2552,6 +2741,16 @@ class DesktopPetWindow(QWidget):
     def _api_chat_enabled(self) -> bool:
         """判断当前用户聊天是否允许接入外部 API。"""
         return self.config_service.get_bool("api.enable_chat_api", True)
+
+    # 判断剪贴板助手功能是否启用，缺失配置时默认启用。
+    def _clipboard_assistant_enabled(self) -> bool:
+        """判断剪贴板助手功能是否启用，缺失配置时默认启用。"""
+        return self.config_service.get_bool("clipboard.enabled", True)
+
+    # 读取剪贴板文本最大处理字符数，异常配置回退到 4000。
+    def _clipboard_max_chars(self) -> int:
+        """读取剪贴板文本最大处理字符数，异常配置回退到 4000。"""
+        return _positive_int(self.config_service.get("clipboard.max_chars", 4000), 4000)
 
     # 返回当前配置的聊天模型提供商。
     def _api_provider(self) -> str:

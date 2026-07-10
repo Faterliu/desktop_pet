@@ -85,6 +85,7 @@ class PromptBuilder:
         relevant_memories: str | None = None,
         runtime_persona_state: dict[str, Any] | PersonaState | None = None,
         reminder_tool_guidance: str | None = None,
+        max_user_message_chars: int | None = None,
     ) -> list[dict[str, str]]:
         """组装发送给模型的完整 messages 列表。"""
         character = load_json(self.character_path, DEFAULT_CHARACTER)
@@ -111,7 +112,12 @@ class PromptBuilder:
             summary.get("summary", "").strip(),
             budget["max_summary_chars"],
         )
-        current_user_message = clip_text(user_message, budget["max_user_message_chars"])
+        user_message_limit = (
+            max_user_message_chars
+            if isinstance(max_user_message_chars, int) and max_user_message_chars > 0
+            else budget["max_user_message_chars"]
+        )
+        current_user_message = clip_text(user_message, user_message_limit)
 
         system_messages = [
             {
