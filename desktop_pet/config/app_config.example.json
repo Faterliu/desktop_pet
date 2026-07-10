@@ -55,6 +55,12 @@
     "scenario_greeting_cooldown_minutes": 60,
     "scenario_greeting_low_interrupt_after_ignored": 2
   },
+  "reminders": {
+    "enabled": true,
+    "check_interval_seconds": 30,
+    "max_active_reminders": 20,
+    "respect_do_not_disturb": false
+  },
   "local_lines_refresh": {
     "enabled": true,
     "interval_days": 14,

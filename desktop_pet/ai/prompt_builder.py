@@ -84,6 +84,7 @@ class PromptBuilder:
         formal_qa_mode: bool = False,
         relevant_memories: str | None = None,
         runtime_persona_state: dict[str, Any] | PersonaState | None = None,
+        reminder_tool_guidance: str | None = None,
     ) -> list[dict[str, str]]:
         """组装发送给模型的完整 messages 列表。"""
         character = load_json(self.character_path, DEFAULT_CHARACTER)
@@ -141,6 +142,8 @@ class PromptBuilder:
                 "content": self._format_mode_guidance(formal_qa_mode),
             }
         )
+        if reminder_tool_guidance:
+            system_messages.append({"role": "system", "content": reminder_tool_guidance})
 
         optional_system_messages: list[dict[str, str]] = []
         if summary_text:

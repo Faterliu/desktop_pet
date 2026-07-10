@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import random
+import re
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,8 @@ from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
 from app.message_splitter import split_knowledge_bubble_text
+from app.reminder_controller import ReminderController
+from app.reminder_tool import ReminderTool, ReminderToolRequest
 from app.speech_bubble import ReplyBubble, SpeechBubble
 from app.window_position_service import WindowPositionService
 from character.behavior_controller import BehaviorController
@@ -48,6 +52,7 @@ from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.local_lines_service import LocalLinesService
 from storage.memory_store import MemoryStore
 from storage.memory_vector_store import MemoryVectorStore
+from storage.reminder_store import ReminderStore
 from storage.usage_store import UsageStore
 from utils.dwm_border import apply_transparent_window_fixes, force_window_topmost, suppress_dwm_border
 from utils.logger import get_logger
@@ -116,6 +121,7 @@ class ChatWorker(QObject):
         mem0_memory_service: Mem0MemoryService | None = None,
         user_id: str = "default_user",
         app_config: dict[str, Any] | None = None,
+        reminder_tool: ReminderTool | None = None,
     ) -> None:
         """初始化后台聊天任务，持有本次请求所需依赖。"""
         super().__init__()
@@ -127,6 +133,7 @@ class ChatWorker(QObject):
         self.mem0_memory_service = mem0_memory_service
         self.user_id = user_id
         self.app_config = app_config or {}
+        self.reminder_tool = reminder_tool
 
     # 在工作线程中构建消息并请求模型回复。
     def run(self) -> None:
@@ -145,14 +152,89 @@ class ChatWorker(QObject):
                 recent_messages,
                 formal_qa_mode=self.formal_qa_mode,
                 relevant_memories=relevant_memories,
+                reminder_tool_guidance=self._reminder_tool_guidance(),
             )
-            reply = self.client.chat(messages)
+            reply = self._request_chat_reply(messages)
             self.finished.emit(reply)
         except DeepSeekError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected chat worker failure")
             self.failed.emit(f"我刚刚走神了一下：{exc}")
+
+    # 在提醒工具可用时请求模型识别提醒意图，否则保持普通聊天请求。
+    def _request_chat_reply(self, messages: list[dict[str, str]]) -> str:
+        """在提醒工具可用时请求模型识别提醒意图，否则保持普通聊天请求。"""
+        if self.reminder_tool is None or not self.reminder_tool.is_enabled():
+            return self.client.chat(messages)
+
+        response = self.client.chat_with_reminder_tools(
+            messages,
+            self._json_fallback_messages(messages),
+        )
+        if response.invalid_tool_calls:
+            return response.reply
+        if not response.reminder_calls:
+            return response.reply or "我在这里哦。"
+
+        results = self.reminder_tool.create_reminders(
+            [ReminderToolRequest(call.title, call.due_at) for call in response.reminder_calls],
+            source=f"model_tool_{response.protocol}",
+        )
+        if not all(result.success for result in results):
+            return self._reminder_tool_failure_reply(results[0].code)
+        return response.reply or self._reminder_created_reply(results)
+
+    # 构建供模型调用提醒工具的时间与边界说明。
+    def _reminder_tool_guidance(self) -> str | None:
+        """构建供模型调用提醒工具的时间与边界说明。"""
+        if self.reminder_tool is None or not self.reminder_tool.is_enabled():
+            return None
+        current_time = self.reminder_tool.now_provider().isoformat(timespec="seconds")
+        return (
+            "【本地提醒工具】当前设备本地时间为 "
+            f"{current_time}。当且仅当用户明确要设置提醒，且提醒内容与具体时间完整时，"
+            "调用 create_reminder。due_at 必须是无时区的 YYYY-MM-DDTHH:MM:SS 本地绝对时间；"
+            "请把“明天”“半小时后”等换算为该格式。若用户只说“晚点”“下午”“之后”等含糊时间，"
+            "不要调用工具，先追问准确日期和时间。一次最多创建 3 条提醒。"
+        )
+
+    # 为不支持原生工具调用的端点构建严格 JSON 降级协议。
+    def _json_fallback_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+        """为不支持原生工具调用的端点构建严格 JSON 降级协议。"""
+        protocol = {
+            "role": "system",
+            "content": (
+                "当前端点不支持工具调用。请只输出一个 JSON 对象，严格形如 "
+                '{"reply":"给用户的自然语言回复","reminders":[{"title":"提醒内容",'
+                '"due_at":"YYYY-MM-DDTHH:MM:SS"}]}。若不应创建提醒或时间不明确，'
+                '必须输出 reminders: [] 并在 reply 中追问或正常回答；不要输出 Markdown 或其他字段。'
+            ),
+        }
+        if not messages:
+            return [protocol]
+        return [*messages[:-1], protocol, messages[-1]]
+
+    # 根据模型工具调用失败码生成安全、简短的本地提示。
+    def _reminder_tool_failure_reply(self, code: str) -> str:
+        """根据模型工具调用失败码生成安全、简短的本地提示。"""
+        messages = {
+            "reminders_disabled": "提醒功能当前未启用。",
+            "active_reminder_limit": "当前进行中的提醒已达到上限。",
+            "invalid_or_past_due_at": "这个提醒时间已经过去或格式不对，请告诉我一个未来的准确时间。",
+            "empty_title": "提醒内容不能为空。",
+            "too_many_reminders": "一次最多可以设置 3 条提醒。",
+        }
+        return messages.get(code, "这个提醒暂时没有设置成功，请告诉我准确的日期、时间和内容。")
+
+    # 在模型未给出文本确认时，根据创建结果生成本地确认语。
+    def _reminder_created_reply(self, results: list[Any]) -> str:
+        """在模型未给出文本确认时，根据创建结果生成本地确认语。"""
+        reminders = [result.reminder for result in results if result.reminder]
+        if len(reminders) == 1:
+            reminder = reminders[0]
+            return f"好，我会在 {reminder['due_at'].replace('T', ' ')} 提醒你：{reminder['title']}"
+        return f"好，已为你设置 {len(reminders)} 条提醒。"
 
     # 检索与当前消息相关的长期记忆文本并返回。
     def _relevant_memories(self) -> str:
@@ -552,6 +634,7 @@ class DesktopPetWindow(QWidget):
         self.summary_informal_path = self.data_dir / "conversation_summary_informal.json"
         self.memory_path = self.data_dir / "memory.json"
         self.daily_usage_path = self.data_dir / "daily_usage.json"
+        self.reminders_path = self.data_dir / "reminders.json"
         self.window_state_path = self.data_dir / "window_state.json"
 
         self.app_config = self._load_app_config()
@@ -585,6 +668,7 @@ class DesktopPetWindow(QWidget):
         self.background_tasks = BackgroundTaskRegistry(default_wait_timeout_ms=1000)
         self.move_animation: QPropertyAnimation | None = None
         self.behavior_started = False
+        self.reminders_started = False
         self.memory_maintenance_started = False
         self.local_lines_refresh_started = False
         self.exit_animation_in_progress = False
@@ -608,6 +692,19 @@ class DesktopPetWindow(QWidget):
         self.chat_store_formal = ChatStore(self.chat_history_formal_path)
         self.chat_store_informal = ChatStore(self.chat_history_informal_path)
         self.usage_store = UsageStore(self.daily_usage_path)
+        self.reminder_store = ReminderStore(self.reminders_path)
+        self.reminder_tool = ReminderTool(
+            self.reminder_store,
+            enabled_provider=self._reminders_enabled,
+            max_active_provider=self._max_active_reminders,
+        )
+        self.reminder_controller = ReminderController(
+            self.reminder_store,
+            enabled=self._reminders_enabled(),
+            check_interval_seconds=self._reminder_check_interval_seconds(),
+            can_deliver=self._can_deliver_reminders,
+            parent=self,
+        )
         self.memory_vector_store = MemoryVectorStore(
             self.data_dir / "memory_vectors.json",
             self.app_config,
@@ -727,6 +824,7 @@ class DesktopPetWindow(QWidget):
             self._handle_scenario_greeting
         )
         self.reply_bubble.clicked.connect(self._handle_reply_bubble_clicked)
+        self.reminder_controller.reminder_due.connect(self._handle_due_reminder)
 
     # 窗口首次显示时启动主动行为控制器和置顶强制计时器。
     def showEvent(self, event) -> None:  # noqa: N802
@@ -735,6 +833,9 @@ class DesktopPetWindow(QWidget):
         if not self.behavior_started:
             self.behavior_started = True
             self.behavior_controller.start()
+        if not self.reminders_started:
+            self.reminders_started = True
+            self.reminder_controller.start()
         if not self.memory_maintenance_started:
             self.memory_maintenance_started = True
             QTimer.singleShot(0, self._start_memory_maintenance_worker)
@@ -822,6 +923,7 @@ class DesktopPetWindow(QWidget):
         """关闭窗口前保存位置并安全回收后台线程。"""
         self._is_closing = True
         if not self.allow_immediate_close:
+            self.reminder_controller.stop()
             event.ignore()
             self.request_exit()
             return
@@ -834,6 +936,7 @@ class DesktopPetWindow(QWidget):
                 return
             self._close_after_workers_finished = False
         self._destroy_formal_answer_panels()
+        self.reminder_controller.stop()
         self._save_window_position()
         self.bubble.hide()
         self.reply_bubble.hide()
@@ -881,6 +984,10 @@ class DesktopPetWindow(QWidget):
             show_reload_config=self.config_service.get_bool("ui.show_reload_config", True),
             on_clear_informal_chat=self._clear_informal_chat_history,
             on_clear_formal_chat=self._clear_formal_chat_history,
+            on_add_ten_minute_reminder=self._add_ten_minute_reminder,
+            on_add_custom_minute_reminder=self._add_custom_minute_reminder,
+            on_view_current_reminders=self._view_current_reminders,
+            on_clear_completed_reminders=self._clear_completed_reminders,
         )
         menu.exec(global_pos)
 
@@ -1017,6 +1124,90 @@ class DesktopPetWindow(QWidget):
         if accepted:
             self._set_scale(new_scale)
 
+    # 通过菜单添加固定 10 分钟后的提醒。
+    def _add_ten_minute_reminder(self) -> None:
+        """通过菜单添加固定 10 分钟后的提醒。"""
+        title, accepted = QInputDialog.getText(self, "10 分钟后提醒", "提醒内容：")
+        if accepted:
+            self._create_reminder_after_minutes(title, 10, "menu_10_minutes")
+
+    # 通过菜单添加用户指定分钟数后的提醒。
+    def _add_custom_minute_reminder(self) -> None:
+        """通过菜单添加用户指定分钟数后的提醒。"""
+        minutes, accepted = QInputDialog.getInt(
+            self,
+            "添加自定义分钟提醒",
+            "多少分钟后提醒：",
+            value=30,
+            minValue=1,
+            maxValue=7 * 24 * 60,
+        )
+        if not accepted:
+            return
+        title, accepted = QInputDialog.getText(self, "添加自定义分钟提醒", "提醒内容：")
+        if accepted:
+            self._create_reminder_after_minutes(title, minutes, "menu_custom_minutes")
+
+    # 创建相对当前时间的提醒，并显示创建结果。
+    def _create_reminder_after_minutes(self, title: str, minutes: int, source: str) -> bool:
+        """创建相对当前时间的提醒，并显示创建结果。"""
+        normalized_title = title.strip()
+        if not self._reminders_enabled():
+            self._display_message("提醒功能当前未启用。", 3200, "system")
+            return False
+        if not normalized_title:
+            self._display_message("提醒内容不能为空。", 3200, "system")
+            return False
+        if minutes <= 0:
+            self._display_message("提醒分钟数需要大于 0。", 3200, "system")
+            return False
+        if len(self.reminder_store.list_reminders("active")) >= self._max_active_reminders():
+            self._display_message("当前进行中的提醒已达到上限。", 3500, "system")
+            return False
+
+        self.reminder_store.add_reminder(
+            normalized_title,
+            datetime.now() + timedelta(minutes=minutes),
+            source=source,
+        )
+        self._display_message(f"好，{minutes} 分钟后提醒你：{normalized_title}", 4200, "system")
+        return True
+
+    # 显示仍在进行中的提醒列表。
+    def _view_current_reminders(self) -> None:
+        """显示仍在进行中的提醒列表。"""
+        reminders = self.reminder_store.list_reminders("active")
+        if not reminders:
+            self._display_message("当前没有进行中的提醒。", 3200, "system")
+            return
+        preview = [
+            f"{item['due_at'].replace('T', ' ')}：{item['title']}"
+            for item in reminders[:3]
+        ]
+        suffix = f"\n还有 {len(reminders) - 3} 条提醒。" if len(reminders) > 3 else ""
+        self._display_message("当前提醒：\n" + "\n".join(preview) + suffix, 8500, "system")
+
+    # 清理已完成提醒，不影响仍在进行中的提醒。
+    def _clear_completed_reminders(self) -> None:
+        """清理已完成提醒，不影响仍在进行中的提醒。"""
+        removed_count = self.reminder_store.clear_completed_reminders()
+        self._display_message(
+            f"已清空 {removed_count} 条已完成提醒。" if removed_count else "没有已完成提醒可清空。",
+            3200,
+            "system",
+        )
+
+    # 接收提醒控制器的到期事件，并用挥手动作和气泡展示提醒。
+    def _handle_due_reminder(self, reminder: dict[str, str]) -> None:
+        """接收提醒控制器的到期事件，并用挥手动作和气泡展示提醒。"""
+        if self._closing_or_closed():
+            return
+        title = str(reminder.get("title", "")).strip()
+        if not title:
+            return
+        self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
+        self._display_message(f"提醒你一下：{title}", 8000, "reminder")
+
     # 切换免打扰模式并保存配置。
     def _toggle_do_not_disturb(self, enabled: bool) -> None:
         """切换免打扰模式并保存配置。"""
@@ -1025,6 +1216,8 @@ class DesktopPetWindow(QWidget):
         if enabled and self.bubble.source == "proactive":
             self.bubble.hide()
         self._display_message("小桃接下来不会说话了。" if enabled else "来和小桃聊天吧。", 3000, "system")
+        if not enabled:
+            self.reminder_controller.check_due_reminders()
 
     # 切换自主移动功能并刷新定时器。
     def _toggle_auto_move(self, enabled: bool) -> None:
@@ -1199,6 +1392,10 @@ class DesktopPetWindow(QWidget):
         """重新读取配置文件，并刷新动画和行为控制状态。"""
         self.app_config = self._load_app_config()
         self.config_service.update(self.app_config)
+        self.reminder_controller.configure(
+            self._reminders_enabled(),
+            self._reminder_check_interval_seconds(),
+        )
         self.memory_vector_store.update_config(self.app_config)
         self._start_mem0_initialization(close_existing=True)
         self.summarizer_formal.user_id = self._memory_user_id()
@@ -1232,10 +1429,15 @@ class DesktopPetWindow(QWidget):
         self._waiting_timer.start(30_000)
 
     _poetry_keywords = {"诗", "诗歌", "写诗", "念诗", "吟诗", "背诗", "来首", "作诗", "赋诗"}
+    _remind_command_pattern = re.compile(r"^/remind\s+(\d+)\s+(.+?)\s*$", re.IGNORECASE)
 
     # 处理用户提交的消息，并决定走占位回复还是 API 回复。
     def _handle_user_message(self, message: str) -> None:
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
+        if re.match(r"^\s*/remind(?:\s|$)", message, re.IGNORECASE):
+            self._waiting_timer.stop()
+            self._handle_remind_command(message)
+            return
         self._waiting_timer.stop()
         if self._clear_history_in_progress():
             self._display_message("先等一下，我正在整理笔记。", 3200, "system")
@@ -1273,6 +1475,19 @@ class DesktopPetWindow(QWidget):
             return
 
         self._start_chat_worker(message)
+
+    # 解析并执行轻量的 /remind 分钟数 提醒内容 本地命令。
+    def _handle_remind_command(self, message: str) -> None:
+        """解析并执行轻量的 /remind 分钟数 提醒内容 本地命令。"""
+        match = self._remind_command_pattern.match(message.strip())
+        if match is None:
+            self._display_message("用法：/remind 分钟数 提醒内容", 3600, "system")
+            return
+        minutes = int(match.group(1))
+        if minutes <= 0:
+            self._display_message("提醒分钟数需要大于 0。", 3200, "system")
+            return
+        self._create_reminder_after_minutes(match.group(2), minutes, "chat_command")
 
     # 检查用户消息是否包含念诗/写诗相关的关键词。
     def _is_poetry_request(self, message: str) -> bool:
@@ -1322,6 +1537,7 @@ class DesktopPetWindow(QWidget):
                 mem0_memory_service=self.mem0_memory_service,
                 user_id=self._memory_user_id(),
                 app_config=self.app_config,
+                reminder_tool=self.reminder_tool,
             )
         )
         self.chat_worker.moveToThread(self.chat_thread)
@@ -2359,6 +2575,28 @@ class DesktopPetWindow(QWidget):
     def _api_config(self) -> dict[str, Any]:
         """返回 API 配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("api", {})
+
+    # 读取提醒功能开关，缺失时默认启用。
+    def _reminders_enabled(self) -> bool:
+        """读取提醒功能开关，缺失时默认启用。"""
+        return self.config_service.get_bool("reminders.enabled", True)
+
+    # 读取提醒轮询间隔，异常配置回退到 30 秒。
+    def _reminder_check_interval_seconds(self) -> int:
+        """读取提醒轮询间隔，异常配置回退到 30 秒。"""
+        return _positive_int(self.config_service.get("reminders.check_interval_seconds", 30), 30)
+
+    # 读取进行中提醒数量上限，异常配置回退到 20 条。
+    def _max_active_reminders(self) -> int:
+        """读取进行中提醒数量上限，异常配置回退到 20 条。"""
+        return _positive_int(self.config_service.get("reminders.max_active_reminders", 20), 20)
+
+    # 根据提醒和免打扰配置决定当前是否应投递提醒气泡。
+    def _can_deliver_reminders(self) -> bool:
+        """根据提醒和免打扰配置决定当前是否应投递提醒气泡。"""
+        if not self.config_service.get_bool("reminders.respect_do_not_disturb", False):
+            return True
+        return not self.config_service.get_bool("behavior.do_not_disturb", False)
 
     # 返回聊天配置字典，不存在时自动补默认节点。
     def _chat_config(self) -> dict[str, Any]:

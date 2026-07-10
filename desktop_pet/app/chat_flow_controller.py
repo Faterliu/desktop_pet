@@ -144,6 +144,7 @@ class ChatFlowController:
         mem0_memory_service: Any,
         user_id: str,
         app_config: dict[str, Any],
+        reminder_tool: Any = None,
     ) -> dict[str, Any]:
         """根据 message、client、prompt_builder 处理聊天消息流程，更新上下文和展示状态。"""
         return {
@@ -155,6 +156,7 @@ class ChatFlowController:
             "mem0_memory_service": mem0_memory_service,
             "user_id": user_id,
             "app_config": app_config,
+            "reminder_tool": reminder_tool,
         }
 
     # 保存助手回复，清理待处理上下文并返回本轮聊天结果。

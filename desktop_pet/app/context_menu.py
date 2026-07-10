@@ -40,6 +40,10 @@ def build_context_menu(
     on_reload_config: Callable[[], None],
     on_clear_informal_chat: Callable[[], None],
     on_clear_formal_chat: Callable[[], None],
+    on_add_ten_minute_reminder: Callable[[], None],
+    on_add_custom_minute_reminder: Callable[[], None],
+    on_view_current_reminders: Callable[[], None],
+    on_clear_completed_reminders: Callable[[], None],
 ) -> QMenu:
     """构建桌宠右键菜单，并绑定各项操作回调。"""
     menu = QMenu(parent)
@@ -156,6 +160,24 @@ def build_context_menu(
         )
         formal_display_group.addAction(action)
         formal_display_menu.addAction(action)
+
+    reminder_menu = menu.addMenu("提醒")
+    ten_minute_reminder_action = QAction("添加 10 分钟后提醒...", reminder_menu)
+    ten_minute_reminder_action.triggered.connect(on_add_ten_minute_reminder)
+    reminder_menu.addAction(ten_minute_reminder_action)
+
+    custom_reminder_action = QAction("添加自定义分钟提醒...", reminder_menu)
+    custom_reminder_action.triggered.connect(on_add_custom_minute_reminder)
+    reminder_menu.addAction(custom_reminder_action)
+
+    reminder_menu.addSeparator()
+    view_reminders_action = QAction("查看当前提醒", reminder_menu)
+    view_reminders_action.triggered.connect(on_view_current_reminders)
+    reminder_menu.addAction(view_reminders_action)
+
+    clear_completed_reminders_action = QAction("清空已完成提醒", reminder_menu)
+    clear_completed_reminders_action.triggered.connect(on_clear_completed_reminders)
+    reminder_menu.addAction(clear_completed_reminders_action)
 
     menu.addSeparator()
 
