@@ -6,11 +6,23 @@
   },
   "api": {
     "provider": "deepseek",
-    "base_url": "https://api.deepseek.com",
-    "model": "deepseek-v4-flash",
-    "api_key": "",
     "enable_chat_api": true,
-    "timeout_seconds": 30,
+    "deepseek": {
+      "base_url": "https://api.deepseek.com",
+      "model": "deepseek-v4-flash",
+      "api_key": "",
+      "timeout_seconds": 30
+    },
+    "openai": {
+      "name": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "wire_api": "responses",
+      "requires_openai_auth": true,
+      "model": "gpt-5.5",
+      "api_key": "",
+      "api_key_env": "OPENAI_API_KEY",
+      "timeout_seconds": 30
+    },
     "max_recent_messages": 20,
     "summary_trigger_rounds": 20,
     "max_prompt_chars": 12000,
@@ -68,37 +80,100 @@
     "max_items": 8,
     "max_chars": 80,
     "groups": {
-      "first_start": { "enabled": false },
-      "startup": { "enabled": false },
-      "idle": { "enabled": false },
-      "quiet": { "enabled": false },
-      "encourage": { "enabled": false },
-      "sleepy": { "enabled": false },
-      "greeting_morning": { "enabled": false },
-      "greeting_noon": { "enabled": false },
-      "greeting_afternoon": { "enabled": false },
-      "greeting_evening": { "enabled": false },
-      "greeting_spring": { "enabled": false },
-      "greeting_summer": { "enabled": false },
-      "greeting_autumn": { "enabled": false },
-      "greeting_winter": { "enabled": false },
-      "thinking": { "enabled": false },
-      "api_error": { "enabled": false },
-      "ignored": { "enabled": false },
-      "return_after_idle": { "enabled": false },
-      "work_focus": { "enabled": false },
-      "break_reminder": { "enabled": false },
-      "comfort": { "enabled": false },
-      "happy": { "enabled": false },
-      "sad": { "enabled": false },
-      "waiting": { "enabled": false },
-      "feedback": { "enabled": false },
-      "scenario_greeting_templates": { "enabled": false },
-      "low_interrupt": { "enabled": false },
-      "knowledge_speak_intro": { "enabled": false },
-      "farewell": { "enabled": false },
-      "poetry": { "enabled": false, "max_chars": 160 },
-      "reply": { "enabled": false }
+      "first_start": {
+        "enabled": false
+      },
+      "startup": {
+        "enabled": false
+      },
+      "idle": {
+        "enabled": false
+      },
+      "quiet": {
+        "enabled": false
+      },
+      "encourage": {
+        "enabled": false
+      },
+      "sleepy": {
+        "enabled": false
+      },
+      "greeting_morning": {
+        "enabled": false
+      },
+      "greeting_noon": {
+        "enabled": false
+      },
+      "greeting_afternoon": {
+        "enabled": false
+      },
+      "greeting_evening": {
+        "enabled": false
+      },
+      "greeting_spring": {
+        "enabled": false
+      },
+      "greeting_summer": {
+        "enabled": false
+      },
+      "greeting_autumn": {
+        "enabled": false
+      },
+      "greeting_winter": {
+        "enabled": false
+      },
+      "thinking": {
+        "enabled": false
+      },
+      "api_error": {
+        "enabled": false
+      },
+      "ignored": {
+        "enabled": false
+      },
+      "return_after_idle": {
+        "enabled": false
+      },
+      "work_focus": {
+        "enabled": false
+      },
+      "break_reminder": {
+        "enabled": false
+      },
+      "comfort": {
+        "enabled": false
+      },
+      "happy": {
+        "enabled": false
+      },
+      "sad": {
+        "enabled": false
+      },
+      "waiting": {
+        "enabled": false
+      },
+      "feedback": {
+        "enabled": false
+      },
+      "scenario_greeting_templates": {
+        "enabled": false
+      },
+      "low_interrupt": {
+        "enabled": false
+      },
+      "knowledge_speak_intro": {
+        "enabled": false
+      },
+      "farewell": {
+        "enabled": false
+      },
+      "poetry": {
+        "enabled": false,
+        "max_chars": 160
+      },
+      "reply": {
+        "enabled": false
+      }
     }
   },
   "chat": {

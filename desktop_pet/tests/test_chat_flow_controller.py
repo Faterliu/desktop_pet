@@ -69,7 +69,7 @@ class ChatFlowControllerTests(unittest.TestCase):
         decision = controller.decide_after_thinking(context)
 
         self.assertEqual(decision.kind, "missing_api_config")
-        self.assertIn("DeepSeek API key", decision.reply)
+        self.assertIn("当前模型提供商的 API key", decision.reply)
         self.assertEqual(informal_store.messages[-1], ("assistant", decision.reply))
 
     # 验证正式问答 success appends to 正式问答 存储 and returns question场景下的预期结果。

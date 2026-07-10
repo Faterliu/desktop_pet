@@ -967,6 +967,7 @@ class DesktopPetWindow(QWidget):
             do_not_disturb=self.config_service.get_bool("behavior.do_not_disturb", False),
             auto_move=self.config_service.get_bool("ui.enable_free_move", False),
             api_chat_enabled=self.config_service.get_bool("api.enable_chat_api", True),
+            api_provider=self._api_provider(),
             formal_qa_mode=self._formal_qa_enabled(),
             formal_answer_display=self._formal_answer_display_mode(),
             on_set_scale=self._set_scale,
@@ -974,6 +975,7 @@ class DesktopPetWindow(QWidget):
             on_toggle_dnd=self._toggle_do_not_disturb,
             on_toggle_auto_move=self._toggle_auto_move,
             on_toggle_api_chat=self._toggle_api_chat,
+            on_set_api_provider=self._set_api_provider,
             on_toggle_formal_qa_mode=self._toggle_formal_qa_mode,
             on_set_formal_answer_display=self._set_formal_answer_display,
             on_toggle_always_on_top=self._toggle_always_on_top,
@@ -1233,6 +1235,15 @@ class DesktopPetWindow(QWidget):
         self.app_config.setdefault("api", {})["enable_chat_api"] = enabled
         self._save_app_config()
         self._display_message("我变的更聪明了。" if enabled else "我好像变笨了。", 3200, "system")
+
+    # 切换聊天模型提供商并保存配置。
+    def _set_api_provider(self, provider: str) -> None:
+        """切换聊天模型提供商并保存配置。"""
+        normalized = "openai" if provider == "openai" else "deepseek"
+        self.app_config.setdefault("api", {})["provider"] = normalized
+        self._save_app_config()
+        label = "OpenAI GPT" if normalized == "openai" else "DeepSeek"
+        self._display_message(f"聊天模型已切换为 {label}。", 3200, "system")
 
     # 切换正式问答模式。
     def _toggle_formal_qa_mode(self, enabled: bool) -> None:
@@ -2541,6 +2552,12 @@ class DesktopPetWindow(QWidget):
     def _api_chat_enabled(self) -> bool:
         """判断当前用户聊天是否允许接入外部 API。"""
         return self.config_service.get_bool("api.enable_chat_api", True)
+
+    # 返回当前配置的聊天模型提供商。
+    def _api_provider(self) -> str:
+        """返回当前配置的聊天模型提供商。"""
+        provider = self.config_service.get_str("api.provider", "deepseek").strip().lower()
+        return "openai" if provider in {"openai", "gpt", "gpt_openai"} else "deepseek"
 
     # 判断当前是否开启正式问答模式。
     def _formal_qa_enabled(self) -> bool:

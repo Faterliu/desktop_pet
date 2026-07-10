@@ -18,7 +18,7 @@ logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
 sys.modules.setdefault("utils.logger", logger_module)
 
-from ai.deepseek_client import DeepSeekClient  # noqa: E402
+from ai.deepseek_client import DeepSeekClient, DeepSeekError  # noqa: E402
 
 
 class FakeResponse:
@@ -39,6 +39,13 @@ class FakeResponse:
     def json(self) -> dict:
         """返回模拟 JSON 载荷。"""
         return self.payload
+
+
+class InvalidJsonResponse(FakeResponse):
+    # 模拟成功状态下返回非 JSON 内容的响应。
+    def json(self) -> dict:
+        """模拟成功状态下返回非 JSON 内容的响应。"""
+        raise ValueError("invalid json")
 
 
 class DeepSeekClientToolTests(unittest.TestCase):
@@ -134,6 +141,146 @@ class DeepSeekClientToolTests(unittest.TestCase):
         self.assertTrue(invalid_result.invalid_tool_calls)
         self.assertEqual(invalid_result.reminder_calls, [])
         self.assertEqual(plain_reply, "普通回复")
+
+    # 验证 OpenAI GPT 提供商读取独立配置，并复用 Chat Completions 请求路径。
+    def test_openai_provider_uses_nested_config_without_temperature(self) -> None:
+        """验证 OpenAI GPT 提供商读取独立配置，并复用 Chat Completions 请求路径。"""
+        config = {
+            "api": {
+                "provider": "openai",
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://api.openai.com/v1",
+                    "model": "gpt-5",
+                    "timeout_seconds": 15,
+                },
+            }
+        }
+        response = FakeResponse({"choices": [{"message": {"content": "GPT 回复"}}]})
+        client = DeepSeekClient("unused-openai.json")
+        with patch("ai.deepseek_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.deepseek_client.requests.post", return_value=response) as post:
+                self.assertEqual(client.provider_name(), "openai")
+                self.assertTrue(client.is_configured())
+                self.assertEqual(client.chat(self.messages), "GPT 回复")
+
+        self.assertEqual(post.call_args.args[0], "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer openai-key")
+        self.assertEqual(post.call_args.kwargs["json"]["model"], "gpt-5")
+        self.assertNotIn("temperature", post.call_args.kwargs["json"])
+
+    # 验证 OpenAI Responses 协议使用与连接脚本一致的 instructions 和文本 input。
+    def test_openai_responses_provider_uses_responses_endpoint(self) -> None:
+        """验证 OpenAI Responses 协议使用与连接脚本一致的 instructions 和文本 input。"""
+        config = {
+            "api": {
+                "provider": "openai",
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://provider.test",
+                    "wire_api": "responses",
+                    "model": "gpt-5.5",
+                },
+            }
+        }
+        response = FakeResponse(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "Responses 回复"}],
+                    }
+                ]
+            }
+        )
+        client = DeepSeekClient("unused-responses.json")
+        messages = [
+            {"role": "system", "content": "请简短、直接地回答。"},
+            {"role": "user", "content": "你好"},
+            {"role": "assistant", "content": "你好呀"},
+            {"role": "user", "content": "再说一句"},
+        ]
+        with patch("ai.deepseek_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.deepseek_client.requests.post", return_value=response) as post:
+                self.assertEqual(client.chat(messages), "Responses 回复")
+
+        self.assertEqual(post.call_args.args[0], "https://provider.test/responses")
+        self.assertEqual(post.call_args.kwargs["json"]["instructions"], "请简短、直接地回答。")
+        self.assertEqual(
+            post.call_args.kwargs["json"]["input"],
+            "用户：你好\n\n助手：你好呀\n\n用户：再说一句",
+        )
+        self.assertNotIn("messages", post.call_args.kwargs["json"])
+
+    # 验证 Responses 协议会将函数调用规范为现有提醒工具参数。
+    def test_responses_provider_parses_function_call(self) -> None:
+        """验证 Responses 协议会将函数调用规范为现有提醒工具参数。"""
+        config = {
+            "api": {
+                "provider": "openai",
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://provider.test",
+                    "wire_api": "responses",
+                    "model": "gpt-5.5",
+                },
+            }
+        }
+        response = FakeResponse(
+            {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "create_reminder",
+                        "arguments": '{"title":"开会","due_at":"2026-07-11T09:00:00"}',
+                    }
+                ]
+            }
+        )
+        client = DeepSeekClient("unused-responses-tools.json")
+        with patch("ai.deepseek_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.deepseek_client.requests.post", return_value=response) as post:
+                result = client.chat_with_reminder_tools(self.messages, self.messages)
+
+        self.assertEqual(result.reminder_calls[0].title, "开会")
+        tools = post.call_args.kwargs["json"]["tools"]
+        self.assertEqual(tools[0]["type"], "function")
+        self.assertEqual(tools[0]["name"], "create_reminder")
+        self.assertTrue(tools[0]["strict"])
+
+    # 验证文档中的同级 deepseek 节点仍能正常建立兼容请求。
+    def test_deepseek_provider_uses_nested_config(self) -> None:
+        """验证文档中的同级 deepseek 节点仍能正常建立兼容请求。"""
+        config = {
+            "api": {
+                "provider": "deepseek",
+                "deepseek": {
+                    "api_key": "deepseek-key",
+                    "base_url": "https://api.deepseek.com",
+                    "model": "deepseek-v4-flash",
+                    "timeout_seconds": 20,
+                },
+            }
+        }
+        response = FakeResponse({"choices": [{"message": {"content": "DeepSeek 回复"}}]})
+        client = DeepSeekClient("unused-deepseek.json")
+        with patch("ai.deepseek_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.deepseek_client.requests.post", return_value=response) as post:
+                self.assertEqual(client.provider_name(), "deepseek")
+                self.assertEqual(client.chat(self.messages), "DeepSeek 回复")
+
+        self.assertEqual(post.call_args.kwargs["json"]["model"], "deepseek-v4-flash")
+        self.assertEqual(post.call_args.kwargs["json"]["temperature"], 0.7)
+
+    # 验证非 JSON 响应会归类为可识别的模型服务响应错误。
+    def test_invalid_json_response_raises_specific_error(self) -> None:
+        """验证非 JSON 响应会归类为可识别的模型服务响应错误。"""
+        with patch(
+            "ai.deepseek_client.requests.post",
+            return_value=InvalidJsonResponse({}),
+        ):
+            with self.assertRaisesRegex(DeepSeekError, "无法解析"):
+                self.client.chat(self.messages)
 
 
 if __name__ == "__main__":

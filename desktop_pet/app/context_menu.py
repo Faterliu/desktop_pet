@@ -23,6 +23,7 @@ def build_context_menu(
     do_not_disturb: bool,
     auto_move: bool,
     api_chat_enabled: bool,
+    api_provider: str,
     formal_qa_mode: bool,
     formal_answer_display: str,
     always_on_top: bool,
@@ -34,6 +35,7 @@ def build_context_menu(
     on_toggle_dnd: Callable[[bool], None],
     on_toggle_auto_move: Callable[[bool], None],
     on_toggle_api_chat: Callable[[bool], None],
+    on_set_api_provider: Callable[[str], None],
     on_toggle_formal_qa_mode: Callable[[bool], None],
     on_set_formal_answer_display: Callable[[str], None],
     on_toggle_always_on_top: Callable[[bool], None],
@@ -101,6 +103,21 @@ def build_context_menu(
         poetry_action = QAction("念一首诗", test_menu)
         poetry_action.triggered.connect(on_test_poetry)
         test_menu.addAction(poetry_action)
+
+        test_menu.addSeparator()
+
+        provider_menu = test_menu.addMenu("测试模型切换")
+        provider_group = QActionGroup(provider_menu)
+        provider_group.setExclusive(True)
+        for provider, title in [("deepseek", "DeepSeek"), ("openai", "OpenAI GPT")]:
+            action = QAction(title, provider_menu)
+            action.setCheckable(True)
+            action.setChecked(api_provider == provider)
+            action.triggered.connect(
+                lambda checked=False, value=provider: on_set_api_provider(value)
+            )
+            provider_group.addAction(action)
+            provider_menu.addAction(action)
 
         menu.addSeparator()
 

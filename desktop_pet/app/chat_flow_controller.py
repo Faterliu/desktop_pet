@@ -54,7 +54,7 @@ class ChatFlowController:
     """协调主聊天流程中的非界面状态变化。"""
 
     missing_api_reply = (
-        "我已经收到你说的话啦。先在 config/app_config.json 里填好 DeepSeek API key，"
+        "我已经收到你说的话啦。先在 config/app_config.json 里填好当前模型提供商的 API key，"
         "或者先关闭“聊天接入 API”。"
     )
 
