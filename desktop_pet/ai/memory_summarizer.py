@@ -4,7 +4,7 @@ import json
 from typing import Any, Callable
 
 from ai.deepseek_client import DeepSeekClient
-from storage.memory_store import MemoryStore
+from storage.memory_store import MEMORY_FIELDS, MemoryStore
 from utils.log_sanitizer import safe_exception
 from utils.logger import get_logger
 
@@ -103,7 +103,12 @@ class MemorySummarizer:
                     '{"operations":[{"action":"add|update|unchanged","field":"允许的字段路径",'
                     '"record_id":"仅 update 可用","description":["仅 add/update 必填"],"reason":"判断原因"}],'
                     '"conclusion":{"added":0,"updated":0,"unchanged":0}}。'
-                    "字段路径只能是输入 memory 中已经出现的语义字段路径。"
+                    "字段路径只能使用以下规范路径："
+                    f"{', '.join(MEMORY_FIELDS)}。"
+                    "新增字段约束：light_interests 只记录用户明确表达的长期轻松兴趣；"
+                    "comfort_preferences 只记录用户明确表达的舒缓或陪伴偏好；"
+                    "recent_positive_events 只记录用户明确提及的近期积极事件或小进展。"
+                    "不要根据情绪、关系困扰或沉默推断这些字段。"
                     "不要生成序号、timestamp、memory_meta 或 JSON 之外的内容。"
                 ),
             },

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import random
+from datetime import datetime
 from typing import Any
 
 from character.persona_state import compact_behavior_policy, read_persona_state
-from storage.memory_store import memory_descriptions, normalize_memory_schema
+from storage.memory_store import memory_descriptions, memory_records, normalize_memory_schema
+from utils.time_utils import now_utc, parse_iso_datetime
 
 
 FORBIDDEN_GREETING_PHRASES = (
@@ -28,13 +30,7 @@ def build_proactive_context(
 ) -> dict[str, Any]:
     """根据 memory、runtime_state、time_period 组装主动行为 上下文对象或消息并返回给调用方。"""
     normalized = normalize_memory_schema(memory)
-    work_study = normalized.get("work_study", {})
-    task_focus = _unique_limited(
-        memory_descriptions(normalized, "relationship_memory.interaction_patterns.task_focus")
-        + memory_descriptions(normalized, "work_study.current_projects")
-        + memory_descriptions(normalized, "work_study.current_learning_topics"),
-        limit=4,
-    )
+    task_focus = select_weighted_task_focus(normalized, limit=4)
     runtime = dict(runtime_state or {})
     persona_state = read_persona_state(runtime_state)
     for key, value in persona_state.to_dict().items():
@@ -73,6 +69,80 @@ def build_proactive_context(
         "character_behavior": compact_behavior_policy(character),
         "runtime_state": runtime,
     }
+
+
+# 从任务类记忆中按记录年龄加权抽取不同主题，较早记录有更高概率被主动问候使用。
+def select_weighted_task_focus(
+    memory: dict[str, Any],
+    *,
+    limit: int = 4,
+    rng: Any | None = None,
+    now: datetime | None = None,
+) -> list[str]:
+    """从任务类记忆中按时间加权选择不同主题。"""
+    normalized = normalize_memory_schema(memory)
+    current_time = now or now_utc()
+    primary_topics = _weighted_topics_from_fields(
+        normalized,
+        ("relationship_memory.interaction_patterns.task_focus",),
+        limit=limit,
+        rng=rng,
+        now=current_time,
+    )
+    if primary_topics:
+        return primary_topics
+    return _weighted_topics_from_fields(
+        normalized,
+        (
+            "work_study.current_projects",
+            "work_study.current_learning_topics",
+        ),
+        limit=limit,
+        rng=rng,
+        now=current_time,
+    )
+
+
+# 从指定任务字段中按记录年龄加权抽取不同主题。
+def _weighted_topics_from_fields(
+    memory: dict[str, Any],
+    field_paths: tuple[str, ...],
+    *,
+    limit: int,
+    rng: Any | None,
+    now: datetime,
+) -> list[str]:
+    """从指定任务字段中按记录年龄加权抽取不同主题。"""
+    candidates: dict[str, datetime | None] = {}
+    for field_path in field_paths:
+        for _, record in memory_records(memory, field_path):
+            timestamp = parse_iso_datetime(record.get("timestamp"))
+            for text in record.get("description", []):
+                topic = str(text).strip()
+                if not topic:
+                    continue
+                existing = candidates.get(topic)
+                if existing is None or (timestamp is not None and timestamp < existing):
+                    candidates[topic] = timestamp
+
+    selected: list[str] = []
+    chooser = rng or random
+    while candidates and len(selected) < max(0, limit):
+        topics = list(candidates)
+        weights = [_memory_age_weight(candidates[topic], now) for topic in topics]
+        topic = chooser.choices(topics, weights=weights, k=1)[0]
+        selected.append(topic)
+        candidates.pop(topic)
+    return selected
+
+
+# 根据记录时间计算主动问候的抽取权重，无法解析时保留基础权重。
+def _memory_age_weight(timestamp: datetime | None, now: datetime) -> float:
+    """根据记录时间计算主动问候的抽取权重。"""
+    if timestamp is None:
+        return 1.0
+    age_days = max(0.0, (now - timestamp).total_seconds() / 86400)
+    return 1.0 + age_days
 
 
 # 把一组结构化编号记忆字段压缩为主动问候可读取的值。
@@ -276,18 +346,6 @@ def _clip_text(text: str, limit: int = 80) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 1] + "…"
-
-
-# 根据 items、limit 去重并限制列表长度，保持原有顺序。
-def _unique_limited(items: list[str], limit: int) -> list[str]:
-    """根据 items、limit 去重并限制列表长度，保持原有顺序。"""
-    unique: list[str] = []
-    for item in items:
-        if item and item not in unique:
-            unique.append(item)
-        if len(unique) >= limit:
-            break
-    return unique
 
 
 # 统计主动上下文中可用于问候的任务和关系条目数量。

@@ -11,7 +11,8 @@ from utils.time_utils import now_iso, parse_iso_datetime, utc_iso
 
 MEMORY_FIELDS: dict[str, str] = {
     "user_profile.preferences": "preferences",
-    "user_profile.communication_style": "communication_style",
+    "user_profile.light_interests": "light_interests",
+    "user_profile.comfort_preferences": "comfort_preferences",
     "user_profile.important_personal_notes": "notes",
     "work_study.current_learning_topics": "topics",
     "work_study.current_projects": "projects",
@@ -29,6 +30,7 @@ MEMORY_FIELDS: dict[str, str] = {
     "relationship_memory.companionship_style.avoid_behaviors": "avoid_behaviors",
     "relationship_memory.companionship_style.evidence": "companionship_evidence",
     "relationship_memory.interaction_patterns.task_focus": "task_focus",
+    "relationship_memory.interaction_patterns.recent_positive_events": "positive_events",
     "relationship_memory.interaction_patterns.recent_interaction_mode": "recent_interaction_mode",
     "relationship_memory.interaction_patterns.interruption_tolerance": "interruption_tolerance",
     "relationship_memory.interaction_patterns.response_to_proactive_greetings": "response_to_proactive_greetings",
@@ -54,6 +56,7 @@ DEFAULT_RELATIONSHIP_MEMORY = {
     },
     "interaction_patterns": {
         "task_focus": {},
+        "recent_positive_events": {},
         "recent_interaction_mode": {},
         "interruption_tolerance": {},
         "response_to_proactive_greetings": {},
@@ -64,7 +67,8 @@ DEFAULT_MEMORY = {
     "schema_version": "2.0",
     "user_profile": {
         "preferences": {},
-        "communication_style": {},
+        "light_interests": {},
+        "comfort_preferences": {},
         "important_personal_notes": {},
     },
     "work_study": {
@@ -74,8 +78,7 @@ DEFAULT_MEMORY = {
     },
     "relationship_memory": copy.deepcopy(DEFAULT_RELATIONSHIP_MEMORY),
     "memory_meta": {
-        "schema_version": 3,
-        "last_updated": "",
+        "schema_version": 5,
         "summary_batches": {},
     },
     "last_updated": "",
@@ -96,17 +99,111 @@ def normalize_memory_schema(data: dict[str, Any] | None) -> dict[str, Any]:
             path,
             _normalize_record_collection(container, prefix, fallback_timestamp),
         )
+    _migrate_legacy_memory_fields(normalized, fallback_timestamp)
     _merge_defaults(normalized, DEFAULT_MEMORY)
     normalized.setdefault("memory_meta", {})
     if not isinstance(normalized["memory_meta"], dict):
         normalized["memory_meta"] = {}
     normalized["schema_version"] = "2.0"
-    normalized["memory_meta"]["schema_version"] = 3
+    normalized["memory_meta"]["schema_version"] = 5
+    normalized["memory_meta"].pop("last_updated", None)
     if not isinstance(normalized["memory_meta"].get("summary_batches"), dict):
         normalized["memory_meta"]["summary_batches"] = {}
     _merge_defaults(normalized["relationship_memory"], DEFAULT_RELATIONSHIP_MEMORY)
     normalized["last_updated"] = _normalized_timestamp(normalized.get("last_updated"))
     return normalized
+
+
+# 将旧版重复字段合并到当前唯一的规范字段，并在内容保留后删除来源字段。
+def _migrate_legacy_memory_fields(memory: dict[str, Any], fallback_timestamp: str) -> None:
+    """将旧版重复字段合并到当前唯一的规范字段。"""
+    root_preferences = memory.get("preferences")
+    if "preferences" in memory and _append_legacy_records(
+        memory,
+        "user_profile.preferences",
+        root_preferences,
+        "preferences",
+        fallback_timestamp,
+    ):
+        memory.pop("preferences", None)
+
+    user_profile = memory.get("user_profile")
+    legacy_communication = (
+        user_profile.get("communication_style") if isinstance(user_profile, dict) else None
+    )
+    if isinstance(user_profile, dict) and "communication_style" in user_profile and _append_legacy_records(
+        memory,
+        "relationship_memory.communication_style.preferred_response_style",
+        legacy_communication,
+        "preferred_response_style",
+        fallback_timestamp,
+    ):
+        user_profile.pop("communication_style", None)
+
+
+# 追加旧字段记录到目标集合，保留可用描述与原始时间戳，并按文本去重。
+def _append_legacy_records(
+    memory: dict[str, Any],
+    target_path: str,
+    source: Any,
+    prefix: str,
+    fallback_timestamp: str,
+) -> bool:
+    """追加旧字段记录到目标集合，成功保留内容后返回 True。"""
+    source_records = _legacy_record_collection(source, prefix, fallback_timestamp)
+    target = _get_path(memory, target_path)
+    if not isinstance(target, dict):
+        return False
+
+    known_texts = {
+        str(text).strip()
+        for record in target.values()
+        if _is_memory_record(record)
+        for text in record.get("description", [])
+        if str(text).strip()
+    }
+    for record in source_records.values():
+        descriptions = [
+            str(text).strip()
+            for text in record.get("description", [])
+            if str(text).strip() and str(text).strip() not in known_texts
+        ]
+        if not descriptions:
+            continue
+        record_id = _next_collection_record_id(target, prefix)
+        target[record_id] = {
+            "description": descriptions,
+            "timestamp": _normalized_timestamp(record.get("timestamp")),
+        }
+        known_texts.update(descriptions)
+    return True
+
+
+# 兼容旧版列表、文本及字典包装的字段，整理为编号记录集合。
+def _legacy_record_collection(value: Any, prefix: str, fallback_timestamp: str) -> dict[str, dict[str, Any]]:
+    """兼容旧版列表、文本及字典包装的字段。"""
+    if isinstance(value, dict) and not any(_is_memory_record(item) for item in value.values()):
+        records: dict[str, dict[str, Any]] = {}
+        for item in value.values():
+            for record in _legacy_record_collection(item, prefix, fallback_timestamp).values():
+                record_id = _next_collection_record_id(records, prefix)
+                records[record_id] = record
+        return records
+    return _normalize_record_collection(value, prefix, fallback_timestamp)
+
+
+# 读取集合中的最大编号并生成下一个记录键。
+def _next_collection_record_id(collection: dict[str, Any], prefix: str) -> str:
+    """读取集合中的最大编号并生成下一个记录键。"""
+    maximum = 0
+    for key in collection:
+        if not isinstance(key, str) or not key.startswith(f"{prefix}_"):
+            continue
+        try:
+            maximum = max(maximum, int(key.rsplit("_", 1)[1]))
+        except (IndexError, ValueError):
+            continue
+    return f"{prefix}_{maximum + 1}"
 
 
 # 返回字段内的编号记录，按最近更新时间优先排序。
@@ -257,12 +354,16 @@ class MemoryStore:
     # 读取load并返回 dict[str, Any]。
     def load(self) -> dict[str, Any]:
         """读取load并返回 dict[str, Any]。"""
+        changed = False
         with MEMORY_IO_LOCK:
             raw = load_json(self.path, DEFAULT_MEMORY)
             normalized = normalize_memory_schema(raw)
-            if raw != normalized:
+            changed = raw != normalized
+            if changed:
                 save_json(self.path, normalized)
-            return normalized
+        if changed:
+            self._sync_vectors(normalized)
+        return normalized
 
     # 根据 data 把save写入持久化存储并保持数据可恢复。
     def save(self, data: dict[str, Any]) -> None:
@@ -377,8 +478,8 @@ class MemoryStore:
         timestamp = utc_iso()
         data["last_updated"] = timestamp
         data.setdefault("memory_meta", {})
-        data["memory_meta"]["schema_version"] = 3
-        data["memory_meta"]["last_updated"] = timestamp
+        data["memory_meta"]["schema_version"] = 5
+        data["memory_meta"].pop("last_updated", None)
 
     # 根据 current、updates 合并关系记忆分区，并为新增条目补充时间戳。
     def _touch_relationship_sections(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -13,6 +14,7 @@ from character.proactive_context import (  # noqa: E402
     build_proactive_context,
     build_scenario_greeting_messages,
     has_scenario_context,
+    select_weighted_task_focus,
 )
 
 
@@ -61,7 +63,10 @@ class ProactiveContextTests(unittest.TestCase):
         )
 
         self.assertEqual(context["time_period"], "afternoon")
-        self.assertEqual(context["recent_task_focus"][:2], ["桌宠记忆系统", "Mem0 接入"])
+        self.assertCountEqual(
+            context["recent_task_focus"],
+            ["桌宠记忆系统", "Mem0 接入", "很久以前的旧任务", "Prompt 分区"],
+        )
         self.assertEqual(
             context["communication_style"]["preferred_response_style"],
             "direct_actionable",
@@ -74,6 +79,86 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertEqual(context["runtime_state"]["mood"], "calm")
         self.assertEqual(context["runtime_state"]["consecutive_unanswered"], 1)
         self.assertTrue(has_scenario_context(context, min_items=2))
+
+    # 验证较早任务在同一次加权抽取中的权重更高。
+    def test_weighted_task_focus_prefers_older_timestamp(self) -> None:
+        """验证主动问候优先选择较早的任务记录。"""
+        class HighestWeightRandom:
+            def __init__(self) -> None:
+                self.calls: list[tuple[list[str], list[float]]] = []
+
+            def choices(
+                self,
+                population: list[str],
+                *,
+                weights: list[float],
+                k: int,
+            ) -> list[str]:
+                self.calls.append((population, weights))
+                return [population[weights.index(max(weights))]]
+
+        memory = {
+            "work_study": {
+                "current_projects": {
+                    "projects_1": {
+                        "description": ["较新的项目"],
+                        "timestamp": "2026-07-10T00:00:00+00:00",
+                    },
+                    "projects_2": {
+                        "description": ["较早的项目"],
+                        "timestamp": "2026-07-01T00:00:00+00:00",
+                    },
+                }
+            }
+        }
+        chooser = HighestWeightRandom()
+
+        topics = select_weighted_task_focus(
+            memory,
+            limit=2,
+            rng=chooser,
+            now=datetime(2026, 7, 11, tzinfo=timezone.utc),
+        )
+
+        first_topics, first_weights = chooser.calls[0]
+        self.assertGreater(
+            first_weights[first_topics.index("较早的项目")],
+            first_weights[first_topics.index("较新的项目")],
+        )
+        self.assertEqual(topics[0], "较早的项目")
+
+    # 验证缺失或异常时间戳的任务记忆仍可安全参与主动问候。
+    def test_weighted_task_focus_tolerates_invalid_timestamps(self) -> None:
+        """验证异常时间戳不会阻断主动问候上下文生成。"""
+        memory = {
+            "work_study": {
+                "current_projects": {
+                    "projects_1": {"description": ["异常时间任务"], "timestamp": "invalid"},
+                },
+                "current_learning_topics": ["旧格式学习主题"],
+            }
+        }
+
+        context = build_proactive_context(memory)
+
+        self.assertCountEqual(context["recent_task_focus"], ["异常时间任务", "旧格式学习主题"])
+
+    # 验证存在短期任务关注时不再混入项目和学习主题。
+    def test_task_focus_takes_priority_over_project_and_learning_topics(self) -> None:
+        """验证短期任务关注独立作为主动问候主题。"""
+        memory = {
+            "relationship_memory": {
+                "interaction_patterns": {"task_focus": ["短期任务"]},
+            },
+            "work_study": {
+                "current_projects": ["长期项目"],
+                "current_learning_topics": ["学习主题"],
+            },
+        }
+
+        context = build_proactive_context(memory)
+
+        self.assertEqual(context["recent_task_focus"], ["短期任务"])
 
     # 验证本地 template 问候 is short natural and not mechanical场景下的预期结果。
     def test_local_template_greeting_is_short_natural_and_not_mechanical(self) -> None:

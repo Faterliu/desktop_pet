@@ -1,3 +1,30 @@
+
+# Desktop AI Pet
+
+## 配置环境、运行启动与参数配置
+
+项目程序位于 `desktop_pet/`。首次使用时，在该目录运行：
+
+```powershell
+.\setup_env.bat
+```
+`setup_env.bat` 会查找可用的 Python、创建项目专用的 `.desktop_pet_venv` 虚拟环境、安装 `requirements.txt` 中的依赖，并把实际运行解释器路径写入 `data/runtime_python.txt`。日常使用不需要重复执行；仅在首次配置、依赖损坏或更换 Python 环境后重新运行即可。
+
+环境配置完成后，可双击运行：
+```text
+desktop_pet\start_main.vbs
+```
+`start_main.vbs` 会读取 `runtime_python.txt`、尽力执行一次 `git pull --ff-only` 更新当前分支，然后在后台启动 `main.py`。启动失败时会把原因写入 `desktop_pet/data/start_main_error.log`，并弹出错误查看窗口。
+
+程序配置以 `desktop_pet/config/app_config.example.json` 为示例模板；如需保存本机配置，将其复制为同目录的 `app_config.json` 后修改。未创建 `app_config.json` 时，程序会直接使用示例配置。常用配置分组如下：
+
+- `api`：聊天服务提供商、模型、API Key、超时和上下文长度限制；密钥仅填写在本机 `app_config.json`，不要提交。
+- `ui`：人物缩放、置顶、右键菜单项和气泡展示时长。
+- `behavior`：启动/主动问候、主动问候间隔、场景问候和每日限额。
+- `chat`：正式问答模式与正式回答展示方式。
+- `memory`：长期记忆、向量索引、Mem0 与嵌入服务开关。
+- `reminders`、`screenshot`：提醒与截图解析功能的开关和限制。
+
 ##更新日志：
 [v0.1.0] - 20260509
 项目完成初始化，已能够稳定运行。
@@ -182,3 +209,7 @@
 [v1.3.3] - 20260711
 1. 增加截图识别功能.
 2. 修改对话总结、记忆总结机制，增加定时总结与记忆覆盖+记忆时间功能。
+3. 重构记忆存储的方式。
+
+[v2.0.0] - 20260711
+2.0正式上线！

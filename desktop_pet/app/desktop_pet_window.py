@@ -63,7 +63,7 @@ from character.proactive_context import (
 from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.local_lines_service import LocalLinesService
-from storage.memory_store import MemoryStore
+from storage.memory_store import MemoryStore, memory_descriptions, normalize_memory_schema
 from storage.memory_vector_store import MemoryVectorStore
 from storage.reminder_store import ReminderStore
 from storage.usage_store import UsageStore
@@ -421,6 +421,7 @@ class KnowledgeSpeakWorker(QObject):
         client: DeepSeekClient,
         prompt_builder: PromptBuilder,
         memory: dict[str, Any],
+        formal_qa_mode: bool = False,
         mem0_memory_service: Mem0MemoryService | None = None,
         user_id: str = "default_user",
         use_mem0: bool = False,
@@ -431,36 +432,26 @@ class KnowledgeSpeakWorker(QObject):
         self.client = client
         self.prompt_builder = prompt_builder
         self.memory = memory
+        self.formal_qa_mode = formal_qa_mode
         self.mem0_memory_service = mem0_memory_service
         self.user_id = user_id
         self.use_mem0 = use_mem0
         self.mem0_memory_context = mem0_memory_context
 
-    # 基于用户记忆随机选取一个偏好方向，生成 2-3 句针对性知识问候。
+    # 根据当前问答模式生成正式知识内容或轻柔陪伴问候。
     def run(self) -> None:
-        """基于用户记忆随机选取一个偏好方向，生成 2-3 句针对性知识问候。"""
+        """根据当前问答模式生成正式知识内容或轻柔陪伴问候。"""
         try:
-            user_profile = self.memory.get("user_profile", {})
-            work_study = self.memory.get("work_study", {})
-            prefs = user_profile.get("preferences", [])
-            topics = work_study.get("current_learning_topics", [])
-            projects = work_study.get("current_projects", [])
-            all_context = "、".join(topics + projects) or "暂无"
-            focus = random.choice(prefs) if prefs else "编程学习"
+            memory = normalize_memory_schema(self.memory)
             mem0_memory_context = self._mem0_memory_context()
-            if mem0_memory_context:
-                all_context = mem0_memory_context
-
-            prompt = (
-                f"用户偏好中有一条是：{focus}。其他背景：{all_context}。"
-                f"请针对「{focus}」这个方向，主动给用户提供一段简短有用的内容，"
-                "比如一个实用技巧、一条学习建议、一个冷知识或效率方法。"
-                "严格控制在 2-3 句话以内，温柔自然，不要像AI助手那样正式。"
-                "请以「你知道吗」「说起来」「对了」「我突然想到」这类口语化开头来开始。"
-            )
+            if self.formal_qa_mode:
+                prompt = self._formal_knowledge_prompt(memory, mem0_memory_context)
+            else:
+                prompt = self._informal_companion_prompt(memory, mem0_memory_context)
             messages = self.prompt_builder.build_messages(
                 prompt,
                 [],
+                formal_qa_mode=self.formal_qa_mode,
                 relevant_memories=mem0_memory_context,
             )
             reply = self.client.chat(messages)
@@ -470,6 +461,66 @@ class KnowledgeSpeakWorker(QObject):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected knowledge worker failure")
             self.failed.emit(f"知识问候走神了：{exc}")
+
+    # 构造正式问答模式下的短知识问候提示词。
+    def _formal_knowledge_prompt(self, memory: dict[str, Any], mem0_context: str) -> str:
+        """构造正式问答模式下的短知识问候提示词。"""
+        prefs = memory_descriptions(memory, "user_profile.preferences")
+        topics = memory_descriptions(memory, "work_study.current_learning_topics")
+        projects = memory_descriptions(memory, "work_study.current_projects")
+        focus = random.choice(prefs) if prefs else "通用学习方法"
+        background = mem0_context or "、".join(topics + projects) or "暂无"
+        return (
+            f"当前处于正式问答模式。主题：{focus}。背景：{background}。"
+            "请主动提供一段简短、准确、可执行的硬性知识或方法建议。"
+            "控制在 2-3 句话，表达清晰、专业，不要引用或推断个人备注。"
+        )
+
+    # 构造非正式问答模式下的轻柔陪伴提示词。
+    def _informal_companion_prompt(self, memory: dict[str, Any], mem0_context: str) -> str:
+        """构造非正式问答模式下的轻柔陪伴提示词。"""
+        interests = memory_descriptions(memory, "user_profile.light_interests")
+        positive_events = memory_descriptions(
+            memory,
+            "relationship_memory.interaction_patterns.recent_positive_events",
+        )
+        notes = memory_descriptions(memory, "user_profile.important_personal_notes")
+        topics = interests + positive_events
+        if topics:
+            context = f"轻松话题：{random.choice(topics)}。"
+        else:
+            note = random.choice(notes) if notes else "用户此刻可能更需要轻松一点的陪伴"
+            context = f"备用个人备注：{note}。"
+
+        style_hints = self._informal_style_hints(memory)
+        background = f"补充背景：{mem0_context}。" if mem0_context else ""
+        return (
+            f"当前处于非正式问答模式。{context}{style_hints}{background}"
+            "请只输出一句自然、轻柔、低压力的陪伴话或小建议。"
+            "可以轻轻安慰或给出很小的可行步骤，但不要诊断、催促、说教，"
+            "不要提及记忆、历史对话、数据库或“你之前说过”，也不要直接复述备注。"
+        )
+
+    # 汇总非正式问候的陪伴偏好与互动边界，仅用于调节表达方式。
+    def _informal_style_hints(self, memory: dict[str, Any]) -> str:
+        """汇总非正式问候的陪伴偏好与互动边界。"""
+        fields = (
+            ("舒缓偏好", "user_profile.comfort_preferences"),
+            ("鼓励方式", "relationship_memory.companionship_style.encouragement_style"),
+            ("称呼偏好", "relationship_memory.companionship_style.addressing_preference"),
+            ("主动边界", "relationship_memory.companionship_style.proactive_boundary"),
+            ("近期互动状态", "relationship_memory.interaction_patterns.recent_interaction_mode"),
+            (
+                "主动问候回应",
+                "relationship_memory.interaction_patterns.response_to_proactive_greetings",
+            ),
+        )
+        hints = [
+            f"{label}：{'、'.join(values[:2])}"
+            for label, field_path in fields
+            if (values := memory_descriptions(memory, field_path))
+        ]
+        return f"表达方式参考：{'；'.join(hints)}。" if hints else ""
 
     # 处理记忆数据，保持本地记忆和外部索引一致。
     def _mem0_memory_context(self) -> str:
@@ -3013,6 +3064,7 @@ class DesktopPetWindow(QWidget):
             self.deepseek_client,
             self.prompt_builder,
             memory,
+            formal_qa_mode=self._formal_qa_enabled(),
             mem0_memory_service=self.mem0_memory_service,
             user_id=self._memory_user_id(),
             use_mem0=self.config_service.get_bool("memory.use_mem0_for_knowledge_speak", False),

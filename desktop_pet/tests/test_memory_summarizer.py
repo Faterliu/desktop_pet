@@ -103,8 +103,12 @@ class MemorySummarizerTests(unittest.TestCase):
 
         memory = self.memory_store.load()
         source = client.messages[0][-1]["content"]
+        instructions = client.messages[0][0]["content"]
         self.assertIn("摘要1", source)
         self.assertIn("摘要3", source)
+        self.assertIn("user_profile.light_interests", instructions)
+        self.assertIn("recent_positive_events", instructions)
+        self.assertIn("用户明确表达", instructions)
         self.assertEqual(memory["memory_meta"]["summary_batches"]["clipboard"], 3)
         self.assertEqual(
             memory["user_profile"]["preferences"]["preferences_1"]["description"],

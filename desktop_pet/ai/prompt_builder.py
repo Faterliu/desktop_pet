@@ -490,8 +490,6 @@ class PromptBuilder:
     def _format_fact_memory(self, memory: dict[str, Any]) -> str:
         """把用户事实记忆整理为提示词中的事实记忆段落。"""
         fragments: list[str] = []
-        user_profile = memory.get("user_profile", {})
-        work_study = memory.get("work_study", {})
         self._append_memory_items(
             fragments, "用户偏好", memory_descriptions(memory, "user_profile.preferences")
         )
@@ -511,7 +509,6 @@ class PromptBuilder:
         self._append_memory_items(
             fragments, "有用上下文", memory_descriptions(memory, "work_study.useful_context")
         )
-        self._append_legacy_preferences(fragments, memory.get("preferences"))
         return "\n".join(f"- {item}" for item in fragments[:8])
 
     # 把关系记忆按模式筛选后整理为提示词片段。
@@ -524,14 +521,7 @@ class PromptBuilder:
         communication = relationship.get("communication_style", {})
         companionship = relationship.get("companionship_style", {})
         interaction = relationship.get("interaction_patterns", {})
-        user_profile = memory.get("user_profile", {})
 
-        if isinstance(user_profile, dict):
-            self._append_memory_items(
-                fragments,
-                "历史沟通风格",
-                memory_descriptions(memory, "user_profile.communication_style"),
-            )
         if isinstance(communication, dict):
             self._append_scalar(
                 fragments,
@@ -677,17 +667,6 @@ class PromptBuilder:
         text = self._string_value(value)
         if text:
             fragments.append(f"{label}：{text}")
-
-    # 根据 fragments、value 把legacy preferences加入当前状态或持久化记录。
-    def _append_legacy_preferences(self, fragments: list[str], value: Any) -> None:
-        """根据 fragments、value 把legacy preferences加入当前状态或持久化记录。"""
-        if isinstance(value, dict):
-            for key, item in value.items():
-                items = self._string_items(item)
-                if items:
-                    fragments.append(f"旧版偏好 {key}：{'、'.join(items[:3])}")
-        else:
-            self._append_memory_items(fragments, "旧版偏好", value)
 
     # 根据 value 遍历嵌套数据中的文本项，过滤空值后逐条返回。
     def _string_items(self, value: Any) -> list[str]:
