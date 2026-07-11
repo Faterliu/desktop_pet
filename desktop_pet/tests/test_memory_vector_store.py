@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -86,6 +87,8 @@ class MemoryVectorStoreTests(unittest.TestCase):
     def setUp(self) -> None:
         """准备当前测试所需的环境和数据。"""
         self.temp_dir = DESKTOP_PET_ROOT / "tmp_work" / self._testMethodName
+        if self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.memory_path = self.temp_dir / "memory.json"
         self.vector_path = self.temp_dir / "memory_vectors.json"
@@ -269,9 +272,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(len(texts), 2)
         self.assertIn("important project memory", texts)
 
-    # 验证语义 merge removes same field high similarity duplicate场景下的预期结果。
-    def test_semantic_merge_removes_same_field_high_similarity_duplicate(self) -> None:
-        """验证语义 merge removes same field high similarity duplicate场景下的预期结果。"""
+    # 验证向量语义维护不再直接改写结构化记忆。
+    def test_semantic_merge_does_not_rewrite_structured_memory(self) -> None:
+        """验证向量语义维护不再直接改写结构化记忆。"""
         memory = {
             "schema_version": "1.0",
             "user_profile": {
@@ -319,10 +322,10 @@ class MemoryVectorStoreTests(unittest.TestCase):
         result = store._merge_semantic_duplicates(self.memory_path)
 
         updated = load_json(self.memory_path, {})
-        self.assertEqual(result["merged_count"], 1)
+        self.assertEqual(result["merged_count"], 0)
         self.assertEqual(
             updated["user_profile"]["preferences"],
-            ["偏好简短直接的回答", "喜欢番茄"],
+            ["喜欢简短回答", "偏好简短直接的回答", "喜欢番茄"],
         )
 
     # 验证语义 merge does not merge across 记忆 fields场景下的预期结果。

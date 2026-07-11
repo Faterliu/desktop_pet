@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 import re
-import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QWidget
 
 from ai.context_manager import ContextManager
 from ai.deepseek_client import DeepSeekClient, DeepSeekError
+from ai.memory_summarizer import MemorySummarizer
 from ai.mem0_memory_service import Mem0MemoryService
 from ai.prompt_builder import PromptBuilder
 from ai.summarizer import Summarizer
@@ -34,12 +35,23 @@ from app.chat_input import ChatInput
 from app.chat_flow_controller import ChatFlowController
 from app.clipboard_service import ClipboardService
 from app.config_service import ConfigService
+from app.conversation_maintenance_worker import (
+    ConversationMaintenanceWorker,
+    should_run_daily_catchup,
+)
 from app.context_menu import build_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
 from app.message_splitter import split_knowledge_bubble_text
 from app.reminder_controller import ReminderController
 from app.reminder_tool import ReminderTool, ReminderToolRequest
+from app.screenshot_analysis_worker import ScreenshotAnalysisWorker
+from app.screenshot_capture_service import (
+    CapturedScreenshot,
+    ScreenshotCaptureError,
+    ScreenshotCaptureService,
+)
+from app.screenshot_selection_overlay import ScreenshotSelectionOverlay
 from app.speech_bubble import ReplyBubble, SpeechBubble
 from app.window_position_service import WindowPositionService
 from character.behavior_controller import BehaviorController
@@ -123,8 +135,16 @@ def _positive_int(value: Any, default: int) -> int:
     return parsed if parsed > 0 else default
 
 
+@dataclass(frozen=True)
+class ChatWorkerResult:
+    """聊天工作线程的回复与提醒创建结果。"""
+
+    reply: str
+    created_reminders: bool = False
+
+
 class ChatWorker(QObject):
-    finished = Signal(str)
+    finished = Signal(object)
     failed = Signal(str)
 
     # 初始化后台聊天任务，持有本次请求所需依赖。
@@ -171,8 +191,8 @@ class ChatWorker(QObject):
                 relevant_memories=relevant_memories,
                 reminder_tool_guidance=self._reminder_tool_guidance(),
             )
-            reply = self._request_chat_reply(messages)
-            self.finished.emit(reply)
+            result = self._request_chat_reply(messages)
+            self.finished.emit(result)
         except DeepSeekError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -180,27 +200,30 @@ class ChatWorker(QObject):
             self.failed.emit(f"我刚刚走神了一下：{exc}")
 
     # 在提醒工具可用时请求模型识别提醒意图，否则保持普通聊天请求。
-    def _request_chat_reply(self, messages: list[dict[str, str]]) -> str:
+    def _request_chat_reply(self, messages: list[dict[str, str]]) -> ChatWorkerResult:
         """在提醒工具可用时请求模型识别提醒意图，否则保持普通聊天请求。"""
         if self.reminder_tool is None or not self.reminder_tool.is_enabled():
-            return self.client.chat(messages)
+            return ChatWorkerResult(self.client.chat(messages))
 
         response = self.client.chat_with_reminder_tools(
             messages,
             self._json_fallback_messages(messages),
         )
         if response.invalid_tool_calls:
-            return response.reply
+            return ChatWorkerResult(response.reply)
         if not response.reminder_calls:
-            return response.reply or "我在这里哦。"
+            return ChatWorkerResult(response.reply or "我在这里哦。")
 
         results = self.reminder_tool.create_reminders(
             [ReminderToolRequest(call.title, call.due_at) for call in response.reminder_calls],
             source=f"model_tool_{response.protocol}",
         )
         if not all(result.success for result in results):
-            return self._reminder_tool_failure_reply(results[0].code)
-        return response.reply or self._reminder_created_reply(results)
+            return ChatWorkerResult(self._reminder_tool_failure_reply(results[0].code))
+        return ChatWorkerResult(
+            response.reply or self._reminder_created_reply(results),
+            created_reminders=True,
+        )
 
     # 构建供模型调用提醒工具的时间与边界说明。
     def _reminder_tool_guidance(self) -> str | None:
@@ -691,10 +714,13 @@ class DesktopPetWindow(QWidget):
         self.local_lines_path = self.config_dir / "local_lines.json"
         self.safety_rules_path = self.config_dir / "safety_rules.json"
         self.sprite_config_path = self.assets_dir / "sprite_config.json"
-        self.chat_history_formal_path = self.data_dir / "chat_history_formal.json"
-        self.chat_history_informal_path = self.data_dir / "chat_history_informal.json"
+        self.chat_history_path = self.data_dir / "chat_history.jsonl"
+        self.legacy_chat_history_formal_path = self.data_dir / "chat_history_formal.json"
+        self.legacy_chat_history_informal_path = self.data_dir / "chat_history_informal.json"
         self.summary_formal_path = self.data_dir / "conversation_summary_formal.json"
         self.summary_informal_path = self.data_dir / "conversation_summary_informal.json"
+        self.summary_clipboard_path = self.data_dir / "conversation_summary_clipboard.json"
+        self.conversation_maintenance_state_path = self.data_dir / "conversation_maintenance_state.json"
         self.memory_path = self.data_dir / "memory.json"
         self.daily_usage_path = self.data_dir / "daily_usage.json"
         self.reminders_path = self.data_dir / "reminders.json"
@@ -712,6 +738,7 @@ class DesktopPetWindow(QWidget):
             QApplication,
         )
         self.bubble_position_service = BubblePositionService(QApplication)
+        self.screenshot_capture_service = ScreenshotCaptureService()
         self.mem0_memory_service: Mem0MemoryService | None = None
         self.drag_start_offset = QPoint()
         self.dragging = False
@@ -720,9 +747,16 @@ class DesktopPetWindow(QWidget):
         self.chat_worker: QObject | None = None
         self.clipboard_thread: QThread | None = None
         self.clipboard_worker: QObject | None = None
+        self.screenshot_thread: QThread | None = None
+        self.screenshot_worker: QObject | None = None
+        self.screenshot_selection_overlay: ScreenshotSelectionOverlay | None = None
+        self._pending_screenshot: CapturedScreenshot | None = None
+        self._screenshot_visibility: list[tuple[QWidget, bool]] = []
         self._pending_scenario_fallback_line = ""
         self.clear_history_thread: QThread | None = None
         self.clear_history_worker: QObject | None = None
+        self.conversation_maintenance_thread: QThread | None = None
+        self.conversation_maintenance_worker: QObject | None = None
         self.mem0_init_thread: QThread | None = None
         self.mem0_init_worker: QObject | None = None
         self.mem0_search_thread: QThread | None = None
@@ -736,12 +770,16 @@ class DesktopPetWindow(QWidget):
         self.behavior_started = False
         self.reminders_started = False
         self.memory_maintenance_started = False
+        self.conversation_maintenance_started = False
         self.local_lines_refresh_started = False
         self.exit_animation_in_progress = False
         self.allow_immediate_close = False
         self._close_after_workers_finished = False
         self._is_closing = False
         self._summaries_running: set[str] = set()
+        self._queued_maintenance_modes: set[str] = set()
+        self._queued_maintenance_force = False
+        self._queued_maintenance_source = "round_threshold"
         self._suppress_click = False
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
@@ -749,6 +787,9 @@ class DesktopPetWindow(QWidget):
         self._waiting_timer = QTimer(self)
         self._waiting_timer.setSingleShot(True)
         self._waiting_timer.timeout.connect(self._show_waiting_prompt)
+        self._daily_summary_timer = QTimer(self)
+        self._daily_summary_timer.setSingleShot(True)
+        self._daily_summary_timer.timeout.connect(self._run_daily_conversation_maintenance)
         self.formal_answer_panels: list[FormalAnswerPanel] = []
         self.active_formal_answer_panel: FormalAnswerPanel | None = None
         self.pending_formal_question = ""
@@ -760,8 +801,18 @@ class DesktopPetWindow(QWidget):
         self._reminder_reply_timer.setSingleShot(True)
         self._reminder_reply_timer.timeout.connect(self._expire_reminder_reply_controls)
 
-        self.chat_store_formal = ChatStore(self.chat_history_formal_path)
-        self.chat_store_informal = ChatStore(self.chat_history_informal_path)
+        ChatStore.migrate_legacy_histories(
+            self.chat_history_path,
+            {
+                "formal": self.legacy_chat_history_formal_path,
+                "informal": self.legacy_chat_history_informal_path,
+            },
+        )
+        self.chat_store_formal = ChatStore(self.chat_history_path, "formal")
+        self.chat_store_informal = ChatStore(self.chat_history_path, "informal")
+        self.chat_store_remind = ChatStore(self.chat_history_path, "remind")
+        self.chat_store_clipboard = ChatStore(self.chat_history_path, "clipboard")
+        self.chat_store_screenshot = ChatStore(self.chat_history_path, "screenshot")
         self.usage_store = UsageStore(self.daily_usage_path)
         self.reminder_store = ReminderStore(self.reminders_path)
         self.clipboard_service = ClipboardService()
@@ -828,6 +879,21 @@ class DesktopPetWindow(QWidget):
             user_id=self._memory_user_id(),
             config_path=self.config_path,
             fallback_config_path=self.example_config_path,
+        )
+        self.summarizer_clipboard = Summarizer(
+            self.summary_clipboard_path,
+            self.chat_store_clipboard,
+            self.memory_store,
+            self.deepseek_client,
+            mem0_memory_service=self.mem0_memory_service,
+            user_id=self._memory_user_id(),
+            config_path=self.config_path,
+            fallback_config_path=self.example_config_path,
+        )
+        self.memory_summarizer = MemorySummarizer(
+            self.memory_store,
+            self.deepseek_client,
+            self._config_snapshot,
         )
 
         self.sprite_player = SpritePlayer(self.sprite_config_path, self._ui_scale())
@@ -896,7 +962,8 @@ class DesktopPetWindow(QWidget):
     def _connect_signals(self) -> None:
         """连接动画、输入框和主动行为等信号。"""
         self.sprite_player.frame_changed.connect(self._update_sprite)
-        self.chat_input.message_submitted.connect(self._handle_user_message)
+        self.chat_input.message_submitted.connect(self._handle_chat_input_message)
+        self.chat_input.cancelled.connect(self._handle_chat_input_cancelled)
         self.behavior_controller.speak_requested.connect(self._handle_behavior_speak)
         self.behavior_controller.knowledge_speak_requested.connect(self._handle_knowledge_speak)
         self.behavior_controller.scenario_greeting_requested.connect(
@@ -920,6 +987,9 @@ class DesktopPetWindow(QWidget):
         if not self.memory_maintenance_started:
             self.memory_maintenance_started = True
             QTimer.singleShot(0, self._start_memory_maintenance_worker)
+        if not self.conversation_maintenance_started:
+            self.conversation_maintenance_started = True
+            QTimer.singleShot(0, self._initialize_conversation_maintenance)
         if not self.local_lines_refresh_started:
             self.local_lines_refresh_started = True
             QTimer.singleShot(0, self._start_local_lines_refresh_worker)
@@ -1009,6 +1079,7 @@ class DesktopPetWindow(QWidget):
             event.ignore()
             self.request_exit()
             return
+        self._clear_screenshot_interaction(restore_widgets=False)
         if self._background_workers_running():
             self._close_after_workers_finished = True
             running_tasks = self._stop_background_workers()
@@ -1019,6 +1090,7 @@ class DesktopPetWindow(QWidget):
             self._close_after_workers_finished = False
         self._destroy_formal_answer_panels()
         self.reminder_controller.stop()
+        self._daily_summary_timer.stop()
         self.behavior_controller.flush_runtime_state()
         self._reminder_reply_timer.stop()
         self._save_window_position()
@@ -1053,6 +1125,7 @@ class DesktopPetWindow(QWidget):
             do_not_disturb=self.config_service.get_bool("behavior.do_not_disturb", False),
             auto_move=self.config_service.get_bool("ui.enable_free_move", False),
             api_chat_enabled=self.config_service.get_bool("api.enable_chat_api", True),
+            show_chat_api_menu=self.config_service.get_bool("ui.show_chat_api_menu", True),
             api_provider=self._api_provider(),
             formal_qa_mode=self._formal_qa_enabled(),
             formal_answer_display=self._formal_answer_display_mode(),
@@ -1077,6 +1150,7 @@ class DesktopPetWindow(QWidget):
             on_view_current_reminders=self._view_current_reminders,
             on_clear_completed_reminders=self._clear_completed_reminders,
             on_clipboard_assistant=self._handle_clipboard_assistant,
+            on_screenshot_analysis=self._handle_screenshot_analysis,
         )
         menu.triggered.connect(lambda _action: self._record_user_interaction("context_menu"))
         menu.exec(global_pos)
@@ -1239,7 +1313,13 @@ class DesktopPetWindow(QWidget):
             self._create_reminder_after_minutes(title, minutes, "menu_custom_minutes")
 
     # 创建相对当前时间的提醒，并显示创建结果。
-    def _create_reminder_after_minutes(self, title: str, minutes: int, source: str) -> bool:
+    def _create_reminder_after_minutes(
+        self,
+        title: str,
+        minutes: int,
+        source: str,
+        history_request: str | None = None,
+    ) -> bool:
         """创建相对当前时间的提醒，并显示创建结果。"""
         normalized_title = title.strip()
         if not self._reminders_enabled():
@@ -1255,12 +1335,19 @@ class DesktopPetWindow(QWidget):
             self._display_message("当前进行中的提醒已达到上限。", 3500, "system")
             return False
 
-        self.reminder_store.add_reminder(
+        reminder = self.reminder_store.add_reminder(
             normalized_title,
             datetime.now() + timedelta(minutes=minutes),
             source=source,
         )
-        self._display_message(f"好，{minutes} 分钟后提醒你：{normalized_title}", 4200, "system")
+        confirmation = f"好，{minutes} 分钟后提醒你：{normalized_title}"
+        self._record_remind_exchange(
+            history_request or f"{minutes} 分钟后提醒：{normalized_title}",
+            confirmation,
+            operation=source,
+            reminder_id=reminder["id"],
+        )
+        self._display_message(confirmation, 4200, "system")
         return True
 
     # 显示仍在进行中的提醒列表。
@@ -1286,6 +1373,22 @@ class DesktopPetWindow(QWidget):
             3200,
             "system",
         )
+
+    # 把成功的提醒交互写入独立历史，不进入普通聊天、摘要或长期记忆。
+    def _record_remind_exchange(
+        self,
+        request: str,
+        confirmation: str,
+        *,
+        operation: str,
+        reminder_id: str = "",
+    ) -> None:
+        """把成功的提醒交互写入独立历史。"""
+        metadata = {"operation": operation}
+        if reminder_id:
+            metadata["reminder_id"] = reminder_id
+        self.chat_store_remind.append_message("user", request, metadata)
+        self.chat_store_remind.append_message("assistant", confirmation, metadata)
 
     # 按菜单选择主动读取剪贴板，并启动独立的后台辅助请求。
     def _handle_clipboard_assistant(self, mode: str) -> None:
@@ -1323,9 +1426,210 @@ class DesktopPetWindow(QWidget):
             self._display_message("我正在处理上一段剪贴板内容，请稍等一下。", 3200, "system")
             return
 
+        self.chat_store_clipboard.append_message(
+            "user",
+            clipboard_text,
+            {
+                "operation": "clipboard_assistant",
+                "assistant_mode": mode,
+                "chars": len(clipboard_text),
+                "truncated": truncated,
+            },
+        )
         self.sprite_player.set_action("review")
         self._display_message("我来看看剪贴板里的内容。", 2800, "system")
         self._start_clipboard_assistant_worker(mode, clipboard_text)
+        self._start_conversation_maintenance(["clipboard"], "round_threshold")
+
+    # 根据菜单模式启动全屏快速解析或框选截图提问。
+    def _handle_screenshot_analysis(self, mode: str = "full") -> None:
+        """响应截图菜单，图片只在内存中传递给 OpenAI。"""
+        if self._closing_or_closed():
+            return
+        if mode not in {"full", "region_question"}:
+            self._display_message("不支持这个截图处理方式。", 3200, "system")
+            return
+        if not self._screenshot_analysis_enabled():
+            self._display_message("截图解析当前未启用。", 3200, "system")
+            return
+        if not self.deepseek_client.is_vision_configured():
+            self._display_message("还没有配置可用的 OpenAI API，暂时不能解析截图。", 4200, "system")
+            return
+        if (
+            self.background_tasks.is_registered("screenshot_analysis")
+            or self.screenshot_selection_overlay is not None
+            or self._pending_screenshot is not None
+        ):
+            self._display_message("我正在解析上一张截图，请稍等一下。", 3200, "system")
+            return
+
+        screen = self._current_screen()
+        widgets: list[QWidget] = [
+            self,
+            self.bubble,
+            self.reply_bubble,
+            self.reminder_ack_bubble,
+            self.reminder_snooze_bubble,
+            self.chat_input,
+            *self.formal_answer_panels,
+        ]
+        visibility = [(widget, widget.isVisible()) for widget in widgets]
+        self._screenshot_visibility = visibility
+        for widget, was_visible in visibility:
+            if was_visible:
+                widget.hide()
+        QTimer.singleShot(
+            self._screenshot_capture_delay_ms(),
+            lambda: self._capture_screen_for_analysis(screen, mode),
+        )
+
+    # 在桌宠窗口隐藏生效后截取冻结画面，再按模式继续处理。
+    def _capture_screen_for_analysis(self, screen, mode: str) -> None:
+        """在主线程截屏，并进入全屏上传或静态框选流程。"""
+        if self._closing_or_closed():
+            self._clear_screenshot_interaction(restore_widgets=False)
+            return
+        try:
+            pixmap = self.screenshot_capture_service.grab_screen_pixmap(screen)
+        except (ScreenshotCaptureError, RuntimeError) as exc:
+            self._restore_screenshot_widgets(self._take_screenshot_visibility())
+            self._on_screenshot_analysis_failure(str(exc))
+            return
+
+        if mode == "region_question":
+            self._show_screenshot_selection_overlay(screen, pixmap)
+            return
+
+        try:
+            screenshot = self.screenshot_capture_service.encode_pixmap(
+                pixmap,
+                max_image_edge=self._screenshot_max_image_edge(),
+                max_image_bytes=self._screenshot_max_image_bytes(),
+            )
+        except (ScreenshotCaptureError, RuntimeError) as exc:
+            self._restore_screenshot_widgets(self._take_screenshot_visibility())
+            self._on_screenshot_analysis_failure(str(exc))
+            return
+
+        self._restore_screenshot_widgets(self._take_screenshot_visibility())
+        self.sprite_player.set_action("review", fallback_action="idle", force_single_cycle=True)
+        self._display_message("我来看看这张截图。", 2800, "system")
+        self._start_screenshot_analysis_worker(
+            screenshot.image_bytes,
+            screenshot.mime_type,
+        )
+
+    # 在冻结截图上显示覆盖当前屏幕的框选浮层。
+    def _show_screenshot_selection_overlay(self, screen, pixmap: QPixmap) -> None:
+        """创建单屏静态框选浮层并连接确认、取消信号。"""
+        if screen is None:
+            self._restore_screenshot_widgets(self._take_screenshot_visibility())
+            self._on_screenshot_analysis_failure("没有找到可框选的屏幕。")
+            return
+        overlay = ScreenshotSelectionOverlay(
+            pixmap,
+            screen.geometry(),
+            minimum_size=self._screenshot_selection_min_size(),
+        )
+        self.screenshot_selection_overlay = overlay
+        overlay.selection_confirmed.connect(
+            lambda rect, viewport_size: self._on_screenshot_region_selected(
+                pixmap,
+                rect,
+                viewport_size,
+            )
+        )
+        overlay.cancelled.connect(self._on_screenshot_selection_cancelled)
+        overlay.show()
+
+    # 将逻辑坐标选区映射到原截图，编码后等待用户输入问题。
+    def _on_screenshot_region_selected(
+        self,
+        pixmap: QPixmap,
+        selection_rect: QRect,
+        viewport_size,
+    ) -> None:
+        """完成区域裁剪并打开截图问题输入框。"""
+        try:
+            cropped = self.screenshot_capture_service.crop_pixmap(
+                pixmap,
+                selection_rect,
+                viewport_size,
+            )
+            screenshot = self.screenshot_capture_service.encode_pixmap(
+                cropped,
+                max_image_edge=self._screenshot_max_image_edge(),
+                max_image_bytes=self._screenshot_max_image_bytes(),
+            )
+        except (ScreenshotCaptureError, RuntimeError) as exc:
+            self._close_screenshot_selection_overlay()
+            self._restore_screenshot_widgets(self._take_screenshot_visibility())
+            self._on_screenshot_analysis_failure(str(exc))
+            return
+
+        self._close_screenshot_selection_overlay()
+        self._restore_screenshot_widgets(self._take_screenshot_visibility())
+        self._pending_screenshot = screenshot
+        self.chat_input.clear_text()
+        self.chat_input.set_always_on_top(self.config_service.get_bool("ui.always_on_top", True))
+        self.chat_input.show_near(
+            self.geometry(),
+            placeholder_text="想问这张截图什么？",
+            max_length=self._screenshot_question_max_chars(),
+        )
+        self.sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)
+        self._waiting_timer.start(30_000)
+
+    # 取消框选时恢复原界面且不上传或落盘。
+    def _on_screenshot_selection_cancelled(self) -> None:
+        """结束框选并释放冻结截图。"""
+        self.screenshot_selection_overlay = None
+        self._restore_screenshot_widgets(self._take_screenshot_visibility())
+        self._settle_after_user_interaction()
+
+    # 关闭并释放当前框选浮层引用。
+    def _close_screenshot_selection_overlay(self) -> None:
+        """关闭框选窗口，成功路径不会触发取消回调。"""
+        overlay = self.screenshot_selection_overlay
+        self.screenshot_selection_overlay = None
+        if overlay is not None:
+            overlay.close()
+
+    # 取出并清空截图前窗口可见状态，确保只恢复一次。
+    def _take_screenshot_visibility(self) -> list[tuple[QWidget, bool]]:
+        """返回截图前可见状态并清空内部引用。"""
+        visibility = self._screenshot_visibility
+        self._screenshot_visibility = []
+        return visibility
+
+    # 恢复截图前可见的桌宠窗口，不改变原本隐藏的窗口状态。
+    def _restore_screenshot_widgets(self, visibility: list[tuple[QWidget, bool]]) -> None:
+        """恢复截图前记录的可见窗口。"""
+        if self._closing_or_closed():
+            return
+        for widget, was_visible in visibility:
+            if was_visible:
+                widget.show()
+        self.raise_()
+        self._sync_floating_widgets()
+
+    # 清理框选、等待提问和截图前窗口状态，可选是否恢复界面。
+    def _clear_screenshot_interaction(self, *, restore_widgets: bool) -> None:
+        """释放所有未进入后台请求的截图对象和浮层。"""
+        overlay = self.screenshot_selection_overlay
+        self.screenshot_selection_overlay = None
+        if overlay is not None:
+            try:
+                overlay.cancelled.disconnect(self._on_screenshot_selection_cancelled)
+            except (RuntimeError, TypeError):
+                pass
+            overlay.close()
+        self._pending_screenshot = None
+        self.chat_input.clear_text()
+        self._waiting_timer.stop()
+        visibility = self._take_screenshot_visibility()
+        if restore_widgets:
+            self._restore_screenshot_widgets(visibility)
 
     # 接收提醒控制器的到期事件，并将提醒按顺序加入可回复展示队列。
     def _handle_due_reminder(self, reminder: dict[str, str]) -> None:
@@ -1359,7 +1663,13 @@ class DesktopPetWindow(QWidget):
             self._active_reminder_reply_id = reminder_id
             self.reply_bubble.hide()
             self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
-            self._display_message(f"提醒你一下：{title}", 8000, "reminder")
+            reminder_text = f"提醒你一下：{title}"
+            self.chat_store_remind.append_message(
+                "assistant",
+                reminder_text,
+                {"operation": "reminder_due", "reminder_id": reminder_id},
+            )
+            self._display_message(reminder_text, 8000, "reminder")
             always_on_top = self.config_service.get_bool("ui.always_on_top", True)
             self.reminder_ack_bubble.set_always_on_top(always_on_top)
             self.reminder_snooze_bubble.set_always_on_top(always_on_top)
@@ -1386,7 +1696,14 @@ class DesktopPetWindow(QWidget):
             self._show_next_reminder_reply()
             return
         self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
-        self._display_message(f"好的，已完成提醒：{reminder['title']}", 3600, "reminder")
+        confirmation = f"好的，已完成提醒：{reminder['title']}"
+        self._record_remind_exchange(
+            "好的，我知道了",
+            confirmation,
+            operation="reminder_acknowledged",
+            reminder_id=reminder_id,
+        )
+        self._display_message(confirmation, 3600, "reminder")
         QTimer.singleShot(900, self._show_next_reminder_reply)
 
     # 将当前展示的提醒延后指定分钟数，并在完成后继续展示队列中的下一条。
@@ -1402,7 +1719,14 @@ class DesktopPetWindow(QWidget):
             self._show_next_reminder_reply()
             return
         self.sprite_player.set_action("running", fallback_action="idle", force_single_cycle=True)
-        self._display_message(f"好，{minutes} 分钟后再提醒你：{reminder['title']}", 4200, "reminder")
+        confirmation = f"好，{minutes} 分钟后再提醒你：{reminder['title']}"
+        self._record_remind_exchange(
+            f"{minutes}分钟后再提醒我",
+            confirmation,
+            operation="reminder_snoozed",
+            reminder_id=reminder_id,
+        )
+        self._display_message(confirmation, 4200, "reminder")
         QTimer.singleShot(900, self._show_next_reminder_reply)
 
     # 在快捷回复气泡超时后隐藏控件，提醒仍维持 awaiting_ack 等待重提示。
@@ -1516,40 +1840,22 @@ class DesktopPetWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
-    # 清空正式与非正式聊天历史及对应摘要数据。
+    # 清空正式与非正式原始聊天历史，保留已归档摘要。
     def _clear_chat_history(self) -> None:
-        """清空正式与非正式聊天历史及对应摘要数据。"""
-        default_summary = {
-            "summary": "",
-            "covered_message_count": 0,
-            "highlights": [],
-            "last_updated": "",
-        }
-        for store, summary_path in [
-            (self.chat_store_formal, self.summary_formal_path),
-            (self.chat_store_informal, self.summary_informal_path),
-        ]:
-            store.clear_history()
-            save_json(summary_path, default_summary)
-        self._display_message("我会用心记住你说过的话哦", 3500, "system")
+        """清空正式与非正式原始聊天历史，保留已归档摘要。"""
+        self._start_conversation_maintenance(
+            ["formal", "informal"], "manual_clear", force=True
+        )
 
     # 清空非正式聊天历史；若配置开启则在清空前强制总结。
     def _clear_informal_chat_history(self) -> None:
         """清空非正式聊天历史；若配置开启则在清空前强制总结。"""
-        self._start_clear_history_worker(
-            "informal",
-            self.summarizer_informal,
-            self.chat_store_informal,
-        )
+        self._start_conversation_maintenance(["informal"], "manual_clear", force=True)
 
     # 清空正式问答聊天历史；若配置开启则在清空前强制总结。
     def _clear_formal_chat_history(self) -> None:
         """清空正式问答聊天历史；若配置开启则在清空前强制总结。"""
-        self._start_clear_history_worker(
-            "formal",
-            self.summarizer_formal,
-            self.chat_store_formal,
-        )
+        self._start_conversation_maintenance(["formal"], "manual_clear", force=True)
 
     # 创建聊天历史清理后台任务并注册生命周期回调。
     def _start_clear_history_worker(
@@ -1625,6 +1931,7 @@ class DesktopPetWindow(QWidget):
         self._start_mem0_initialization(close_existing=True)
         self.summarizer_formal.user_id = self._memory_user_id()
         self.summarizer_informal.user_id = self._memory_user_id()
+        self.summarizer_clipboard.user_id = self._memory_user_id()
         self.sprite_player.set_scale(self._ui_scale())
         self.sprite_player.load()
         self._setup_window()
@@ -1639,6 +1946,16 @@ class DesktopPetWindow(QWidget):
     # 在宠物附近打开输入框；若有主动气泡则先关闭。
     def _open_chat_input(self) -> None:
         """在宠物附近打开输入框；若有主动气泡则先关闭。"""
+        if self._pending_screenshot is not None:
+            self.chat_input.set_always_on_top(
+                self.config_service.get_bool("ui.always_on_top", True)
+            )
+            self.chat_input.show_near(
+                self.geometry(),
+                placeholder_text="想问这张截图什么？",
+                max_length=self._screenshot_question_max_chars(),
+            )
+            return
         if self.bubble.source == "proactive":
             self.bubble.hide()
         if self._chat_in_progress():
@@ -1655,6 +1972,33 @@ class DesktopPetWindow(QWidget):
 
     _poetry_keywords = {"诗", "诗歌", "写诗", "念诗", "吟诗", "背诗", "来首", "作诗", "赋诗"}
     _remind_command_pattern = re.compile(r"^/remind\s+(\d+)\s+(.+?)\s*$", re.IGNORECASE)
+
+    # 根据是否存在待处理截图，把输入路由到截图问答或普通聊天。
+    def _handle_chat_input_message(self, message: str) -> None:
+        """统一处理聊天输入框提交，避免截图问题进入普通聊天历史。"""
+        screenshot = self._pending_screenshot
+        if screenshot is None:
+            self._handle_user_message(message)
+            return
+        self._pending_screenshot = None
+        self._waiting_timer.stop()
+        self.sprite_player.set_action("review", fallback_action="idle", force_single_cycle=True)
+        self._display_message("我来看看你框选的内容。", 2800, "system")
+        self._start_screenshot_analysis_worker(
+            screenshot.image_bytes,
+            screenshot.mime_type,
+            question=message,
+        )
+
+    # 输入框被关闭或空提交时取消尚未上传的截图问题。
+    def _handle_chat_input_cancelled(self) -> None:
+        """释放待处理截图；普通聊天输入取消不执行额外操作。"""
+        if self._pending_screenshot is None:
+            return
+        self._pending_screenshot = None
+        self.chat_input.clear_text()
+        self._waiting_timer.stop()
+        self._settle_after_user_interaction()
 
     # 处理用户提交的消息，并决定走占位回复还是 API 回复。
     def _handle_user_message(self, message: str) -> None:
@@ -1715,7 +2059,12 @@ class DesktopPetWindow(QWidget):
         if minutes <= 0:
             self._display_message("提醒分钟数需要大于 0。", 3200, "system")
             return
-        self._create_reminder_after_minutes(match.group(2), minutes, "chat_command")
+        self._create_reminder_after_minutes(
+            match.group(2),
+            minutes,
+            "chat_command",
+            history_request=message.strip(),
+        )
 
     # 检查用户消息是否包含念诗/写诗相关的关键词。
     def _is_poetry_request(self, message: str) -> bool:
@@ -1855,6 +2204,50 @@ class DesktopPetWindow(QWidget):
             return
         self.clipboard_thread.start()
 
+    # 创建独立后台线程上传并解析内存截图。
+    def _start_screenshot_analysis_worker(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+        *,
+        question: str = "",
+    ) -> None:
+        """创建截图解析任务，不让网络请求阻塞 Qt 主线程。"""
+        if self.background_tasks.is_registered("screenshot_analysis"):
+            self._display_message("我正在解析上一张截图，请稍等一下。", 3200, "system")
+            return
+
+        self.screenshot_thread = QThread(self)
+        self.screenshot_worker = ScreenshotAnalysisWorker(
+            image_bytes,
+            mime_type,
+            self.deepseek_client,
+            question=question,
+            detail=self._screenshot_detail(),
+            max_output_tokens=self._screenshot_max_output_tokens(),
+        )
+        self.screenshot_worker.moveToThread(self.screenshot_thread)
+        self.screenshot_thread.started.connect(self.screenshot_worker.run)
+        self.screenshot_worker.finished.connect(self._on_screenshot_analysis_success)
+        self.screenshot_worker.failed.connect(self._on_screenshot_analysis_failure)
+        self.screenshot_worker.finished.connect(self.screenshot_thread.quit)
+        self.screenshot_worker.failed.connect(self.screenshot_thread.quit)
+        self.screenshot_thread.finished.connect(self._cleanup_screenshot_analysis_thread)
+        if not self._register_background_task(
+            "screenshot_analysis",
+            self.screenshot_thread,
+            self.screenshot_worker,
+            self._clear_screenshot_analysis_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.screenshot_thread,
+                self.screenshot_worker,
+                self._clear_screenshot_analysis_task_refs,
+            )
+            self._on_screenshot_analysis_failure("截图解析任务暂时无法启动。")
+            return
+        self.screenshot_thread.start()
+
     # 在线程结束后清理工作对象和线程对象。
     def _cleanup_chat_thread(self) -> None:
         """在线程结束后清理工作对象和线程对象。"""
@@ -1867,10 +2260,37 @@ class DesktopPetWindow(QWidget):
         self.background_tasks.unregister("clear_history", delete_later=True)
         self._maybe_close_after_workers_finished()
 
+    # 清理统一对话维护线程，并在需要时合并执行排队请求。
+    def _cleanup_conversation_maintenance_thread(self) -> None:
+        """清理统一对话维护线程，并在需要时合并执行排队请求。"""
+        queued_modes = sorted(self._queued_maintenance_modes)
+        queued_force = self._queued_maintenance_force
+        queued_source = self._queued_maintenance_source
+        self._queued_maintenance_modes.clear()
+        self._queued_maintenance_force = False
+        self._queued_maintenance_source = "round_threshold"
+        self.background_tasks.unregister("conversation_maintenance", delete_later=True)
+        if queued_modes and not self._closing_or_closed():
+            QTimer.singleShot(
+                0,
+                lambda: self._start_conversation_maintenance(
+                    queued_modes,
+                    queued_source,
+                    force=queued_force,
+                ),
+            )
+        self._maybe_close_after_workers_finished()
+
     # 清理剪贴板辅助后台线程。
     def _cleanup_clipboard_assistant_thread(self) -> None:
         """清理剪贴板辅助后台线程。"""
         self.background_tasks.unregister("clipboard_assistant", delete_later=True)
+        self._maybe_close_after_workers_finished()
+
+    # 清理截图解析后台线程。
+    def _cleanup_screenshot_analysis_thread(self) -> None:
+        """注销截图解析线程并继续可能被延迟的关闭流程。"""
+        self.background_tasks.unregister("screenshot_analysis", delete_later=True)
         self._maybe_close_after_workers_finished()
 
     # 清空聊天线程和 worker 引用，避免回调重复清理。
@@ -1885,11 +2305,23 @@ class DesktopPetWindow(QWidget):
         self.clipboard_worker = None
         self.clipboard_thread = None
 
+    # 清空截图解析线程和 worker 引用。
+    def _clear_screenshot_analysis_task_refs(self) -> None:
+        """释放截图解析对象引用。"""
+        self.screenshot_worker = None
+        self.screenshot_thread = None
+
     # 清空历史清理线程和 worker 引用。
     def _clear_history_task_refs(self) -> None:
         """清空历史清理线程和 worker 引用。"""
         self.clear_history_worker = None
         self.clear_history_thread = None
+
+    # 清空统一对话维护线程和 worker 引用。
+    def _clear_conversation_maintenance_task_refs(self) -> None:
+        """清空统一对话维护线程和 worker 引用。"""
+        self.conversation_maintenance_worker = None
+        self.conversation_maintenance_thread = None
 
     # 清空 Mem0 初始化线程和 worker 引用。
     def _clear_mem0_init_task_refs(self) -> None:
@@ -2244,11 +2676,17 @@ class DesktopPetWindow(QWidget):
         self._maybe_close_after_workers_finished()
 
     # 处理模型成功返回后的界面更新与消息落盘。
-    def _on_chat_success(self, reply: str) -> None:
+    def _on_chat_success(self, result: object) -> None:
         """处理模型成功返回后的界面更新与消息落盘。"""
         if self._closing_or_closed():
             return
-        completion = self.chat_flow_controller.complete_success(reply)
+        if isinstance(result, ChatWorkerResult):
+            reply = result.reply
+            move_to_remind = result.created_reminders
+        else:
+            reply = str(result)
+            move_to_remind = False
+        completion = self.chat_flow_controller.complete_success(reply, move_to_remind)
         self._sync_chat_flow_state()
         if not self._active_reminder_reply_id:
             self.sprite_player.set_action("idle")
@@ -2292,6 +2730,30 @@ class DesktopPetWindow(QWidget):
             self.sprite_player.set_action("failed", fallback_action="idle", force_single_cycle=True)
         self._display_message(error_message, 10000, "assistant")
 
+    # 展示截图解析结果，并只把模型文字写入独立 screenshot 历史。
+    def _on_screenshot_analysis_success(self, reply: str) -> None:
+        """展示并保存截图解析文字，不保存截图或请求载荷。"""
+        if self._closing_or_closed():
+            return
+        cleaned_reply = reply.strip() or "没有得到可显示的截图解析结果。"
+        self.chat_store_screenshot.append_message("assistant", cleaned_reply)
+        if not self._active_reminder_reply_id:
+            self.sprite_player.set_action("idle")
+        self._display_message(
+            cleaned_reply,
+            self._assistant_reply_bubble_duration_ms(),
+            "assistant",
+        )
+
+    # 展示截图获取或模型解析失败提示，失败内容不写入历史。
+    def _on_screenshot_analysis_failure(self, error_message: str) -> None:
+        """显示截图解析失败状态，不保存失败记录。"""
+        if self._closing_or_closed():
+            return
+        if not self._active_reminder_reply_id:
+            self.sprite_player.set_action("failed", fallback_action="idle", force_single_cycle=True)
+        self._display_message(error_message, 10000, "assistant")
+
     # 处理 API 主动说话测试成功后的界面更新。
     def _on_proactive_api_success(self, reply: str) -> None:
         """处理 API 主动说话测试成功后的界面更新。"""
@@ -2309,35 +2771,121 @@ class DesktopPetWindow(QWidget):
         self.sprite_player.set_action("failed")
         self._display_message(error_message, 12000, "assistant")
 
-    # 在后台线程中尝试触发对应模式的聊天摘要。
-    def _maybe_summarize(self, formal_qa_mode: bool = False) -> None:
-        """在后台线程中尝试触发对应模式的聊天摘要。"""
-        try:
-            trigger_rounds = self.config_service.get_int("api.summary_trigger_rounds", 12)
-            if formal_qa_mode:
-                self.summarizer_formal.maybe_summarize(trigger_rounds)
-            else:
-                self.summarizer_informal.maybe_summarize(trigger_rounds)
-        except Exception:  # noqa: BLE001
-            logger.exception("Background summarization failed")
-
-    # 在线程中执行摘要压缩任务，避免阻塞界面。
+    # 为普通聊天追加对应模式的后台维护请求。
     def _start_summary_task(self, formal_qa_mode: bool) -> None:
-        """在线程中执行摘要压缩任务，避免阻塞界面。"""
+        """为普通聊天追加对应模式的后台维护请求。"""
         mode = "formal" if formal_qa_mode else "informal"
-        if mode in self._summaries_running or self._closing_or_closed():
+        self._start_conversation_maintenance([mode], "round_threshold")
+
+    # 返回参与摘要与记忆维护的三种模式摘要器。
+    def _conversation_summarizers(self) -> dict[str, Summarizer]:
+        """返回参与摘要与记忆维护的三种模式摘要器。"""
+        return {
+            "formal": self.summarizer_formal,
+            "informal": self.summarizer_informal,
+            "clipboard": self.summarizer_clipboard,
+        }
+
+    # 初始化启动补跑检查，并安排下一次本地凌晨一点的维护任务。
+    def _initialize_conversation_maintenance(self) -> None:
+        """初始化启动补跑检查，并安排下一次本地凌晨一点的维护任务。"""
+        if self._closing_or_closed():
             return
-        self._summaries_running.add(mode)
+        self._schedule_next_daily_conversation_maintenance()
+        now = datetime.now()
+        state = (
+            load_json(self.conversation_maintenance_state_path, {"last_daily_summary_date": ""})
+            if self.conversation_maintenance_state_path.exists()
+            else {"last_daily_summary_date": ""}
+        )
+        last_date = str(state.get("last_daily_summary_date", "")) if isinstance(state, dict) else ""
+        has_history = any(store.all_messages() for store in self._conversation_summarizers().values())
+        if should_run_daily_catchup(now, last_date, has_history):
+            self._start_conversation_maintenance(
+                list(self._conversation_summarizers()), "daily", force=True
+            )
+            return
+        self._start_conversation_maintenance([], "startup")
 
-        # 整理run 摘要，并把结果交给调用方或写回状态。
-        def run_summary() -> None:
-            """整理run 摘要，并把结果交给调用方或写回状态。"""
-            try:
-                self._maybe_summarize(formal_qa_mode)
-            finally:
-                self._summaries_running.discard(mode)
+    # 设置下一次本机凌晨一点触发的单次定时器。
+    def _schedule_next_daily_conversation_maintenance(self) -> None:
+        """设置下一次本机凌晨一点触发的单次定时器。"""
+        now = datetime.now()
+        target = now.replace(hour=1, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        self._daily_summary_timer.start(max(1, int((target - now).total_seconds() * 1000)))
 
-        threading.Thread(target=run_summary, daemon=True).start()
+    # 执行每日强制摘要，并继续安排下一天的任务。
+    def _run_daily_conversation_maintenance(self) -> None:
+        """执行每日强制摘要，并继续安排下一天的任务。"""
+        self._schedule_next_daily_conversation_maintenance()
+        self._start_conversation_maintenance(
+            list(self._conversation_summarizers()), "daily", force=True
+        )
+
+    # 启动唯一的后台对话维护线程；运行中请求会合并为下一轮。
+    def _start_conversation_maintenance(
+        self,
+        modes: list[str],
+        trigger_source: str,
+        force: bool = False,
+    ) -> None:
+        """启动唯一的后台对话维护线程。"""
+        if self._closing_or_closed():
+            return
+        valid_modes = {mode for mode in modes if mode in self._conversation_summarizers()}
+        if self.background_tasks.is_registered("conversation_maintenance"):
+            self._queued_maintenance_modes.update(valid_modes)
+            if force:
+                self._queued_maintenance_force = True
+                self._queued_maintenance_source = trigger_source
+            return
+
+        self._queued_maintenance_force = False
+        self._queued_maintenance_source = "round_threshold"
+        self.conversation_maintenance_thread = QThread(self)
+        self.conversation_maintenance_worker = ConversationMaintenanceWorker(
+            self._conversation_summarizers(),
+            self.memory_summarizer,
+            self.conversation_maintenance_state_path,
+            self.config_service.get_int("api.summary_trigger_rounds", 12),
+            sorted(valid_modes),
+            trigger_source,
+            force=force,
+            reconcile_memory=True,
+        )
+        self.conversation_maintenance_worker.moveToThread(self.conversation_maintenance_thread)
+        self.conversation_maintenance_thread.started.connect(self.conversation_maintenance_worker.run)
+        self.conversation_maintenance_worker.finished.connect(self._on_conversation_maintenance_success)
+        self.conversation_maintenance_worker.failed.connect(self._on_conversation_maintenance_failure)
+        self.conversation_maintenance_worker.finished.connect(self.conversation_maintenance_thread.quit)
+        self.conversation_maintenance_worker.failed.connect(self.conversation_maintenance_thread.quit)
+        self.conversation_maintenance_thread.finished.connect(self._cleanup_conversation_maintenance_thread)
+        if not self._register_background_task(
+            "conversation_maintenance",
+            self.conversation_maintenance_thread,
+            self.conversation_maintenance_worker,
+            self._clear_conversation_maintenance_task_refs,
+        ):
+            self._discard_unregistered_task(
+                self.conversation_maintenance_thread,
+                self.conversation_maintenance_worker,
+                self._clear_conversation_maintenance_task_refs,
+            )
+            return
+        self.conversation_maintenance_thread.start()
+
+    # 记录后台维护完成；该路径不显示气泡、不影响当前人物动作。
+    def _on_conversation_maintenance_success(self, result: object) -> None:
+        """记录后台维护完成。"""
+        if isinstance(result, dict) and result.get("summarized"):
+            logger.info("Conversation maintenance completed: %s", result)
+
+    # 记录后台维护失败；下一次触发可安全重试。
+    def _on_conversation_maintenance_failure(self, error_message: str) -> None:
+        """记录后台维护失败。"""
+        logger.warning("Conversation maintenance failed: %s", error_message)
 
     # 响应主动行为控制器的说话请求。
     def _handle_behavior_speak(self, text: str, duration_ms: int, action_name: str) -> None:
@@ -2798,6 +3346,9 @@ class DesktopPetWindow(QWidget):
         return (
             self._chat_in_progress()
             or self.background_tasks.is_running("clipboard_assistant")
+            or self.background_tasks.is_running("screenshot_analysis")
+            or self.screenshot_selection_overlay is not None
+            or self._pending_screenshot is not None
             or bool(self._active_reminder_reply_id or self._reminder_reply_queue)
             or self.chat_input.isVisible()
         )
@@ -2921,6 +3472,50 @@ class DesktopPetWindow(QWidget):
     def _clipboard_max_chars(self) -> int:
         """读取剪贴板文本最大处理字符数，异常配置回退到 4000。"""
         return _positive_int(self.config_service.get("clipboard.max_chars", 4000), 4000)
+
+    # 判断截图解析功能是否启用，缺失配置时默认启用。
+    def _screenshot_analysis_enabled(self) -> bool:
+        """读取截图解析功能开关。"""
+        return self.config_service.get_bool("screenshot.enabled", True)
+
+    # 读取隐藏窗口后等待桌面合成刷新的毫秒数。
+    def _screenshot_capture_delay_ms(self) -> int:
+        """返回截图前等待时间，异常配置回退到 180 毫秒。"""
+        return max(0, self.config_service.get_int("screenshot.capture_delay_ms", 180))
+
+    # 读取截图缩放后的最大边长。
+    def _screenshot_max_image_edge(self) -> int:
+        """返回截图最大边长，异常配置回退到 2048。"""
+        return _positive_int(self.config_service.get("screenshot.max_image_edge", 2048), 2048)
+
+    # 读取单张截图允许上传的最大字节数。
+    def _screenshot_max_image_bytes(self) -> int:
+        """返回截图最大字节数，异常配置回退到 6 MiB。"""
+        return _positive_int(
+            self.config_service.get("screenshot.max_image_bytes", 6 * 1024 * 1024),
+            6 * 1024 * 1024,
+        )
+
+    # 读取视觉模型的图片细节等级。
+    def _screenshot_detail(self) -> str:
+        """返回规范化的视觉图片细节等级。"""
+        detail = self.config_service.get_str("screenshot.detail", "auto").strip().lower()
+        return detail if detail in {"low", "high", "original", "auto"} else "auto"
+
+    # 读取截图解析回复的最大输出 token 数。
+    def _screenshot_max_output_tokens(self) -> int:
+        """返回截图解析输出上限，异常配置回退到 80。"""
+        return _positive_int(self.config_service.get("screenshot.max_output_tokens", 80), 80)
+
+    # 读取框选区域允许确认的最小逻辑像素边长。
+    def _screenshot_selection_min_size(self) -> int:
+        """返回框选最小边长，异常配置回退到 12。"""
+        return _positive_int(self.config_service.get("screenshot.selection_min_size", 12), 12)
+
+    # 读取截图问题最大输入字符数。
+    def _screenshot_question_max_chars(self) -> int:
+        """返回截图问题字符上限，异常配置回退到 500。"""
+        return _positive_int(self.config_service.get("screenshot.question_max_chars", 500), 500)
 
     # 返回当前配置的聊天模型提供商。
     def _api_provider(self) -> str:

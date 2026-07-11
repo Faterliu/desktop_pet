@@ -97,9 +97,9 @@ class FakeMem0MemoryService:
 
 
 class SummarizerMemoryUpdateTests(unittest.TestCase):
-    # 验证模型未返回记忆更新时会使用本地抽取并写入 Mem0。
-    def test_empty_model_memory_updates_fall_back_to_local_extraction_and_mem0_write(self) -> None:
-        """验证模型未返回记忆更新时会使用本地抽取并写入 Mem0。"""
+    # 验证单次对话摘要不再直接写入记忆或 Mem0。
+    def test_single_summary_does_not_write_memory_or_mem0(self) -> None:
+        """验证单次对话摘要不再直接写入记忆或 Mem0。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_summarizer_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -132,13 +132,11 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
 
         summarizer.maybe_summarize(trigger_rounds=1, force=True)
 
-        self.assertTrue(memory_store.merged)
-        merged_text = json.dumps(memory_store.merged[-1], ensure_ascii=False)
-        self.assertIn("我喜欢Python项目", merged_text)
-        self.assertTrue(mem0_service.added_texts)
+        self.assertEqual(memory_store.merged, [])
+        self.assertEqual(mem0_service.added_texts, [])
 
-    # 验证正式问答摘要缺少记忆更新时会回退为学习主题。
-    def test_formal_question_with_empty_model_memory_updates_falls_back_to_learning_topic(
+    # 验证正式问答单次摘要不再触发记忆更新。
+    def test_formal_single_summary_does_not_update_memory(
         self,
     ) -> None:
         """验证正式问答摘要缺少记忆更新时会回退为学习主题。"""
@@ -172,13 +170,11 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
 
         summarizer.maybe_summarize(trigger_rounds=1, force=True)
 
-        self.assertTrue(memory_store.merged)
-        merged_text = json.dumps(memory_store.merged[-1], ensure_ascii=False)
-        self.assertIn("conda环境和Python虚拟环境", merged_text)
+        self.assertEqual(memory_store.merged, [])
 
-    # 验证question keywords fall back to learning topics场景下的预期结果。
-    def test_question_keywords_fall_back_to_learning_topics(self) -> None:
-        """验证question keywords fall back to learning topics场景下的预期结果。"""
+    # 验证关键词不会绕过批次机制直接写入记忆。
+    def test_question_keywords_do_not_bypass_memory_batch(self) -> None:
+        """验证关键词不会绕过批次机制直接写入记忆。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_question_keyword_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -211,14 +207,11 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
 
         summarizer.maybe_summarize(trigger_rounds=1, force=True)
 
-        self.assertTrue(memory_store.merged)
-        topics = memory_store.merged[-1]["work_study"]["current_learning_topics"]  # type: ignore[index]
-        self.assertIn("请问PySide6透明窗口怎么做？", topics)
-        self.assertIn("如何实现桌宠启动时自动问候？", topics)
+        self.assertEqual(memory_store.merged, [])
 
-    # 验证informal 摘要 模式 does not use 正式问答 question 兜底场景下的预期结果。
-    def test_informal_summary_mode_does_not_use_formal_question_fallback(self) -> None:
-        """验证informal 摘要 模式 does not use 正式问答 question 兜底场景下的预期结果。"""
+    # 验证非正式单次摘要不再直接更新记忆。
+    def test_informal_single_summary_does_not_update_memory(self) -> None:
+        """验证非正式单次摘要不再直接更新记忆。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_informal_summary_mode"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -249,13 +242,11 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
 
         summarizer.maybe_summarize(trigger_rounds=1, force=True)
 
-        self.assertTrue(memory_store.merged)
-        topics = memory_store.merged[-1]["work_study"]["current_learning_topics"]  # type: ignore[index]
-        self.assertEqual([], topics)
+        self.assertEqual(memory_store.merged, [])
 
-    # 验证用户 interaction preference writes relationship 记忆场景下的预期结果。
-    def test_user_interaction_preference_writes_relationship_memory(self) -> None:
-        """验证用户 interaction preference writes relationship 记忆场景下的预期结果。"""
+    # 验证互动偏好不会绕过三摘要批次直接写入关系记忆。
+    def test_interaction_preference_does_not_bypass_memory_batch(self) -> None:
+        """验证互动偏好不会绕过三摘要批次直接写入关系记忆。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_relationship_memory_updates"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -289,22 +280,11 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
 
         summarizer.maybe_summarize(trigger_rounds=1, force=True)
 
-        self.assertTrue(memory_store.merged)
-        communication_style = memory_store.merged[-1]["relationship_memory"][
-            "communication_style"
-        ]  # type: ignore[index]
-        self.assertEqual(
-            communication_style["confirmation_preference"],
-            "avoid_unnecessary_confirmation",
-        )
-        self.assertEqual(
-            communication_style["preferred_response_style"],
-            "direct_actionable",
-        )
+        self.assertEqual(memory_store.merged, [])
 
-    # 验证助手 claim does not write relationship 记忆场景下的预期结果。
-    def test_assistant_claim_does_not_write_relationship_memory(self) -> None:
-        """验证助手 claim does not write relationship 记忆场景下的预期结果。"""
+    # 验证助手内容不会绕过批次机制直接写入关系记忆。
+    def test_assistant_content_does_not_bypass_memory_batch(self) -> None:
+        """验证助手内容不会绕过批次机制直接写入关系记忆。"""
         temp_dir = DESKTOP_PET_ROOT / "tmp_work" / "test_no_assistant_relationship_memory"
         temp_dir.mkdir(parents=True, exist_ok=True)
         summary_path = temp_dir / "conversation_summary_informal.json"
@@ -335,11 +315,7 @@ class SummarizerMemoryUpdateTests(unittest.TestCase):
 
         summarizer.maybe_summarize(trigger_rounds=1, force=True)
 
-        self.assertTrue(memory_store.merged)
-        relationship_memory = memory_store.merged[-1].get("relationship_memory", {})
-        relationship_text = json.dumps(relationship_memory, ensure_ascii=False)
-        self.assertNotIn("direct_actionable", relationship_text)
-        self.assertNotIn("high", relationship_text)
+        self.assertEqual(memory_store.merged, [])
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from typing import Any
 from ai.context_budget import clip_text, read_context_budget
 from character.persona_state import PersonaState, read_persona_state
 from storage.json_store import load_json, load_json_prefer_primary
-from storage.memory_store import DEFAULT_MEMORY, normalize_memory_schema
+from storage.memory_store import DEFAULT_MEMORY, memory_descriptions, normalize_memory_schema
 
 
 DEFAULT_CHARACTER = {
@@ -109,7 +109,7 @@ class PromptBuilder:
             budget["max_mem0_chars"],
         )
         summary_text = self._fit_section(
-            summary.get("summary", "").strip(),
+            self._format_summary_archive(summary),
             budget["max_summary_chars"],
         )
         user_message_limit = (
@@ -242,6 +242,24 @@ class PromptBuilder:
             return {}
         fallback = self.fallback_config_path or self.config_path
         return load_json_prefer_primary(self.config_path, fallback, {})
+
+    # 从追加式摘要归档中按时间倒序组合可用于提示词的摘要文本。
+    @staticmethod
+    def _format_summary_archive(summary: Any) -> str:
+        """从追加式摘要归档中按时间倒序组合可用于提示词的摘要文本。"""
+        if not isinstance(summary, dict):
+            return ""
+        entries = summary.get("summaries", [])
+        if not isinstance(entries, list):
+            return str(summary.get("summary", "")).strip()
+        lines: list[str] = []
+        for item in reversed(entries):
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("summary", "")).strip()
+            if text:
+                lines.append(text)
+        return "\n".join(lines)
 
     # 根据 messages、max_messages、max_message_chars 整理trim conversation 消息，并把结果交给调用方或写回状态。
     def _trim_conversation_messages(
@@ -474,15 +492,25 @@ class PromptBuilder:
         fragments: list[str] = []
         user_profile = memory.get("user_profile", {})
         work_study = memory.get("work_study", {})
-        self._append_memory_items(fragments, "用户偏好", user_profile.get("preferences", []))
         self._append_memory_items(
-            fragments, "个人备注", user_profile.get("important_personal_notes", [])
+            fragments, "用户偏好", memory_descriptions(memory, "user_profile.preferences")
         )
         self._append_memory_items(
-            fragments, "近期学习", work_study.get("current_learning_topics", [])
+            fragments,
+            "个人备注",
+            memory_descriptions(memory, "user_profile.important_personal_notes"),
         )
-        self._append_memory_items(fragments, "当前项目", work_study.get("current_projects", []))
-        self._append_memory_items(fragments, "有用上下文", work_study.get("useful_context", []))
+        self._append_memory_items(
+            fragments,
+            "近期学习",
+            memory_descriptions(memory, "work_study.current_learning_topics"),
+        )
+        self._append_memory_items(
+            fragments, "当前项目", memory_descriptions(memory, "work_study.current_projects")
+        )
+        self._append_memory_items(
+            fragments, "有用上下文", memory_descriptions(memory, "work_study.useful_context")
+        )
         self._append_legacy_preferences(fragments, memory.get("preferences"))
         return "\n".join(f"- {item}" for item in fragments[:8])
 
@@ -500,48 +528,105 @@ class PromptBuilder:
 
         if isinstance(user_profile, dict):
             self._append_memory_items(
-                fragments, "历史沟通风格", user_profile.get("communication_style", [])
+                fragments,
+                "历史沟通风格",
+                memory_descriptions(memory, "user_profile.communication_style"),
             )
         if isinstance(communication, dict):
             self._append_scalar(
-                fragments, "偏好回复方式", communication.get("preferred_response_style")
+                fragments,
+                "偏好回复方式",
+                memory_descriptions(
+                    memory, "relationship_memory.communication_style.preferred_response_style"
+                ),
             )
-            self._append_scalar(fragments, "详细程度", communication.get("detail_level"))
             self._append_scalar(
-                fragments, "确认偏好", communication.get("confirmation_preference")
+                fragments,
+                "详细程度",
+                memory_descriptions(memory, "relationship_memory.communication_style.detail_level"),
             )
-            self._append_scalar(fragments, "语气偏好", communication.get("tone_preference"))
-            self._append_memory_items(fragments, "避免表达风格", communication.get("avoid_styles", []))
+            self._append_scalar(
+                fragments,
+                "确认偏好",
+                memory_descriptions(
+                    memory, "relationship_memory.communication_style.confirmation_preference"
+                ),
+            )
+            self._append_scalar(
+                fragments,
+                "语气偏好",
+                memory_descriptions(memory, "relationship_memory.communication_style.tone_preference"),
+            )
+            self._append_memory_items(
+                fragments,
+                "避免表达风格",
+                memory_descriptions(memory, "relationship_memory.communication_style.avoid_styles"),
+            )
 
         if not formal_qa_mode:
             if isinstance(companionship, dict):
                 self._append_scalar(
-                    fragments, "陪伴角色", companionship.get("preferred_companion_role")
+                    fragments,
+                    "陪伴角色",
+                    memory_descriptions(
+                        memory, "relationship_memory.companionship_style.preferred_companion_role"
+                    ),
                 )
                 self._append_scalar(
-                    fragments, "主动边界", companionship.get("proactive_boundary")
+                    fragments,
+                    "主动边界",
+                    memory_descriptions(
+                        memory, "relationship_memory.companionship_style.proactive_boundary"
+                    ),
                 )
                 self._append_scalar(
-                    fragments, "鼓励方式", companionship.get("encouragement_style")
+                    fragments,
+                    "鼓励方式",
+                    memory_descriptions(
+                        memory, "relationship_memory.companionship_style.encouragement_style"
+                    ),
                 )
                 self._append_scalar(
-                    fragments, "称呼偏好", companionship.get("addressing_preference")
+                    fragments,
+                    "称呼偏好",
+                    memory_descriptions(
+                        memory, "relationship_memory.companionship_style.addressing_preference"
+                    ),
                 )
                 self._append_memory_items(
-                    fragments, "避免陪伴行为", companionship.get("avoid_behaviors", [])
+                    fragments,
+                    "避免陪伴行为",
+                    memory_descriptions(
+                        memory, "relationship_memory.companionship_style.avoid_behaviors"
+                    ),
                 )
             if isinstance(interaction, dict):
-                self._append_memory_items(fragments, "近期任务关注", interaction.get("task_focus", []))
-                self._append_scalar(
-                    fragments, "近期互动模式", interaction.get("recent_interaction_mode")
+                self._append_memory_items(
+                    fragments,
+                    "近期任务关注",
+                    memory_descriptions(memory, "relationship_memory.interaction_patterns.task_focus"),
                 )
                 self._append_scalar(
-                    fragments, "打扰容忍度", interaction.get("interruption_tolerance")
+                    fragments,
+                    "近期互动模式",
+                    memory_descriptions(
+                        memory, "relationship_memory.interaction_patterns.recent_interaction_mode"
+                    ),
+                )
+                self._append_scalar(
+                    fragments,
+                    "打扰容忍度",
+                    memory_descriptions(
+                        memory, "relationship_memory.interaction_patterns.interruption_tolerance"
+                    ),
                 )
                 self._append_scalar(
                     fragments,
                     "主动问候回应",
-                    interaction.get("response_to_proactive_greetings"),
+                    memory_descriptions(
+                        memory,
+                        "relationship_memory.interaction_patterns.response_to_proactive_greetings",
+                    ),
                 )
 
         return "\n".join(f"- {item}" for item in fragments[:8])
@@ -587,6 +672,8 @@ class PromptBuilder:
     # 根据 fragments、label、value 把scalar加入当前状态或持久化记录。
     def _append_scalar(self, fragments: list[str], label: str, value: Any) -> None:
         """根据 fragments、label、value 把scalar加入当前状态或持久化记录。"""
+        if isinstance(value, list):
+            value = value[0] if value else ""
         text = self._string_value(value)
         if text:
             fragments.append(f"{label}：{text}")

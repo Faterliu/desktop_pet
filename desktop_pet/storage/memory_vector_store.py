@@ -16,6 +16,7 @@ except Exception:  # noqa: BLE001
 
 from storage.json_store import load_json, save_json
 from storage.memory_lock import MEMORY_IO_LOCK
+from storage.memory_store import MEMORY_FIELDS, memory_records, normalize_memory_schema
 from utils.logger import get_logger
 from utils.time_utils import now_iso
 
@@ -279,16 +280,10 @@ class MemoryVectorStore:
         if not duplicate_groups:
             return {"status": "completed", "merged_count": 0}
 
-        with MEMORY_IO_LOCK:
-            memory = load_json(memory_path, {})
-            merged_count = self._apply_duplicate_groups(memory, duplicate_groups)
-            if merged_count:
-                memory["last_updated"] = now_iso()
-                save_json(memory_path, memory)
-
-        if merged_count:
-            self.sync_memory(memory)
-        return {"status": "completed", "merged_count": merged_count}
+        # 结构化长期记忆只允许由三条模式摘要的模型操作更新，
+        # 向量层不再自行合并或改写 memory.json。
+        del memory_path, duplicate_groups
+        return {"status": "completed", "merged_count": 0}
 
     # 根据 items、threshold 根据相似度阈值把重复记忆划分为分组。
     def _duplicate_groups(self, items: list[dict[str, Any]], threshold: float) -> list[list[dict[str, Any]]]:
@@ -417,40 +412,29 @@ class MemoryVectorStore:
     # 根据 memory 遍历嵌套数据中的文本项，过滤空值后逐条返回。
     def _iter_memory_texts(self, memory: dict[str, Any]) -> list[MemoryTextItem]:
         """根据 memory 遍历嵌套数据中的文本项，过滤空值后逐条返回。"""
+        memory = normalize_memory_schema(memory)
         items: list[MemoryTextItem] = []
         seen: set[tuple[str, str]] = set()
         min_text_length = self._memory_vector_min_text_length()
-
-        # 根据 node、path 整理visit，并把结果交给调用方或写回状态。
-        def visit(node: Any, path: list[str]) -> None:
-            """根据 node、path 整理visit，并把结果交给调用方或写回状态。"""
-            if isinstance(node, dict):
-                for key, value in node.items():
-                    if key in {"schema_version", "last_updated"}:
-                        continue
-                    visit(value, [*path, key])
-            elif isinstance(node, list):
-                list_path = ".".join(path)
-                for value in node:
-                    if not isinstance(value, str):
-                        continue
-                    text = value.strip()
+        for field_path in MEMORY_FIELDS:
+            for record_id, record in memory_records(memory, field_path):
+                record_path = f"{field_path}.{record_id}"
+                for value in record.get("description", []):
+                    text = str(value).strip()
                     if not text or len(text) < min_text_length:
                         continue
-                    key = (list_path, text)
+                    key = (record_path, text)
                     if key in seen:
                         continue
                     seen.add(key)
                     items.append(
                         MemoryTextItem(
-                            id=self._item_id(list_path, text),
-                            path=list_path,
+                            id=self._item_id(record_path, text),
+                            path=record_path,
                             text=text,
                             order=len(items),
                         )
                     )
-
-        visit(memory, [])
         return items
 
     # 根据 memory、path 处理文件路径或 JSON 内容，保持读写结果稳定。

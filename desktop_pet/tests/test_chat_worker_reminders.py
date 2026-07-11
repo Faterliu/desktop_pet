@@ -17,7 +17,7 @@ logger_module.get_logger = logging.getLogger
 sys.modules.setdefault("utils.logger", logger_module)
 
 from ai.deepseek_client import ReminderToolCall, ToolChatResponse  # noqa: E402
-from app.desktop_pet_window import ChatWorker  # noqa: E402
+from app.desktop_pet_window import ChatWorker, ChatWorkerResult  # noqa: E402
 from app.reminder_tool import ReminderTool  # noqa: E402
 from storage.reminder_store import ReminderStore  # noqa: E402
 
@@ -112,7 +112,7 @@ class ChatWorkerReminderTests(unittest.TestCase):
             formal_qa_mode=False,
             reminder_tool=self.tool,
         )
-        replies: list[str] = []
+        replies: list[ChatWorkerResult] = []
         worker.finished.connect(replies.append)
 
         worker.run()
@@ -120,7 +120,8 @@ class ChatWorkerReminderTests(unittest.TestCase):
         self.assertEqual(client.tool_calls, 1)
         self.assertIn("本地提醒工具", prompt_builder.reminder_guidance)
         self.assertEqual(len(self.store.list_reminders("active")), 2)
-        self.assertIn("2 条提醒", replies[0])
+        self.assertIn("2 条提醒", replies[0].reply)
+        self.assertTrue(replies[0].created_reminders)
 
     # 验证未返回提醒调用时不会写入提醒存储。
     def test_worker_does_not_create_reminder_for_plain_reply(self) -> None:
@@ -134,13 +135,13 @@ class ChatWorkerReminderTests(unittest.TestCase):
             formal_qa_mode=False,
             reminder_tool=self.tool,
         )
-        replies: list[str] = []
+        replies: list[ChatWorkerResult] = []
         worker.finished.connect(replies.append)
 
         worker.run()
 
         self.assertEqual(self.store.list_reminders("active"), [])
-        self.assertEqual(replies, ["普通回答"])
+        self.assertEqual(replies, [ChatWorkerResult("普通回答")])
 
     # 验证工具校验失败时不会展示模型的错误成功确认。
     def test_worker_uses_local_failure_reply_when_tool_rejects_call(self) -> None:
@@ -160,13 +161,14 @@ class ChatWorkerReminderTests(unittest.TestCase):
             formal_qa_mode=False,
             reminder_tool=self.tool,
         )
-        replies: list[str] = []
+        replies: list[ChatWorkerResult] = []
         worker.finished.connect(replies.append)
 
         worker.run()
 
         self.assertEqual(self.store.list_reminders("active"), [])
-        self.assertIn("已经过去", replies[0])
+        self.assertIn("已经过去", replies[0].reply)
+        self.assertFalse(replies[0].created_reminders)
 
 
 if __name__ == "__main__":

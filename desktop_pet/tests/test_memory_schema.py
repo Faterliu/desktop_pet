@@ -38,8 +38,11 @@ class MemorySchemaTests(unittest.TestCase):
         memory = MemoryStore(self.memory_path).load()
 
         self.assertEqual(memory["preferences"]["likes"], ["直接的回答"])
-        self.assertEqual(memory["user_profile"]["preferences"], ["喜欢简洁"])
-        self.assertEqual(memory["memory_meta"]["schema_version"], 2)
+        self.assertEqual(
+            memory["user_profile"]["preferences"]["preferences_1"]["description"],
+            ["喜欢简洁"],
+        )
+        self.assertEqual(memory["memory_meta"]["schema_version"], 3)
         self.assertIn("relationship_memory", memory)
         self.assertIn("communication_style", memory["relationship_memory"])
         self.assertIn("companionship_style", memory["relationship_memory"])
@@ -71,12 +74,95 @@ class MemorySchemaTests(unittest.TestCase):
         )
 
         saved = load_json(self.memory_path, {})
-        self.assertEqual(saved["user_profile"]["preferences"], ["喜欢简洁"])
-        self.assertEqual(saved["work_study"]["current_projects"], ["桌宠项目"])
-        self.assertEqual(saved["memory_meta"]["schema_version"], 2)
+        self.assertEqual(
+            saved["user_profile"]["preferences"]["preferences_1"]["description"],
+            ["喜欢简洁"],
+        )
+        self.assertEqual(
+            saved["work_study"]["current_projects"]["projects_1"]["description"],
+            ["桌宠项目"],
+        )
+        self.assertEqual(saved["memory_meta"]["schema_version"], 3)
         communication_style = saved["relationship_memory"]["communication_style"]
-        self.assertEqual(communication_style["preferred_response_style"], "direct_actionable")
-        self.assertEqual(communication_style["avoid_styles"], ["机械化记忆表达"])
+        self.assertEqual(
+            communication_style["preferred_response_style"]["preferred_response_style_1"]["description"],
+            ["direct_actionable"],
+        )
+        self.assertEqual(
+            communication_style["avoid_styles"]["avoid_styles_1"]["description"],
+            ["机械化记忆表达"],
+        )
+
+    # 验证旧 data 时间字段被迁移为带时区的 timestamp。
+    def test_legacy_record_data_timestamp_is_migrated(self) -> None:
+        """验证旧 data 时间字段被迁移为带时区的 timestamp。"""
+        self.memory_path.write_text(
+            json.dumps(
+                {
+                    "work_study": {
+                        "current_learning_topics": {
+                            "topics_1": {
+                                "description": ["旧学习主题"],
+                                "data": "2026-06-23T11:29:13",
+                            }
+                        }
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        memory = MemoryStore(self.memory_path).load()
+        record = memory["work_study"]["current_learning_topics"]["topics_1"]
+
+        self.assertEqual(record["description"], ["旧学习主题"])
+        self.assertIn("+00:00", record["timestamp"])
+        self.assertNotIn("data", record)
+
+    # 验证程序分配连续编号、更新保留编号并刷新时间戳。
+    def test_operations_allocate_and_update_numbered_records(self) -> None:
+        """验证程序分配连续编号、更新保留编号并刷新时间戳。"""
+        store = MemoryStore(self.memory_path)
+        store.apply_summary_operations(
+            "formal",
+            3,
+            [
+                {
+                    "action": "add",
+                    "field": "work_study.current_learning_topics",
+                    "description": ["主题一"],
+                },
+                {
+                    "action": "add",
+                    "field": "work_study.current_learning_topics",
+                    "description": ["主题二"],
+                },
+            ],
+        )
+        before = store.load()["work_study"]["current_learning_topics"]["topics_1"]["timestamp"]
+        store.apply_summary_operations(
+            "formal",
+            6,
+            [
+                {
+                    "action": "update",
+                    "field": "work_study.current_learning_topics",
+                    "record_id": "topics_1",
+                    "description": ["合并后的主题一"],
+                },
+                {
+                    "action": "unchanged",
+                    "field": "work_study.current_learning_topics",
+                },
+            ],
+        )
+
+        records = store.load()["work_study"]["current_learning_topics"]
+        self.assertEqual(sorted(records), ["topics_1", "topics_2"])
+        self.assertEqual(records["topics_1"]["description"], ["合并后的主题一"])
+        self.assertGreaterEqual(records["topics_1"]["timestamp"], before)
+        self.assertEqual(store.load()["memory_meta"]["summary_batches"]["formal"], 6)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,10 @@ from utils.dwm_border import suppress_dwm_border
 
 class ChatInput(QWidget):
     message_submitted = Signal(str)
+    cancelled = Signal()
+
+    DEFAULT_PLACEHOLDER = "想和小桃说点什么？"
+    DEFAULT_MAX_LENGTH = 32767
 
     # 初始化悬浮聊天输入框及发送控件。
     def __init__(self) -> None:
@@ -32,7 +36,7 @@ class ChatInput(QWidget):
         layout.setSpacing(6)
 
         self.input = QLineEdit(self)
-        self.input.setPlaceholderText("想和小桃说点什么？")
+        self.input.setPlaceholderText(self.DEFAULT_PLACEHOLDER)
         self.input.returnPressed.connect(self._submit)
         layout.addWidget(self.input)
 
@@ -43,7 +47,7 @@ class ChatInput(QWidget):
         self.close_button = QPushButton("×", self)
         self.close_button.setFixedWidth(32)
         self.close_button.setToolTip("关闭输入框")
-        self.close_button.clicked.connect(self.hide)
+        self.close_button.clicked.connect(self._cancel)
         layout.addWidget(self.close_button)
         self.resize(300, 52)
         self._last_anchor_rect = QRect()
@@ -71,8 +75,18 @@ class ChatInput(QWidget):
         return super().nativeEvent(eventType, message)
 
     # 把输入框显示在宠物附近，并聚焦到文本框。
-    def show_near(self, anchor_rect: QRect) -> None:
+    def show_near(
+        self,
+        anchor_rect: QRect,
+        *,
+        placeholder_text: str | None = None,
+        max_length: int | None = None,
+    ) -> None:
         """把输入框显示在宠物附近，并聚焦到文本框。"""
+        self.input.setPlaceholderText(placeholder_text or self.DEFAULT_PLACEHOLDER)
+        self.input.setMaxLength(
+            self.DEFAULT_MAX_LENGTH if max_length is None else max(1, int(max_length))
+        )
         self._last_anchor_rect = QRect(anchor_rect)
         self.reposition(anchor_rect)
         self.show()
@@ -99,7 +113,28 @@ class ChatInput(QWidget):
         text = self.input.text().strip()
         if not text:
             self.hide()
+            self._reset_context()
+            self.cancelled.emit()
             return
         self.input.clear()
         self.hide()
+        self._reset_context()
         self.message_submitted.emit(text)
+
+    # 关闭输入框并通知上层清理可能存在的待处理任务。
+    def _cancel(self) -> None:
+        """关闭输入框，保留普通聊天草稿并发出取消信号。"""
+        self.hide()
+        self._reset_context()
+        self.cancelled.emit()
+
+    # 清空输入文字，供截图取消路径释放问题草稿。
+    def clear_text(self) -> None:
+        """清空当前输入内容。"""
+        self.input.clear()
+
+    # 恢复普通聊天使用的占位文字和长度上限。
+    def _reset_context(self) -> None:
+        """恢复输入框的默认展示配置。"""
+        self.input.setPlaceholderText(self.DEFAULT_PLACEHOLDER)
+        self.input.setMaxLength(self.DEFAULT_MAX_LENGTH)

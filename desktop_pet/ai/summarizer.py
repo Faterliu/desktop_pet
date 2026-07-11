@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,7 @@ from storage.memory_store import MemoryStore
 from storage.path_lock import lock_for_path
 from utils.log_sanitizer import safe_exception
 from utils.logger import get_logger
-from utils.time_utils import now_iso
+from utils.time_utils import utc_iso
 
 
 logger = get_logger(__name__)
@@ -23,7 +24,18 @@ DEFAULT_SUMMARY = {
     "covered_message_count": 0,
     "highlights": [],
     "last_updated": "",
+    "summaries": [],
 }
+
+
+@dataclass(frozen=True)
+class SummaryResult:
+    """单次模式摘要的归档结果。"""
+
+    mode: str
+    sequence: int
+    snapshot: list[dict[str, Any]]
+    trigger_source: str
 
 
 class Summarizer:
@@ -56,35 +68,128 @@ class Summarizer:
     def load_summary(self) -> dict[str, Any]:
         """读取当前对话摘要数据。"""
         with self._summary_lock:
-            return load_json(self.summary_path, DEFAULT_SUMMARY)
+            payload = load_json(self.summary_path, DEFAULT_SUMMARY)
+            normalized, changed = self._normalize_archive(payload)
+            if changed:
+                save_json(self.summary_path, normalized)
+            return normalized
 
     # 在达到轮数阈值或强制触发时尝试生成并保存摘要。
-    def maybe_summarize(self, trigger_rounds: int, force: bool = False) -> None:
+    def maybe_summarize(
+        self,
+        trigger_rounds: int,
+        force: bool = False,
+        trigger_source: str = "round_threshold",
+    ) -> SummaryResult | None:
         """在达到轮数阈值或强制触发时尝试生成并保存摘要。"""
         with self._summary_lock:
             history = self.chat_store.all_messages()
             if not self._has_summarizable_history(history):
                 logger.info("Skip summary because chat history has no user content")
-                return
+                return None
 
-            current_summary = load_json(self.summary_path, DEFAULT_SUMMARY)
-            covered_count = int(current_summary.get("covered_message_count", 0))
-            if not force and not self._should_summarize(history, trigger_rounds, covered_count):
-                return
+            current_summary, migrated = self._normalize_archive(
+                load_json(self.summary_path, DEFAULT_SUMMARY)
+            )
+            if not force and not self._should_summarize(history, trigger_rounds):
+                if migrated:
+                    save_json(self.summary_path, current_summary)
+                return None
 
             try:
                 payload = self._summarize_history(history)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Summary generation failed: %s", safe_exception(exc))
-                return
+                return None
 
-            extracted_memory = payload.pop("memory_updates", {})
-            payload["covered_message_count"] = len(history)
-            payload["last_updated"] = now_iso()
-            save_json(self.summary_path, payload)
-        if self._has_memory_update_text(extracted_memory):
-            self.memory_store.merge(extracted_memory)
-            self._write_memory_updates_to_mem0(extracted_memory)
+            sequence = len(current_summary["summaries"]) + 1
+            created_at = utc_iso()
+            entry = {
+                "sequence": sequence,
+                "summary": str(payload.get("summary", "")).strip(),
+                "highlights": self._string_list(payload.get("highlights", []))[:3],
+                "created_at": created_at,
+                "trigger_source": str(trigger_source or "round_threshold"),
+            }
+            current_summary["summaries"].append(entry)
+            current_summary["summary"] = entry["summary"]
+            current_summary["highlights"] = entry["highlights"]
+            # 该字段保留旧名称以兼容读取方，语义改为最新摘要序号。
+            current_summary["covered_message_count"] = sequence
+            current_summary["last_updated"] = created_at
+            save_json(self.summary_path, current_summary)
+            return SummaryResult(
+                mode=str(getattr(self.chat_store, "mode", self._summary_mode())),
+                sequence=sequence,
+                snapshot=history,
+                trigger_source=entry["trigger_source"],
+            )
+
+    # 返回当前模式最近若干条归档摘要，供记忆总结使用。
+    def recent_summary_entries(self, limit: int = 3) -> list[dict[str, Any]]:
+        """返回当前模式最近若干条归档摘要。"""
+        summaries = self.load_summary().get("summaries", [])
+        count = max(0, int(limit))
+        if not isinstance(summaries, list) or count == 0:
+            return []
+        return [dict(item) for item in summaries[-count:] if isinstance(item, dict)]
+
+    # 兼容旧版单摘要文件并规范化为追加式归档载荷。
+    @staticmethod
+    def _normalize_archive(payload: Any) -> tuple[dict[str, Any], bool]:
+        """兼容旧版单摘要文件并规范化为追加式归档载荷。"""
+        source = payload if isinstance(payload, dict) else {}
+        raw_summaries = source.get("summaries", [])
+        changed = not isinstance(raw_summaries, list)
+        entries: list[dict[str, Any]] = []
+        if isinstance(raw_summaries, list):
+            for raw in raw_summaries:
+                if not isinstance(raw, dict):
+                    changed = True
+                    continue
+                text = str(raw.get("summary", "")).strip()
+                highlights = raw.get("highlights", [])
+                if not text and not highlights and not (
+                    "sequence" in raw or "created_at" in raw or "trigger_source" in raw
+                ):
+                    changed = True
+                    continue
+                entries.append(
+                    {
+                        "sequence": len(entries) + 1,
+                        "summary": text,
+                        "highlights": [str(item).strip() for item in highlights if str(item).strip()][:3]
+                        if isinstance(highlights, list)
+                        else [],
+                        "created_at": str(raw.get("created_at", raw.get("last_updated", ""))).strip(),
+                        "trigger_source": str(raw.get("trigger_source", "legacy")).strip() or "legacy",
+                    }
+                )
+        if not entries:
+            legacy_text = str(source.get("summary", "")).strip()
+            legacy_highlights = source.get("highlights", [])
+            if legacy_text or legacy_highlights:
+                entries.append(
+                    {
+                        "sequence": 1,
+                        "summary": legacy_text,
+                        "highlights": [str(item).strip() for item in legacy_highlights if str(item).strip()][:3]
+                        if isinstance(legacy_highlights, list)
+                        else [],
+                        "created_at": str(source.get("last_updated", "")).strip(),
+                        "trigger_source": "legacy",
+                    }
+                )
+                changed = True
+        latest = entries[-1] if entries else {}
+        normalized = {
+            "summary": str(latest.get("summary", "")),
+            "covered_message_count": len(entries),
+            "highlights": list(latest.get("highlights", [])),
+            "last_updated": str(source.get("last_updated", latest.get("created_at", ""))),
+            "summaries": entries,
+        }
+        return normalized, changed or source != normalized
 
     # 读取配置片段，缺失时返回安全默认配置。
     def _config(self) -> dict[str, Any]:
@@ -162,19 +267,13 @@ class Summarizer:
         self,
         history: list[dict[str, Any]],
         trigger_rounds: int,
-        covered_count: int,
     ) -> bool:
         """根据 history、trigger_rounds、covered_count 判断summarize是否满足条件并返回布尔结果。"""
         trigger_rounds = max(1, int(trigger_rounds))
         total_user_rounds = self._count_user_messages(history)
         if total_user_rounds < trigger_rounds:
             return False
-        if len(history) <= covered_count:
-            return False
-
-        covered_count = min(max(covered_count, 0), len(history))
-        uncovered_user_rounds = self._count_user_messages(history[covered_count:])
-        return uncovered_user_rounds >= trigger_rounds
+        return total_user_rounds >= trigger_rounds
 
     # 统计历史消息中的用户发言数量。
     def _count_user_messages(self, history: list[dict[str, Any]]) -> int:
@@ -199,7 +298,6 @@ class Summarizer:
         if summary_payload is None:
             return self._local_summary(history)
 
-        summary_payload["memory_updates"] = self._model_memory_updates(history)
         return summary_payload
 
     # 根据 history 请求模型生成摘要 JSON，失败时交给本地兜底。
@@ -309,9 +407,6 @@ class Summarizer:
         return {
             "summary": clip_text(summary, budget["max_summary_chars"]),
             "highlights": [clip_text(item.get("content", ""), 80) for item in recent[-3:]],
-            "memory_updates": self._extract_memory(
-                self._cap_user_messages(self._user_history(history), budget["memory_extract_max_input_chars"])
-            ),
         }
 
     # 从用户最近几轮消息里提取可保存的偏好和学习工作信息。

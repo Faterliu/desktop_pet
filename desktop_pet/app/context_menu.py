@@ -23,6 +23,7 @@ def build_context_menu(
     do_not_disturb: bool,
     auto_move: bool,
     api_chat_enabled: bool,
+    show_chat_api_menu: bool,
     api_provider: str,
     formal_qa_mode: bool,
     formal_answer_display: str,
@@ -47,6 +48,7 @@ def build_context_menu(
     on_view_current_reminders: Callable[[], None],
     on_clear_completed_reminders: Callable[[], None],
     on_clipboard_assistant: Callable[[str], None],
+    on_screenshot_analysis: Callable[[str], None],
 ) -> QMenu:
     """构建桌宠右键菜单，并绑定各项操作回调。"""
     menu = QMenu(parent)
@@ -151,11 +153,12 @@ def build_context_menu(
     move_action.toggled.connect(on_toggle_auto_move)
     menu.addAction(move_action)
 
-    api_action = QAction("聊天接入 API", menu)
-    api_action.setCheckable(True)
-    api_action.setChecked(api_chat_enabled)
-    api_action.toggled.connect(on_toggle_api_chat)
-    menu.addAction(api_action)
+    if show_chat_api_menu:
+        api_action = QAction("聊天接入 API", menu)
+        api_action.setCheckable(True)
+        api_action.setChecked(api_chat_enabled)
+        api_action.toggled.connect(on_toggle_api_chat)
+        menu.addAction(api_action)
 
     formal_qa_action = QAction("正式问答模式", menu)
     formal_qa_action.setCheckable(True)
@@ -210,6 +213,17 @@ def build_context_menu(
             lambda checked=False, value=mode: on_clipboard_assistant(value)
         )
         clipboard_menu.addAction(action)
+
+    screenshot_menu = menu.addMenu("截图")
+    for mode, title in [
+        ("full", "全屏快速解析"),
+        ("region_question", "框选截图并提问"),
+    ]:
+        action = QAction(title, screenshot_menu)
+        action.triggered.connect(
+            lambda checked=False, value=mode: on_screenshot_analysis(value)
+        )
+        screenshot_menu.addAction(action)
 
     menu.addSeparator()
 

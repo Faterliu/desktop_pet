@@ -24,7 +24,7 @@
       "timeout_seconds": 30
     },
     "max_recent_messages": 20,
-    "summary_trigger_rounds": 20,
+    "summary_trigger_rounds": 40,
     "max_prompt_chars": 12000,
     "max_history_messages": 12,
     "max_user_message_chars": 1200,
@@ -50,6 +50,7 @@
     },
     "show_test_menu": false,
     "show_clear_menu": false,
+    "show_chat_api_menu": false,
     "show_reload_config": false
   },
   "behavior": {
@@ -79,9 +80,17 @@
   },
   "clipboard": {
     "enabled": true,
-    "max_chars": 4000,
-    "save_to_chat_history": false,
-    "allow_summary_memory": false
+    "max_chars": 4000
+  },
+  "screenshot": {
+    "enabled": true,
+    "capture_delay_ms": 180,
+    "max_image_edge": 2048,
+    "max_image_bytes": 6291456,
+    "detail": "auto",
+    "max_output_tokens": 80,
+    "selection_min_size": 12,
+    "question_max_chars": 500
   },
   "local_lines_refresh": {
     "enabled": true,

@@ -15,12 +15,18 @@ class FakeStore:
     # 初始化当前对象及其依赖。
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
-        self.messages: list[tuple[str, str]] = []
+        self.messages: list[tuple[str, str, dict | None]] = []
+        self.reassigned: list[tuple[str, str]] = []
 
     # 为 FakeStore 测试替身提供append 消息行为。
-    def append_message(self, role: str, content: str) -> None:
+    def append_message(self, role: str, content: str, metadata: dict | None = None) -> None:
         """为 FakeStore 测试替身提供append 消息行为。"""
-        self.messages.append((role, content))
+        self.messages.append((role, content, metadata))
+
+    # 记录会话重标调用，模拟 JSONL 模式切换。
+    def reassign_conversation(self, conversation_id: str, target_mode: str) -> None:
+        """记录会话重标调用。"""
+        self.reassigned.append((conversation_id, target_mode))
 
 
 class ChatFlowControllerTests(unittest.TestCase):
@@ -57,7 +63,10 @@ class ChatFlowControllerTests(unittest.TestCase):
 
         self.assertEqual(decision.kind, "local_reply")
         self.assertEqual(decision.reply, "local:你好")
-        self.assertEqual(informal_store.messages, [("user", "你好"), ("assistant", "local:你好")])
+        self.assertEqual(
+            [(role, content) for role, content, _metadata in informal_store.messages],
+            [("user", "你好"), ("assistant", "local:你好")],
+        )
         self.assertEqual(formal_store.messages, [])
 
     # 验证missing API 配置 keeps existing 回复 文本场景下的预期结果。
@@ -70,7 +79,7 @@ class ChatFlowControllerTests(unittest.TestCase):
 
         self.assertEqual(decision.kind, "missing_api_config")
         self.assertIn("当前模型提供商的 API key", decision.reply)
-        self.assertEqual(informal_store.messages[-1], ("assistant", decision.reply))
+        self.assertEqual(informal_store.messages[-1][:2], ("assistant", decision.reply))
 
     # 验证正式问答 success appends to 正式问答 存储 and returns question场景下的预期结果。
     def test_formal_success_appends_to_formal_store_and_returns_question(self) -> None:
@@ -83,10 +92,30 @@ class ChatFlowControllerTests(unittest.TestCase):
         self.assertEqual(completion.reply, "答案")
         self.assertEqual(completion.question, "如何实现？")
         self.assertTrue(completion.formal_qa_mode)
-        self.assertEqual(formal_store.messages, [("user", "如何实现？"), ("assistant", "答案")])
+        self.assertEqual(
+            [(role, content) for role, content, _metadata in formal_store.messages],
+            [("user", "如何实现？"), ("assistant", "答案")],
+        )
         self.assertEqual(informal_store.messages, [])
         self.assertFalse(controller.pending_was_formal)
         self.assertEqual(controller.pending_question, "")
+
+    # 验证成功提醒会按当前会话标识把两条记录改标为 remind。
+    def test_successful_reminder_reassigns_current_conversation(self) -> None:
+        """验证成功提醒会按当前会话标识把两条记录改标为 remind。"""
+        controller, _formal_store, informal_store = self.make_controller()
+
+        controller.begin_user_message("十分钟后提醒我休息")
+        controller.complete_success("好的，十分钟后提醒你。", move_to_remind=True)
+
+        self.assertEqual(len(informal_store.reassigned), 1)
+        self.assertEqual(informal_store.reassigned[0][1], "remind")
+        conversation_ids = {
+            metadata["conversation_id"]
+            for _role, _content, metadata in informal_store.messages
+            if metadata is not None
+        }
+        self.assertEqual({informal_store.reassigned[0][0]}, conversation_ids)
 
     # 验证工作线程 kwargs use pending 正式问答 snapshot场景下的预期结果。
     def test_worker_kwargs_use_pending_formal_snapshot(self) -> None:

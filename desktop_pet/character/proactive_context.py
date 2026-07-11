@@ -4,7 +4,7 @@ import random
 from typing import Any
 
 from character.persona_state import compact_behavior_policy, read_persona_state
-from storage.memory_store import normalize_memory_schema
+from storage.memory_store import memory_descriptions, normalize_memory_schema
 
 
 FORBIDDEN_GREETING_PHRASES = (
@@ -29,15 +29,10 @@ def build_proactive_context(
     """根据 memory、runtime_state、time_period 组装主动行为 上下文对象或消息并返回给调用方。"""
     normalized = normalize_memory_schema(memory)
     work_study = normalized.get("work_study", {})
-    relationship = normalized.get("relationship_memory", {})
-    communication = relationship.get("communication_style", {})
-    companionship = relationship.get("companionship_style", {})
-    interaction = relationship.get("interaction_patterns", {})
-
     task_focus = _unique_limited(
-        _string_items(interaction.get("task_focus", []))
-        + _string_items(work_study.get("current_projects", []))
-        + _string_items(work_study.get("current_learning_topics", [])),
+        memory_descriptions(normalized, "relationship_memory.interaction_patterns.task_focus")
+        + memory_descriptions(normalized, "work_study.current_projects")
+        + memory_descriptions(normalized, "work_study.current_learning_topics"),
         limit=4,
     )
     runtime = dict(runtime_state or {})
@@ -50,7 +45,7 @@ def build_proactive_context(
         "season": season or "",
         "recent_task_focus": task_focus,
         "communication_style": _compact_mapping(
-            communication,
+            _record_mapping(normalized, "relationship_memory.communication_style"),
             [
                 "preferred_response_style",
                 "detail_level",
@@ -59,7 +54,7 @@ def build_proactive_context(
             ],
         ),
         "companionship_style": _compact_mapping(
-            companionship,
+            _record_mapping(normalized, "relationship_memory.companionship_style"),
             [
                 "preferred_companion_role",
                 "proactive_boundary",
@@ -68,7 +63,7 @@ def build_proactive_context(
             ],
         ),
         "interaction_patterns": _compact_mapping(
-            interaction,
+            _record_mapping(normalized, "relationship_memory.interaction_patterns"),
             [
                 "recent_interaction_mode",
                 "interruption_tolerance",
@@ -78,6 +73,41 @@ def build_proactive_context(
         "character_behavior": compact_behavior_policy(character),
         "runtime_state": runtime,
     }
+
+
+# 把一组结构化编号记忆字段压缩为主动问候可读取的值。
+def _record_mapping(memory: dict[str, Any], section_path: str) -> dict[str, Any]:
+    """把一组结构化编号记忆字段压缩为主动问候可读取的值。"""
+    section = section_path.rsplit(".", 1)[-1]
+    fields = {
+        "communication_style": [
+            "preferred_response_style",
+            "detail_level",
+            "confirmation_preference",
+            "tone_preference",
+            "avoid_styles",
+        ],
+        "companionship_style": [
+            "preferred_companion_role",
+            "proactive_boundary",
+            "encouragement_style",
+            "avoid_behaviors",
+        ],
+        "interaction_patterns": [
+            "recent_interaction_mode",
+            "interruption_tolerance",
+            "response_to_proactive_greetings",
+        ],
+    }.get(section, [])
+    list_fields = {"avoid_styles", "avoid_behaviors"}
+    result: dict[str, Any] = {}
+    for field in fields:
+        descriptions = memory_descriptions(memory, f"{section_path}.{field}")
+        if field in list_fields:
+            result[field] = descriptions
+        elif descriptions:
+            result[field] = descriptions[0]
+    return result
 
 
 # 判断主动上下文中是否包含足够的场景问候线索。

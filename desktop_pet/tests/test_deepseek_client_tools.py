@@ -282,6 +282,101 @@ class DeepSeekClientToolTests(unittest.TestCase):
             with self.assertRaisesRegex(DeepSeekError, "无法解析"):
                 self.client.chat(self.messages)
 
+    # 验证视觉请求固定读取 OpenAI 配置并构建已验证的 Responses 图片载荷。
+    def test_vision_request_uses_openai_responses_payload_independent_of_provider(self) -> None:
+        """验证 DeepSeek 为聊天提供商时，视觉请求仍使用 OpenAI Responses。"""
+        config = {
+            "api": {
+                "provider": "deepseek",
+                "deepseek": {"api_key": "deepseek-key"},
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://vision.test/v1",
+                    "model": "gpt-5.5",
+                    "timeout_seconds": 45,
+                },
+            }
+        }
+        response = FakeResponse({"output_text": "截图里是一个设置页面。"})
+        client = DeepSeekClient("unused-vision.json")
+        with patch("ai.deepseek_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.deepseek_client.requests.post", return_value=response) as post:
+                self.assertTrue(client.is_vision_configured())
+                reply = client.analyze_image(
+                    b"\x89PNG\r\n",
+                    "image/png",
+                    "请解析截图",
+                    detail="auto",
+                    max_output_tokens=80,
+                )
+
+        self.assertEqual(reply, "截图里是一个设置页面。")
+        self.assertEqual(post.call_args.args[0], "https://vision.test/v1/responses")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer openai-key")
+        self.assertEqual(post.call_args.kwargs["timeout"], 45)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "gpt-5.5")
+        self.assertEqual(payload["max_output_tokens"], 80)
+        self.assertEqual(
+            [part["type"] for part in payload["input"][0]["content"]],
+            ["input_text", "input_image"],
+        )
+        image_part = payload["input"][0]["content"][1]
+        self.assertEqual(image_part["detail"], "auto")
+        self.assertEqual(image_part["image_url"], "data:image/png;base64,iVBORw0K")
+
+    # 验证视觉 Responses 的嵌套 output 文本仍能复用统一解析逻辑。
+    def test_vision_request_parses_nested_output_text(self) -> None:
+        """验证没有 output_text 快捷字段时提取 output 内容。"""
+        config = {
+            "api": {
+                "provider": "deepseek",
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://vision.test/v1",
+                    "model": "gpt-5.5",
+                },
+            }
+        }
+        response = FakeResponse(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": "嵌套回复"}],
+                    }
+                ]
+            }
+        )
+        client = DeepSeekClient("unused-vision.json")
+        with patch("ai.deepseek_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.deepseek_client.requests.post", return_value=response):
+                self.assertEqual(
+                    client.analyze_image(b"jpeg", "image/jpeg", "解析"),
+                    "嵌套回复",
+                )
+
+    # 验证视觉请求拒绝空图片并把超时转换为安全错误。
+    def test_vision_request_validates_empty_image_and_handles_timeout(self) -> None:
+        """验证视觉请求的输入校验和超时错误。"""
+        client = DeepSeekClient("unused-vision.json")
+        with self.assertRaisesRegex(DeepSeekError, "截图内容为空"):
+            client.analyze_image(b"", "image/png", "解析")
+
+        config = {
+            "api": {
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://vision.test/v1",
+                    "model": "gpt-5.5",
+                }
+            }
+        }
+        with patch("ai.deepseek_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.deepseek_client.requests.post", side_effect=requests.Timeout("late")):
+                with self.assertRaisesRegex(DeepSeekError, "超时"):
+                    client.analyze_image(b"png", "image/png", "解析")
+
 
 if __name__ == "__main__":
     unittest.main()

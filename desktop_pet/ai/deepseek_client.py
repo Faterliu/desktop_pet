@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 from dataclasses import dataclass
@@ -89,6 +90,15 @@ class DeepSeekClient:
                 "provider": "deepseek",
             }
 
+        return self._openai_api_config(api)
+
+    # 固定读取 OpenAI 连接配置，供不跟随聊天提供商的视觉请求使用。
+    def _openai_api_config(self, api: dict[str, Any] | None = None) -> dict[str, Any]:
+        """读取 OpenAI 连接配置，不受当前聊天提供商选择影响。"""
+        if api is None:
+            config = load_json_prefer_primary(self.config_path, self.fallback_config_path, {})
+            raw_api = config.get("api", {}) if isinstance(config, dict) else {}
+            api = raw_api if isinstance(raw_api, dict) else {}
         openai = api.get("openai", {})
         if not isinstance(openai, dict):
             openai = {}
@@ -126,6 +136,107 @@ class DeepSeekClient:
     def is_configured(self) -> bool:
         """判断必需配置是否完整，并返回客户端是否可以调用。"""
         return bool(self._api_config().get("api_key", "").strip())
+
+    # 判断独立 OpenAI 视觉请求所需配置是否完整。
+    def is_vision_configured(self) -> bool:
+        """判断 OpenAI 视觉请求所需的 API key、地址和模型是否完整。"""
+        api = self._openai_api_config()
+        return bool(
+            str(api.get("api_key", "")).strip()
+            and str(api.get("base_url", "")).strip()
+            and str(api.get("model", "")).strip()
+        )
+
+    # 将内存图片作为 Data URL 发送给固定 OpenAI Responses API。
+    def analyze_image(
+        self,
+        image_bytes: bytes,
+        mime_type: str,
+        prompt: str,
+        *,
+        detail: str = "auto",
+        max_output_tokens: int = 80,
+    ) -> str:
+        """发送单张内存图片并返回 Responses API 提取出的文字结果。"""
+        if not image_bytes:
+            raise DeepSeekError("截图内容为空，无法解析。")
+        normalized_mime = str(mime_type).strip().lower()
+        if normalized_mime not in {"image/png", "image/jpeg"}:
+            raise DeepSeekError("截图格式不受支持。")
+        normalized_prompt = str(prompt).strip()
+        if not normalized_prompt:
+            raise DeepSeekError("截图解析提示不能为空。")
+
+        api = self._openai_api_config()
+        api_key = str(api.get("api_key", "")).strip()
+        if not api_key:
+            raise DeepSeekError("OpenAI API key 未配置，暂时不能解析截图。")
+        base_url = str(api.get("base_url", "https://api.openai.com/v1")).rstrip("/")
+        model = str(api.get("model", "")).strip()
+        if not model:
+            raise DeepSeekError("OpenAI 模型未配置，暂时不能解析截图。")
+        timeout_seconds = api.get("timeout_seconds", 30)
+        normalized_detail = str(detail).strip().lower()
+        if normalized_detail not in {"low", "high", "original", "auto"}:
+            normalized_detail = "auto"
+        try:
+            output_limit = max(1, int(max_output_tokens))
+        except (TypeError, ValueError):
+            output_limit = 80
+
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        payload = {
+            "model": model,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": normalized_prompt},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:{normalized_mime};base64,{encoded}",
+                            "detail": normalized_detail,
+                        },
+                    ],
+                }
+            ],
+            "max_output_tokens": output_limit,
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = requests.post(
+                f"{base_url}/responses",
+                headers=headers,
+                json=payload,
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.Timeout as exc:
+            logger.error("Vision API request timed out: %s", safe_exception(exc))
+            raise DeepSeekError("截图解析超时了，请稍后再试。") from exc
+        except requests.HTTPError as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            logger.error(
+                "Vision API request failed: %s status_code=%s",
+                safe_exception(exc),
+                status_code,
+            )
+            raise DeepSeekError("截图解析服务暂时无法完成请求。") from exc
+        except ValueError as exc:
+            logger.error("Vision API returned invalid JSON: %s", safe_exception(exc))
+            raise DeepSeekError("截图解析服务返回了无法解析的响应。") from exc
+        except requests.RequestException as exc:
+            logger.error("Vision API request failed: %s", safe_exception(exc))
+            raise DeepSeekError("截图解析服务暂时无法连接。") from exc
+
+        reply = self._message_content(self._responses_message(data))
+        if not reply:
+            raise DeepSeekError("截图解析没有返回可显示的文字。")
+        return reply
 
     # 根据 messages 处理聊天消息流程，更新上下文和展示状态。
     def chat(self, messages: list[dict[str, str]]) -> str:

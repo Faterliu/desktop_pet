@@ -52,7 +52,7 @@ Startup diagnostics:
 - Click opens a floating chat input; double-click triggers reply or proactive-feedback behavior.
 - Right-click menu controls testing entries, reload config, scaling, do-not-disturb, always-on-top, autonomous movement, API chat, formal Q&A, cleanup, and exit.
 - Chat can use local scripted replies or the DeepSeek OpenAI-compatible Chat Completions API.
-- Local JSON stores keep chat history, summaries, memory, usage counters, generated local lines, and window position.
+- Local JSON/JSONL stores keep chat history, append-only mode summaries, memory, usage counters, generated local lines, and window position. Chat history is shared `data/chat_history.jsonl`; `formal`, `informal`, and `clipboard` feed their own summaries through one background maintenance task, while `remind` and reserved `screenshot` remain outside summaries and memory. `memory.json` stores each semantic field as numbered description/timestamp records; only the three-summary memory pipeline may add or update them.
 - Optional Mem0 / DashScope-backed long-term semantic memory is off by default and must degrade gracefully.
 - Proactive behavior includes startup greetings, idle greetings, scenario-based greetings, knowledge greetings, time-period greetings, and low-interruption fallback. Knowledge greetings no longer show a local intro line before the generated content.
 

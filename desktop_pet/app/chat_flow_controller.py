@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
+from uuid import uuid4
 
 
 ChatDecisionKind = Literal["local_reply", "missing_api_config", "start_api"]
@@ -14,6 +15,7 @@ class ChatMessageContext:
     formal_qa_mode: bool
     question: str
     store: Any
+    conversation_id: str
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,7 @@ class ChatFlowController:
         self._local_reply_provider = local_reply_provider
         self.pending_question = ""
         self.pending_was_formal = False
+        self.pending_conversation_id = ""
 
     # 根据任务注册表判断指定聊天任务能否开始。
     def can_start_chat(self, chat_task_registered: bool) -> bool:
@@ -88,14 +91,17 @@ class ChatFlowController:
         """根据 message 处理聊天消息流程，更新上下文和展示状态。"""
         formal_qa_mode = self._formal_qa_enabled()
         store = self._store_for_mode(formal_qa_mode)
-        store.append_message("user", message)
+        conversation_id = uuid4().hex
+        store.append_message("user", message, {"conversation_id": conversation_id})
         self.pending_was_formal = formal_qa_mode
         self.pending_question = message if formal_qa_mode else ""
+        self.pending_conversation_id = conversation_id
         return ChatMessageContext(
             message=message,
             formal_qa_mode=formal_qa_mode,
             question=self.pending_question,
             store=store,
+            conversation_id=conversation_id,
         )
 
     # 把助手回复追加到当前聊天存储，并写入待处理上下文。
@@ -105,7 +111,11 @@ class ChatFlowController:
         reply: str,
     ) -> ChatFlowDecision:
         """把助手回复追加到当前聊天存储，并写入待处理上下文。"""
-        context.store.append_message("assistant", reply)
+        context.store.append_message(
+            "assistant",
+            reply,
+            {"conversation_id": context.conversation_id},
+        )
         return ChatFlowDecision(
             kind="local_reply",
             message=context.message,
@@ -160,11 +170,19 @@ class ChatFlowController:
         }
 
     # 保存助手回复，清理待处理上下文并返回本轮聊天结果。
-    def complete_success(self, reply: str) -> ChatCompletion:
+    def complete_success(self, reply: str, move_to_remind: bool = False) -> ChatCompletion:
         """保存助手回复，清理待处理上下文并返回本轮聊天结果。"""
         cleaned_reply = reply.strip() or "我在这里哦。"
         store = self._store_for_mode(self.pending_was_formal)
-        store.append_message("assistant", cleaned_reply)
+        store.append_message(
+            "assistant",
+            cleaned_reply,
+            {"conversation_id": self.pending_conversation_id},
+        )
+        if move_to_remind:
+            reassign = getattr(store, "reassign_conversation", None)
+            if callable(reassign):
+                reassign(self.pending_conversation_id, "remind")
         completion = ChatCompletion(
             reply=cleaned_reply,
             question=self.pending_question,
@@ -172,6 +190,7 @@ class ChatFlowController:
         )
         self.pending_question = ""
         self.pending_was_formal = False
+        self.pending_conversation_id = ""
         return completion
 
     # 记录聊天失败信息，清理待处理上下文并返回错误展示内容。
@@ -184,6 +203,7 @@ class ChatFlowController:
         )
         self.pending_question = ""
         self.pending_was_formal = False
+        self.pending_conversation_id = ""
         return failure
 
     # 返回当前正式或非正式聊天模式对应的消息存储。
