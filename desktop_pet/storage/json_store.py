@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import json
 import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,12 +17,6 @@ logger = get_logger(__name__)
 def _normalize_path(path: str | Path) -> Path:
     """把字符串或 Path 输入转换为展开用户目录后的 Path 对象。"""
     return Path(path)
-
-
-# 根据 path 生成 JSON 主文件对应的辅助文件路径。
-def _backup_path(path: Path) -> Path:
-    """根据 path 生成 JSON 主文件对应的辅助文件路径。"""
-    return path.with_name(f"{path.name}.bak")
 
 
 # 根据 path 生成 JSON 主文件对应的辅助文件路径。
@@ -88,26 +81,10 @@ def ensure_json_file(path: str | Path, default: Any) -> Path:
     return target
 
 
-# 从可用备份恢复主 JSON 文件，并返回恢复后的内容。
-def _restore_from_backup(target: Path, backup: Path) -> Any:
-    """从可用备份恢复主 JSON 文件，并返回恢复后的内容。"""
-    recovered = _read_json_file(backup)
-    save_json(target, recovered)
-    logger.warning("Restored JSON file %s from backup %s", target, backup)
-    return recovered
-
-
 # 根据 path、default 读取JSON并返回 Any。
 def load_json(path: str | Path, default: Any = None) -> Any:
     """根据 path、default 读取JSON并返回 Any。"""
     target = _normalize_path(path)
-    backup = _backup_path(target)
-    if not target.exists() and backup.exists():
-        try:
-            return _restore_from_backup(target, backup)
-        except json.JSONDecodeError as backup_exc:
-            logger.error("JSON backup parse failed for %s: %s", backup, backup_exc)
-
     ensure_json_file(target, default if default is not None else {})
 
     try:
@@ -117,12 +94,6 @@ def load_json(path: str | Path, default: Any = None) -> Any:
         corrupt = _move_corrupt_file(target)
         if corrupt is not None:
             logger.warning("Moved corrupt JSON file from %s to %s", target, corrupt)
-
-        if backup.exists():
-            try:
-                return _restore_from_backup(target, backup)
-            except json.JSONDecodeError as backup_exc:
-                logger.error("JSON backup parse failed for %s: %s", backup, backup_exc)
 
         logger.warning("Falling back to default content for %s", target)
         return copy.deepcopy(default)
@@ -151,9 +122,6 @@ def save_json(path: str | Path, data: Any) -> Path:
     target = _normalize_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     cleanup_tmp_json_files(target.parent)
-
-    if target.exists() and target.stat().st_size > 0:
-        shutil.copy2(target, _backup_path(target))
 
     tmp = _tmp_path(target)
     try:

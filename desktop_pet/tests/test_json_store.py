@@ -58,51 +58,36 @@ class JsonStoreTests(unittest.TestCase):
         self.assertEqual(ensured, self.path)
         self.assertEqual(load_json(self.path, {}), {"ready": True})
 
-    # 验证save JSON writes valid JSON and preserves 备份场景下的预期结果。
-    def test_save_json_writes_valid_json_and_preserves_backup(self) -> None:
-        """验证save JSON writes valid JSON and preserves 备份场景下的预期结果。"""
+    # 验证保存 JSON 仅更新主文件，不生成备份文件。
+    def test_save_json_writes_valid_json_without_backup(self) -> None:
+        """验证保存 JSON 仅更新主文件，不生成备份文件。"""
         save_json(self.path, {"version": 1})
         save_json(self.path, {"version": 2})
 
         self.assertEqual(load_json(self.path, {}), {"version": 2})
-        self.assertEqual(load_json(self.path.with_suffix(".json.bak"), {}), {"version": 1})
+        self.assertFalse(self.path.with_suffix(".json.bak").exists())
 
-    # 主文件损坏时从备份恢复，并把恢复内容写回主文件。
-    def test_load_json_recovers_from_backup_when_primary_is_corrupt(self) -> None:
-        """主文件损坏时从备份恢复，并把恢复内容写回主文件。"""
-        save_json(self.path.with_suffix(".json.bak"), {"safe": True})
+    # 主文件损坏时隔离损坏文件，并返回默认值而不读取旧备份。
+    def test_load_json_returns_default_when_primary_is_corrupt(self) -> None:
+        """主文件损坏时隔离损坏文件，并返回默认值。"""
+        self.path.with_suffix(".json.bak").write_text('{"safe": true}', encoding="utf-8")
         self.path.write_text('{"broken": ', encoding="utf-8")
 
         loaded = load_json(self.path, {"safe": False})
 
-        self.assertEqual(loaded, {"safe": True})
-        self.assertTrue(self.path.exists())
-        self.assertEqual(load_json(self.path, {"safe": False}), {"safe": True})
+        self.assertEqual(loaded, {"safe": False})
+        self.assertFalse(self.path.exists())
         self.assertEqual(len(list(self.temp_dir.glob("store.json.corrupt.*"))), 1)
 
-    # 主文件缺失但备份存在时，优先恢复备份而不是写入默认值。
-    def test_load_json_restores_missing_primary_from_backup(self) -> None:
-        """主文件缺失但备份存在时，优先恢复备份而不是写入默认值。"""
-        save_json(self.path.with_suffix(".json.bak"), {"safe": True})
+    # 主文件缺失时忽略遗留备份，并按默认值创建新的主文件。
+    def test_load_json_ignores_legacy_backup_when_primary_is_missing(self) -> None:
+        """主文件缺失时忽略遗留备份，并按默认值创建新的主文件。"""
+        self.path.with_suffix(".json.bak").write_text('{"safe": true}', encoding="utf-8")
 
         loaded = load_json(self.path, {"safe": False})
 
-        self.assertEqual(loaded, {"safe": True})
-        self.assertTrue(self.path.exists())
-        self.assertEqual(load_json(self.path, {}), {"safe": True})
-
-    # 验证主文件和备份都损坏时返回默认值的深拷贝。
-    def test_load_json_returns_deepcopy_default_when_primary_and_backup_are_corrupt(self) -> None:
-        """验证主文件和备份都损坏时返回默认值的深拷贝。"""
-        default = {"items": []}
-        self.path.write_text('{"broken": ', encoding="utf-8")
-        self.path.with_suffix(".json.bak").write_text('{"also_broken": ', encoding="utf-8")
-
-        loaded = load_json(self.path, default)
-        loaded["items"].append("changed")
-
-        self.assertEqual(default, {"items": []})
-        self.assertEqual(len(list(self.temp_dir.glob("store.json.corrupt.*"))), 1)
+        self.assertEqual(loaded, {"safe": False})
+        self.assertEqual(load_json(self.path, {}), {"safe": False})
 
     # 验证failed save keeps previous JSON and removes 临时文件 文件场景下的预期结果。
     def test_failed_save_keeps_previous_json_and_removes_tmp_file(self) -> None:

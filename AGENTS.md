@@ -166,7 +166,7 @@ Startup diagnostics:
 
 - `desktop_pet_window.py`: many UI states and timers interact; regressions can appear only during exit, reload, or background task completion.
 - `closeEvent()` and worker cleanup: avoid unbounded waits and avoid callbacks mutating UI during shutdown.
-- `json_store.py`: affects all runtime persistence; preserve atomic write, backup, corrupt-file recovery, and old data compatibility.
+- `json_store.py`: affects all runtime persistence; preserve atomic write, corrupt-file recovery, and old data compatibility.
 - `app_config.example.json`: missing defaults can break first launch on new devices.
 - `PromptBuilder`, `Summarizer`, `DeepSeekClient`: affect safety, privacy, token budget, formal/informal routing, and model failures.
 - `Mem0MemoryService` and memory-vector logic: optional external services must not become startup or chat blockers.

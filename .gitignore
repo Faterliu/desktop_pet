@@ -40,8 +40,6 @@ desktop_pet/config/app_config.json
 # 运行时数据、日志与本地调试产物
 desktop_pet/data/
 desktop_pet/**/*.log
-*.bak
-*.bak.*
 *.corrupt
 *.corrupt.*
 *.tmp
