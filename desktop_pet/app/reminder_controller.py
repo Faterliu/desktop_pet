@@ -7,6 +7,10 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from storage.reminder_store import ReminderStore
 from utils.time_utils import now_local
+from utils.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class ReminderController(QObject):
@@ -21,6 +25,9 @@ class ReminderController(QObject):
         *,
         enabled: bool = True,
         check_interval_seconds: int = 30,
+        auto_cleanup_enabled: bool = True,
+        completed_retention_days: int = 7,
+        ack_repeat_minutes: int = 5,
         can_deliver: Callable[[], bool] | None = None,
         now_provider: Callable[[], datetime] = now_local,
         parent: QObject | None = None,
@@ -30,6 +37,9 @@ class ReminderController(QObject):
         self.reminder_store = reminder_store
         self.enabled = bool(enabled)
         self.check_interval_seconds = self._normalized_interval(check_interval_seconds)
+        self.auto_cleanup_enabled = bool(auto_cleanup_enabled)
+        self.completed_retention_days = self._normalized_retention_days(completed_retention_days)
+        self.ack_repeat_minutes = self._normalized_ack_repeat_minutes(ack_repeat_minutes)
         self.can_deliver = can_deliver or (lambda: True)
         self.now_provider = now_provider
         self._started = False
@@ -53,19 +63,33 @@ class ReminderController(QObject):
         self.check_timer.stop()
 
     # 更新提醒配置，并在已启动状态下立即按新配置生效。
-    def configure(self, enabled: bool, check_interval_seconds: int) -> None:
+    def configure(
+        self,
+        enabled: bool,
+        check_interval_seconds: int,
+        auto_cleanup_enabled: bool = True,
+        completed_retention_days: int = 7,
+        ack_repeat_minutes: int = 5,
+    ) -> None:
         """更新提醒配置，并在已启动状态下立即按新配置生效。"""
         self.enabled = bool(enabled)
         self.check_interval_seconds = self._normalized_interval(check_interval_seconds)
+        self.auto_cleanup_enabled = bool(auto_cleanup_enabled)
+        self.completed_retention_days = self._normalized_retention_days(completed_retention_days)
+        self.ack_repeat_minutes = self._normalized_ack_repeat_minutes(ack_repeat_minutes)
         if self._started:
             self.start()
 
     # 检查并发出所有到期提醒；无法展示时保留 active 状态以便稍后补发。
     def check_due_reminders(self) -> list[dict]:
         """检查并发出所有到期提醒；无法展示时保留 active 状态以便稍后补发。"""
-        if not self.enabled or not self.can_deliver():
+        if not self.enabled:
             return []
-        due_reminders = self.reminder_store.claim_due_reminders(self.now_provider())
+        now = self.now_provider()
+        self._auto_cleanup_completed_reminders(now)
+        if not self.can_deliver():
+            return []
+        due_reminders = self.reminder_store.claim_due_reminders(now, self.ack_repeat_minutes)
         for reminder in due_reminders:
             self.reminder_due.emit(reminder)
         return due_reminders
@@ -78,3 +102,34 @@ class ReminderController(QObject):
         except (TypeError, ValueError):
             interval = 30
         return max(1, interval)
+
+    # 规范完成提醒保留天数，异常值回退到默认 7 天。
+    def _normalized_retention_days(self, value: int) -> int:
+        """规范完成提醒保留天数，异常值回退到默认 7 天。"""
+        try:
+            days = int(value)
+        except (TypeError, ValueError):
+            days = 7
+        return max(0, days)
+
+    # 规范待确认提醒重复提示间隔，异常配置回退到默认 5 分钟。
+    def _normalized_ack_repeat_minutes(self, value: int) -> int:
+        """规范待确认提醒重复提示间隔，异常配置回退到默认 5 分钟。"""
+        try:
+            minutes = int(value)
+        except (TypeError, ValueError):
+            minutes = 5
+        return max(1, minutes)
+
+    # 清理超过保留期的完成提醒，并记录安全的数量日志。
+    def _auto_cleanup_completed_reminders(self, current_time: datetime) -> int:
+        """清理超过保留期的完成提醒，并记录安全的数量日志。"""
+        if not self.auto_cleanup_enabled:
+            return 0
+        removed_count = self.reminder_store.delete_expired_completed_reminders(
+            self.completed_retention_days,
+            current_time,
+        )
+        if removed_count:
+            logger.info("Reminder auto cleanup removed completed reminders: count=%s", removed_count)
+        return removed_count

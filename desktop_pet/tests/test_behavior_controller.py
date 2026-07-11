@@ -254,7 +254,8 @@ class BehaviorControllerTests(unittest.TestCase):
             }
             controller = self._controller(Path(temp), config, local_lines=local_lines)
             controller.last_user_interaction = now_local().replace(year=2000)
-            controller.awaiting_user_reply = True
+            controller.notify_proactive_shown("regular_greeting")
+            controller.last_proactive_at = now_local().replace(year=2000)
             controller._consecutive_unanswered = 1
             spoken: list[tuple[str, int, str]] = []
             controller.speak_requested.connect(lambda *args: spoken.append(args))
@@ -262,7 +263,7 @@ class BehaviorControllerTests(unittest.TestCase):
             controller._maybe_idle_prompt()
 
             self.assertEqual(spoken[0][0], "看你可能在忙，我先安静一会儿，需要我就点我。")
-            self.assertEqual(controller._last_proactive_type, "low_interrupt_greeting")
+            self.assertEqual(controller.pending_proactive_type(), "low_interrupt_greeting")
 
     # 验证场景 问候 emits API 请求 when 记忆 上下文 exists场景下的预期结果。
     def test_scenario_greeting_emits_api_request_when_memory_context_exists(self) -> None:
@@ -315,7 +316,7 @@ class BehaviorControllerTests(unittest.TestCase):
                 requested[0]["context"]["character_behavior"]["proactive_style"],
                 "轻量出现，不要求回应。",
             )
-            self.assertEqual(controller._last_proactive_type, "memory_context_greeting")
+            self.assertEqual(controller.pending_proactive_type(), "memory_context_greeting")
 
     # 验证场景 问候 uses 本地 template when API disabled场景下的预期结果。
     def test_scenario_greeting_uses_local_template_when_api_disabled(self) -> None:
@@ -349,7 +350,91 @@ class BehaviorControllerTests(unittest.TestCase):
             controller._maybe_idle_prompt()
 
             self.assertEqual(spoken[0][0], "桌宠记忆系统这块先抓最关键的一小步就行。")
-            self.assertEqual(controller._last_proactive_type, "memory_context_greeting")
+            self.assertEqual(controller.pending_proactive_type(), "memory_context_greeting")
+
+    # 验证有效互动会统一重置等待回复和未回应计数，并更新消息时间。
+    def test_user_interaction_and_message_update_unified_time_state(self) -> None:
+        """验证有效互动会统一重置等待回复和未回应计数。"""
+        with tempfile.TemporaryDirectory() as temp:
+            controller = self._controller(Path(temp), {})
+            controller.notify_proactive_shown("regular_greeting")
+            controller._consecutive_unanswered = 2
+
+            controller.notify_user_interaction("pet_click")
+
+            self.assertFalse(controller.awaiting_user_reply)
+            self.assertEqual(controller._consecutive_unanswered, 0)
+            self.assertIsNotNone(controller.last_user_interaction_at.tzinfo)
+
+            controller.notify_user_message()
+
+            self.assertIsNotNone(controller.last_user_message_at)
+            self.assertGreaterEqual(
+                controller.last_user_message_at,
+                controller.last_user_interaction_at,
+            )
+
+    # 验证主动问候未被窗口实际展示时不会更新展示时间或日用量。
+    def test_blocked_proactive_request_does_not_record_shown_time(self) -> None:
+        """验证主动问候未被窗口实际展示时不会更新展示时间。"""
+        with tempfile.TemporaryDirectory() as temp:
+            config = {
+                "behavior": {
+                    "proactive_chat": True,
+                    "do_not_disturb": False,
+                    "max_local_lines_per_day": 10,
+                    "min_proactive_interval_minutes": 1,
+                },
+                "proactive_content_ratio": {"extra_knowledge": 0.0, "regular_greeting": 1.0},
+            }
+            controller = self._controller(Path(temp), config)
+            controller.can_show_proactive = lambda: False
+            controller.last_user_interaction = now_local().replace(year=2000)
+
+            controller._maybe_idle_prompt()
+
+            self.assertIsNone(controller.last_proactive_shown_at)
+            self.assertEqual(controller.usage_store.local_count, 0)  # type: ignore[union-attr]
+
+    # 验证同一条未回应问候只会增加一次计数，并按次数拉长间隔。
+    def test_unanswered_prompt_is_counted_once_and_extends_interval(self) -> None:
+        """验证同一条未回应问候只会增加一次计数。"""
+        with tempfile.TemporaryDirectory() as temp:
+            controller = self._controller(Path(temp), {})
+            controller.notify_proactive_shown("regular_greeting")
+            controller.last_user_interaction = now_local().replace(year=2000)
+            controller.last_proactive_at = now_local().replace(year=2000)
+            controller.awaiting_user_reply = True
+
+            controller._maybe_idle_prompt()
+            controller._maybe_idle_prompt()
+
+            self.assertEqual(controller._consecutive_unanswered, 1)
+            controller._consecutive_unanswered = 2
+            self.assertGreaterEqual(
+                controller._dynamic_proactive_interval_minutes(),
+                30,
+            )
+
+    # 验证运行状态跨重启保存带时区时间，损坏字段不会阻止控制器启动。
+    def test_runtime_time_state_is_persistent_and_tolerates_invalid_values(self) -> None:
+        """验证运行状态跨重启保存带时区时间并容忍损坏字段。"""
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            controller = self._controller(temp_path, {})
+            controller.notify_user_message()
+            controller.notify_proactive_shown("regular_greeting")
+            controller.flush_runtime_state()
+
+            restored = self._controller(temp_path, {})
+            self.assertIsNotNone(restored.last_user_message_at)
+            self.assertIsNotNone(restored.last_proactive_shown_at)
+            state_path = temp_path / "data" / "runtime_state.json"
+            state_path.write_text('{"last_user_interaction_at":"bad-time"}', encoding="utf-8")
+
+            recovered = self._controller(temp_path, {})
+            self.assertIsNotNone(recovered.last_user_interaction_at)
+            self.assertIsNone(recovered.last_user_message_at)
 
 
 if __name__ == "__main__":

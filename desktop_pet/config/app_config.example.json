@@ -71,7 +71,11 @@
     "enabled": true,
     "check_interval_seconds": 30,
     "max_active_reminders": 20,
-    "respect_do_not_disturb": false
+    "respect_do_not_disturb": false,
+    "auto_cleanup_enabled": true,
+    "completed_retention_days": 7,
+    "ack_repeat_minutes": 5,
+    "snooze_minutes": 10
   },
   "clipboard": {
     "enabled": true,

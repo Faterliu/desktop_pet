@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import random
-from datetime import timedelta
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,8 +15,9 @@ from character.proactive_context import (
 )
 from storage.json_store import load_json
 from storage.local_lines_service import LocalLinesService
+from storage.runtime_state_store import RuntimeStateStore
 from storage.usage_store import UsageStore
-from utils.time_utils import now_local
+from utils.time_utils import elapsed_seconds, now_local, now_utc, parse_iso_datetime, to_utc
 
 
 class BehaviorController(QObject):
@@ -33,6 +35,8 @@ class BehaviorController(QObject):
         memory_checker: Callable[[], bool | None] | None = None,
         config_saver: Callable[[], None] | None = None,
         character_path: str | Path | None = None,
+        runtime_state_path: str | Path | None = None,
+        can_show_proactive: Callable[[], bool] | None = None,
     ) -> None:
         """初始化当前对象及其依赖。"""
         super().__init__()
@@ -49,13 +53,23 @@ class BehaviorController(QObject):
             if character_path
             else self.app_config_path.parent / "character_default.json"
         )
-
-        self.last_user_interaction = now_local()
-        self.last_proactive_at = None
+        self.runtime_state_store = RuntimeStateStore(
+            runtime_state_path or self.app_config_path.parent.parent / "data" / "runtime_state.json"
+        )
+        self.can_show_proactive = can_show_proactive or (lambda: True)
+        persisted = self.runtime_state_store.load()
+        self.last_user_interaction_at = parse_iso_datetime(persisted["last_user_interaction_at"]) or now_utc()
+        self.last_user_message_at = parse_iso_datetime(persisted["last_user_message_at"])
+        self.last_proactive_shown_at = parse_iso_datetime(persisted["last_proactive_shown_at"])
+        self.last_proactive_replied_at = parse_iso_datetime(persisted["last_proactive_replied_at"])
+        self._last_user_interaction_monotonic: float | None = None
+        self._last_proactive_shown_monotonic: float | None = None
         self.last_scenario_greeting_at = None
         self.awaiting_user_reply = False
         self._consecutive_unanswered = 0
+        self._unanswered_counted_for = ""
         self._last_proactive_type = ""
+        self._requested_proactive_type = ""
         self._last_time_key = self._time_greeting_key()
         self._last_season_key = self._season_key()
 
@@ -66,6 +80,10 @@ class BehaviorController(QObject):
         self.period_check_timer = QTimer(self)
         self.period_check_timer.timeout.connect(self._check_period_change)
 
+        self._state_save_timer = QTimer(self)
+        self._state_save_timer.setSingleShot(True)
+        self._state_save_timer.timeout.connect(self.flush_runtime_state)
+
     # 启动主动问候定时器，并同步下一次主动检查状态。
     def start(self) -> None:
         """启动主动问候定时器，并同步下一次主动检查状态。"""
@@ -75,33 +93,112 @@ class BehaviorController(QObject):
     # 重载主动行为配置，并同步下一次主动检查状态。
     def reload(self) -> None:
         """重载主动行为配置，并同步下一次主动检查状态。"""
-        self.last_user_interaction = now_local()
-        self.awaiting_user_reply = False
-        self._consecutive_unanswered = 0
-        self._last_proactive_type = ""
         self.last_scenario_greeting_at = None
         self._last_time_key = self._time_greeting_key()
         self._last_season_key = self._season_key()
 
+    # 兼容旧调用方读取或设置最近互动时间；统一转换到 UTC 状态字段。
+    @property
+    def last_user_interaction(self) -> datetime:
+        """兼容旧调用方读取最近互动时间。"""
+        return self.last_user_interaction_at
+
+    @last_user_interaction.setter
+    def last_user_interaction(self, value: datetime) -> None:
+        """兼容旧调用方设置最近互动时间。"""
+        self.last_user_interaction_at = to_utc(value)
+        self._last_user_interaction_monotonic = None
+
+    # 兼容旧调用方读取或设置最近主动问候时间。
+    @property
+    def last_proactive_at(self) -> datetime | None:
+        """兼容旧调用方读取最近主动问候时间。"""
+        return self.last_proactive_shown_at
+
+    @last_proactive_at.setter
+    def last_proactive_at(self, value: datetime | None) -> None:
+        """兼容旧调用方设置最近主动问候时间。"""
+        self.last_proactive_shown_at = to_utc(value) if value else None
+        self._last_proactive_shown_monotonic = None
+
     # 记录最近一次用户交互时间，并清除等待回复状态。
-    def notify_user_interaction(self) -> None:
+    def notify_user_interaction(self, source: str = "unknown") -> None:
         """记录最近一次用户交互时间，并清除等待回复状态。"""
-        self.last_user_interaction = now_local()
+        del source
+        self.last_user_interaction_at = now_utc()
+        self._last_user_interaction_monotonic = time.monotonic()
         self.awaiting_user_reply = False
         self._consecutive_unanswered = 0
+        self._unanswered_counted_for = ""
+        self._schedule_runtime_state_save()
+
+    # 记录用户提交的聊天消息，同时保留统一互动时间。
+    def notify_user_message(self) -> None:
+        """记录用户提交的聊天消息。"""
+        self.notify_user_interaction("chat_message")
+        self.last_user_message_at = now_utc()
+        self._schedule_runtime_state_save()
 
     # 记录主动问候展示时间和类型，并进入等待回复状态。
     def notify_proactive_shown(self, proactive_type: str = "regular_greeting") -> None:
         """记录主动问候展示时间和类型，并进入等待回复状态。"""
-        self.last_proactive_at = now_local()
+        self.last_proactive_shown_at = now_utc()
+        self._last_proactive_shown_monotonic = time.monotonic()
         self.awaiting_user_reply = True
         self._last_proactive_type = proactive_type
+        self._unanswered_counted_for = ""
+        if proactive_type == "extra_knowledge":
+            self.usage_store.increment_api_line()
+        else:
+            self.usage_store.increment_local_line()
+        self._schedule_runtime_state_save()
 
     # 根据上一条主动问候类型调整后续内容比例。
-    def notify_proactive_response(self) -> None:
+    def notify_proactive_response(self) -> bool:
         """根据上一条主动问候类型调整后续内容比例。"""
+        if not self.is_within_proactive_reply_window():
+            return False
+        self.last_proactive_replied_at = now_utc()
+        self.notify_user_interaction("proactive_response")
         if self._last_proactive_type:
             self._adjust_ratio(self._last_proactive_type)
+        self._schedule_runtime_state_save()
+        return True
+
+    # 将需要持久化的业务时间延迟写入，避免高频点击反复写盘。
+    def _schedule_runtime_state_save(self) -> None:
+        """将需要持久化的业务时间延迟写入。"""
+        self._state_save_timer.start(1500)
+
+    # 立即写入关键业务时间，供正常退出和测试调用。
+    def flush_runtime_state(self) -> None:
+        """立即写入关键业务时间。"""
+        self._state_save_timer.stop()
+        self.runtime_state_store.save(
+            {
+                "last_user_interaction_at": self.last_user_interaction_at,
+                "last_user_message_at": self.last_user_message_at,
+                "last_proactive_shown_at": self.last_proactive_shown_at,
+                "last_proactive_replied_at": self.last_proactive_replied_at,
+            }
+        )
+
+    # 返回当前主动问候类型，供窗口在实际显示成功后回写状态。
+    def pending_proactive_type(self) -> str:
+        """返回当前待显示主动问候类型。"""
+        return self._requested_proactive_type or "regular_greeting"
+
+    # 发出待展示的本地主动问候请求；展示成功后由窗口调用 notify_proactive_shown。
+    def _request_proactive_line(
+        self,
+        line: str,
+        duration_ms: int,
+        action_name: str,
+        proactive_type: str,
+    ) -> None:
+        """发出待展示的本地主动问候请求。"""
+        self._requested_proactive_type = proactive_type
+        self.speak_requested.emit(line, duration_ms, action_name)
 
     # 读取主动内容比例配置，缺失时写入普通问候和知识问候默认比例。
     def _proactive_ratio(self) -> dict[str, float]:
@@ -167,12 +264,12 @@ class BehaviorController(QObject):
         if not line:
             line = self._random_line("startup")
 
-        if line:
-            self.notify_proactive_shown()
-            self.speak_requested.emit(
+        if line and self.can_show_proactive():
+            self._request_proactive_line(
                 line,
                 self._bubble_duration_ms("startup_greeting", 7000),
                 "waving",
+                "startup_greeting",
             )
 
     # 根据连续未回应次数计算下一次主动问候间隔。
@@ -257,14 +354,18 @@ class BehaviorController(QObject):
             return
 
         interval_minutes = self._effective_proactive_interval_minutes(behavior)
-        now = now_local()
-        if now - self.last_user_interaction < timedelta(minutes=interval_minutes):
+        if not self.can_show_proactive():
             return
-        if self.last_proactive_at and now - self.last_proactive_at < timedelta(minutes=interval_minutes):
+        now = now_local()
+        if elapsed_seconds(self.last_user_interaction_at, self._last_user_interaction_monotonic) < interval_minutes * 60:
+            return
+        if elapsed_seconds(self.last_proactive_shown_at, self._last_proactive_shown_monotonic) < interval_minutes * 60:
             return
 
-        if self.awaiting_user_reply:
+        shown_key = self.last_proactive_shown_at.isoformat() if self.last_proactive_shown_at else ""
+        if self.awaiting_user_reply and shown_key and self._unanswered_counted_for != shown_key:
             self._consecutive_unanswered += 1
+            self._unanswered_counted_for = shown_key
 
         if self._try_scenario_greeting(behavior, now):
             return
@@ -276,9 +377,8 @@ class BehaviorController(QObject):
             if memory_available is None:
                 return
             if memory_available:
-                self.notify_proactive_shown("extra_knowledge")
+                self._requested_proactive_type = "extra_knowledge"
                 self.knowledge_speak_requested.emit()
-                self._consecutive_unanswered = 0
                 return
 
         line_types = ["idle", "quiet", "encourage", "break_reminder"]
@@ -342,33 +442,31 @@ class BehaviorController(QObject):
 
         self.last_scenario_greeting_at = now
         if behavior.get("scenario_greeting_api_enabled", True) and self._can_use_api(behavior):
-            self.usage_store.increment_api_line()
-            self.notify_proactive_shown("memory_context_greeting")
+            self._requested_proactive_type = "memory_context_greeting"
             self.scenario_greeting_requested.emit(
                 {
                     "greeting_type": "memory_context_greeting",
+                    "proactive_type": "memory_context_greeting",
                     "context": context,
                     "fallback_line": fallback_line,
                     "max_chars": max_chars,
                 }
             )
-            self._consecutive_unanswered = 0
             return True
 
         self._emit_local_proactive_line(fallback_line, "memory_context_greeting")
         return True
 
-    # 发送本地主动台词信号，并记录展示类型。
+    # 发送本地主动台词请求；仅窗口实际展示成功后才记录展示状态。
     def _emit_local_proactive_line(self, line: str, proactive_type: str) -> None:
         """发送本地主动台词信号，并记录展示类型。"""
-        self.usage_store.increment_local_line()
-        self.notify_proactive_shown(proactive_type)
-        self.speak_requested.emit(
+        action_name = "idle" if proactive_type == "low_interrupt_greeting" else "waving"
+        self._request_proactive_line(
             line,
             self._bubble_duration_ms("proactive_greeting", 6000),
-            "waving",
+            action_name,
+            proactive_type,
         )
-        self._consecutive_unanswered = 0
 
     # 根据 behavior 判断useAPI是否满足条件并返回布尔结果。
     def _can_use_api(self, behavior: dict[str, Any]) -> bool:
@@ -466,13 +564,12 @@ class BehaviorController(QObject):
             line = self._random_line(time_key) if time_key else ""
             if not line:
                 line = self._random_line("startup")
-            if line:
-                self.usage_store.increment_local_line()
-                self.notify_proactive_shown()
-                self.speak_requested.emit(
+            if line and self.can_show_proactive():
+                self._request_proactive_line(
                     line,
                     self._bubble_duration_ms("period_greeting", 7000),
                     "waving",
+                    "period_greeting",
                 )
 
     # 按指定台词组触发测试气泡展示，并返回是否成功。
@@ -487,11 +584,11 @@ class BehaviorController(QObject):
         if not line:
             return False
 
-        self.notify_proactive_shown()
-        self.speak_requested.emit(
+        self._request_proactive_line(
             line,
             self._bubble_duration_ms("proactive_greeting", 6000),
             "waving",
+            "regular_greeting",
         )
         return True
 
@@ -501,15 +598,17 @@ class BehaviorController(QObject):
         saved_interaction = self.last_user_interaction
         saved_proactive = self.last_proactive_at
         saved_type = self._last_proactive_type
+        saved_requested_type = self._requested_proactive_type
         long_ago = now_local() - timedelta(hours=24)
         self.last_user_interaction = long_ago
         self.last_proactive_at = None
         self._last_proactive_type = ""
         try:
             self._maybe_idle_prompt()
-            result_type = self._last_proactive_type
+            result_type = self._requested_proactive_type
         finally:
             self._last_proactive_type = saved_type
+            self._requested_proactive_type = saved_requested_type
             self.last_user_interaction = saved_interaction
             self.last_proactive_at = saved_proactive
 
@@ -544,9 +643,12 @@ class BehaviorController(QObject):
     # 根据 window_seconds 判断within主动行为回复窗口是否满足条件并返回布尔结果。
     def is_within_proactive_reply_window(self, window_seconds: int = 60) -> bool:
         """根据 window_seconds 判断within主动行为回复窗口是否满足条件并返回布尔结果。"""
-        if self.last_proactive_at is None:
+        if not self.awaiting_user_reply or self.last_proactive_shown_at is None:
             return False
-        return now_local() - self.last_proactive_at < timedelta(seconds=window_seconds)
+        return elapsed_seconds(
+            self.last_proactive_shown_at,
+            self._last_proactive_shown_monotonic,
+        ) < window_seconds
 
     # 从取消置顶提示台词组中随机选择一条可展示文本。
     def pick_ignored_line(self) -> str:

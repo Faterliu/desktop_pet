@@ -699,6 +699,7 @@ class DesktopPetWindow(QWidget):
         self.daily_usage_path = self.data_dir / "daily_usage.json"
         self.reminders_path = self.data_dir / "reminders.json"
         self.window_state_path = self.data_dir / "window_state.json"
+        self.runtime_state_path = self.data_dir / "runtime_state.json"
 
         self.app_config = self._load_app_config()
         self.config_service = ConfigService(self.app_config)
@@ -753,6 +754,11 @@ class DesktopPetWindow(QWidget):
         self.pending_formal_question = ""
         self._pending_was_formal = False
         self._pending_knowledge_mem0_context = ""
+        self._reminder_reply_queue: list[dict[str, str]] = []
+        self._active_reminder_reply_id = ""
+        self._reminder_reply_timer = QTimer(self)
+        self._reminder_reply_timer.setSingleShot(True)
+        self._reminder_reply_timer.timeout.connect(self._expire_reminder_reply_controls)
 
         self.chat_store_formal = ChatStore(self.chat_history_formal_path)
         self.chat_store_informal = ChatStore(self.chat_history_informal_path)
@@ -768,6 +774,9 @@ class DesktopPetWindow(QWidget):
             self.reminder_store,
             enabled=self._reminders_enabled(),
             check_interval_seconds=self._reminder_check_interval_seconds(),
+            auto_cleanup_enabled=self._reminder_auto_cleanup_enabled(),
+            completed_retention_days=self._reminder_completed_retention_days(),
+            ack_repeat_minutes=self._reminder_ack_repeat_minutes(),
             can_deliver=self._can_deliver_reminders,
             parent=self,
         )
@@ -824,6 +833,8 @@ class DesktopPetWindow(QWidget):
         self.sprite_player = SpritePlayer(self.sprite_config_path, self._ui_scale())
         self.bubble = SpeechBubble()
         self.reply_bubble = ReplyBubble()
+        self.reminder_ack_bubble = ReplyBubble()
+        self.reminder_snooze_bubble = ReplyBubble()
         self.chat_input = ChatInput()
         self.behavior_controller = BehaviorController(
             self.config_path,
@@ -833,6 +844,8 @@ class DesktopPetWindow(QWidget):
             self._has_knowledge_memory,
             config_saver=self._save_app_config,
             character_path=self.character_path,
+            runtime_state_path=self.runtime_state_path,
+            can_show_proactive=self._can_show_proactive_greeting,
         )
         self.auto_move_timer = QTimer(self)
         self.auto_move_timer.timeout.connect(self._trigger_auto_move)
@@ -890,6 +903,8 @@ class DesktopPetWindow(QWidget):
             self._handle_scenario_greeting
         )
         self.reply_bubble.clicked.connect(self._handle_reply_bubble_clicked)
+        self.reminder_ack_bubble.clicked.connect(self._acknowledge_active_reminder)
+        self.reminder_snooze_bubble.clicked.connect(self._snooze_active_reminder)
         self.reminder_controller.reminder_due.connect(self._handle_due_reminder)
 
     # 窗口首次显示时启动主动行为控制器和置顶强制计时器。
@@ -928,6 +943,7 @@ class DesktopPetWindow(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """处理鼠标按下事件，用于拖拽和右键菜单。"""
         if event.button() == Qt.MouseButton.LeftButton:
+            self._record_user_interaction("pet_click")
             self.dragging = False
             self.drag_start_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self.mouse_press_position = event.globalPosition().toPoint()
@@ -979,8 +995,8 @@ class DesktopPetWindow(QWidget):
             else:
                 reply = self.behavior_controller.pick_reply_line()
             if reply:
-                self.behavior_controller.notify_user_interaction()
-                self.sprite_player.set_action("waving")
+                self._settle_after_user_interaction()
+                self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
                 self._display_message(reply, 7000, "system")
         super().mouseDoubleClickEvent(event)
 
@@ -1003,9 +1019,13 @@ class DesktopPetWindow(QWidget):
             self._close_after_workers_finished = False
         self._destroy_formal_answer_panels()
         self.reminder_controller.stop()
+        self.behavior_controller.flush_runtime_state()
+        self._reminder_reply_timer.stop()
         self._save_window_position()
         self.bubble.hide()
         self.reply_bubble.hide()
+        self.reminder_ack_bubble.hide()
+        self.reminder_snooze_bubble.hide()
         self.chat_input.hide()
         if self.mem0_memory_service is not None:
             self.mem0_memory_service.close()
@@ -1058,6 +1078,7 @@ class DesktopPetWindow(QWidget):
             on_clear_completed_reminders=self._clear_completed_reminders,
             on_clipboard_assistant=self._handle_clipboard_assistant,
         )
+        menu.triggered.connect(lambda _action: self._record_user_interaction("context_menu"))
         menu.exec(global_pos)
 
     # 响应菜单中的测试动作切换请求。
@@ -1306,16 +1327,97 @@ class DesktopPetWindow(QWidget):
         self._display_message("我来看看剪贴板里的内容。", 2800, "system")
         self._start_clipboard_assistant_worker(mode, clipboard_text)
 
-    # 接收提醒控制器的到期事件，并用挥手动作和气泡展示提醒。
+    # 接收提醒控制器的到期事件，并将提醒按顺序加入可回复展示队列。
     def _handle_due_reminder(self, reminder: dict[str, str]) -> None:
-        """接收提醒控制器的到期事件，并用挥手动作和气泡展示提醒。"""
+        """接收提醒控制器的到期事件，并将提醒按顺序加入可回复展示队列。"""
         if self._closing_or_closed():
             return
-        title = str(reminder.get("title", "")).strip()
-        if not title:
+        reminder_id = str(reminder.get("id", "")).strip()
+        if not reminder_id or not str(reminder.get("title", "")).strip():
+            return
+        queued_ids = {str(item.get("id", "")) for item in self._reminder_reply_queue}
+        if reminder_id == self._active_reminder_reply_id or reminder_id in queued_ids:
+            return
+        self._reminder_reply_queue.append(dict(reminder))
+        self._show_next_reminder_reply()
+
+    # 显示队列中的下一条待确认提醒及其两个快捷回复气泡。
+    def _show_next_reminder_reply(self) -> None:
+        """显示队列中的下一条待确认提醒及其两个快捷回复气泡。"""
+        if self._closing_or_closed() or self._active_reminder_reply_id:
+            return
+        while self._reminder_reply_queue:
+            reminder = self._reminder_reply_queue.pop(0)
+            reminder_id = str(reminder.get("id", "")).strip()
+            stored = self.reminder_store.get_reminder(reminder_id) if reminder_id else None
+            if stored is None or stored.get("status") != "awaiting_ack":
+                continue
+
+            title = str(stored.get("title", "")).strip()
+            if not title:
+                continue
+            self._active_reminder_reply_id = reminder_id
+            self.reply_bubble.hide()
+            self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
+            self._display_message(f"提醒你一下：{title}", 8000, "reminder")
+            always_on_top = self.config_service.get_bool("ui.always_on_top", True)
+            self.reminder_ack_bubble.set_always_on_top(always_on_top)
+            self.reminder_snooze_bubble.set_always_on_top(always_on_top)
+            duration_ms = self._assistant_reply_bubble_duration_ms()
+            self.reminder_ack_bubble.show_message("好的，我知道了", self.geometry(), duration_ms)
+            self.reminder_snooze_bubble.show_message(
+                f"{self._reminder_snooze_minutes()}分钟后再提醒我",
+                self.geometry(),
+                duration_ms,
+            )
+            self._reminder_reply_timer.start(duration_ms)
+            self._sync_floating_widgets()
+            return
+
+    # 确认当前展示的提醒，并在完成后继续展示队列中的下一条。
+    def _acknowledge_active_reminder(self) -> None:
+        """确认当前展示的提醒，并在完成后继续展示队列中的下一条。"""
+        reminder_id = self._active_reminder_reply_id
+        if not reminder_id:
+            return
+        reminder = self.reminder_store.acknowledge_reminder(reminder_id)
+        self._hide_reminder_reply_controls()
+        if reminder is None:
+            self._show_next_reminder_reply()
             return
         self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
-        self._display_message(f"提醒你一下：{title}", 8000, "reminder")
+        self._display_message(f"好的，已完成提醒：{reminder['title']}", 3600, "reminder")
+        QTimer.singleShot(900, self._show_next_reminder_reply)
+
+    # 将当前展示的提醒延后指定分钟数，并在完成后继续展示队列中的下一条。
+    def _snooze_active_reminder(self) -> None:
+        """将当前展示的提醒延后指定分钟数，并在完成后继续展示队列中的下一条。"""
+        reminder_id = self._active_reminder_reply_id
+        if not reminder_id:
+            return
+        minutes = self._reminder_snooze_minutes()
+        reminder = self.reminder_store.snooze_reminder(reminder_id, minutes)
+        self._hide_reminder_reply_controls()
+        if reminder is None:
+            self._show_next_reminder_reply()
+            return
+        self.sprite_player.set_action("running", fallback_action="idle", force_single_cycle=True)
+        self._display_message(f"好，{minutes} 分钟后再提醒你：{reminder['title']}", 4200, "reminder")
+        QTimer.singleShot(900, self._show_next_reminder_reply)
+
+    # 在快捷回复气泡超时后隐藏控件，提醒仍维持 awaiting_ack 等待重提示。
+    def _expire_reminder_reply_controls(self) -> None:
+        """在快捷回复气泡超时后隐藏控件，提醒仍维持 awaiting_ack 等待重提示。"""
+        self._hide_reminder_reply_controls()
+        self._show_next_reminder_reply()
+
+    # 隐藏当前提醒的快捷回复气泡并释放当前展示标记。
+    def _hide_reminder_reply_controls(self) -> None:
+        """隐藏当前提醒的快捷回复气泡并释放当前展示标记。"""
+        self._reminder_reply_timer.stop()
+        self.reminder_ack_bubble.hide()
+        self.reminder_snooze_bubble.hide()
+        self._active_reminder_reply_id = ""
 
     # 切换免打扰模式并保存配置。
     def _toggle_do_not_disturb(self, enabled: bool) -> None:
@@ -1389,6 +1491,8 @@ class DesktopPetWindow(QWidget):
         apply_transparent_window_fixes(self)
         self.chat_input.set_always_on_top(enabled)
         self.reply_bubble.set_always_on_top(enabled)
+        self.reminder_ack_bubble.set_always_on_top(enabled)
+        self.reminder_snooze_bubble.set_always_on_top(enabled)
         if enabled:
             self._topmost_enforcement_timer.start(30_000)
             reply = self.behavior_controller.pick_return_after_idle_line()
@@ -1513,6 +1617,9 @@ class DesktopPetWindow(QWidget):
         self.reminder_controller.configure(
             self._reminders_enabled(),
             self._reminder_check_interval_seconds(),
+            self._reminder_auto_cleanup_enabled(),
+            self._reminder_completed_retention_days(),
+            self._reminder_ack_repeat_minutes(),
         )
         self.memory_vector_store.update_config(self.app_config)
         self._start_mem0_initialization(close_existing=True)
@@ -1540,7 +1647,7 @@ class DesktopPetWindow(QWidget):
         if self._clear_history_in_progress():
             self._display_message("先等一下，我正在整理笔记。", 3200, "system")
             return
-        self.behavior_controller.notify_user_interaction()
+        self._record_user_interaction("open_chat_input")
         self.chat_input.set_always_on_top(self.config_service.get_bool("ui.always_on_top", True))
         self.chat_input.show_near(self.geometry())
         self.sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)
@@ -1552,6 +1659,10 @@ class DesktopPetWindow(QWidget):
     # 处理用户提交的消息，并决定走占位回复还是 API 回复。
     def _handle_user_message(self, message: str) -> None:
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
+        if self.behavior_controller.is_within_proactive_reply_window():
+            self.behavior_controller.notify_proactive_response()
+        self.behavior_controller.notify_user_message()
+        self._settle_after_user_interaction()
         if re.match(r"^\s*/remind(?:\s|$)", message, re.IGNORECASE):
             self._waiting_timer.stop()
             self._handle_remind_command(message)
@@ -1560,7 +1671,6 @@ class DesktopPetWindow(QWidget):
         if self._clear_history_in_progress():
             self._display_message("先等一下，我正在整理笔记。", 3200, "system")
             return
-        self.behavior_controller.notify_user_interaction()
         chat_context = self.chat_flow_controller.begin_user_message(message)
         self._sync_chat_flow_state()
 
@@ -2140,7 +2250,8 @@ class DesktopPetWindow(QWidget):
             return
         completion = self.chat_flow_controller.complete_success(reply)
         self._sync_chat_flow_state()
-        self.sprite_player.set_action("idle")
+        if not self._active_reminder_reply_id:
+            self.sprite_player.set_action("idle")
         self._show_answer_output(
             completion.reply,
             source="assistant",
@@ -2155,7 +2266,8 @@ class DesktopPetWindow(QWidget):
             return
         failure = self.chat_flow_controller.complete_failure(error_message)
         self._sync_chat_flow_state()
-        self.sprite_player.set_action("failed")
+        if not self._active_reminder_reply_id:
+            self.sprite_player.set_action("failed", fallback_action="idle", force_single_cycle=True)
         self._display_message(failure.error_message, 12000, "assistant")
 
     # 展示剪贴板辅助结果；此路径不写入聊天记录，也不会触发摘要或记忆更新。
@@ -2164,7 +2276,8 @@ class DesktopPetWindow(QWidget):
         if self._closing_or_closed():
             return
         cleaned_reply = reply.strip() or "没有得到可显示的处理结果。"
-        self.sprite_player.set_action("idle")
+        if not self._active_reminder_reply_id:
+            self.sprite_player.set_action("idle")
         if len(cleaned_reply) > 360:
             self._show_clipboard_assistant_panel(mode, cleaned_reply)
             return
@@ -2175,7 +2288,8 @@ class DesktopPetWindow(QWidget):
         """展示剪贴板辅助失败提示，不影响当前聊天状态和历史数据。"""
         if self._closing_or_closed():
             return
-        self.sprite_player.set_action("failed")
+        if not self._active_reminder_reply_id:
+            self.sprite_player.set_action("failed", fallback_action="idle", force_single_cycle=True)
         self._display_message(error_message, 10000, "assistant")
 
     # 处理 API 主动说话测试成功后的界面更新。
@@ -2228,15 +2342,18 @@ class DesktopPetWindow(QWidget):
     # 响应主动行为控制器的说话请求。
     def _handle_behavior_speak(self, text: str, duration_ms: int, action_name: str) -> None:
         """响应主动行为控制器的说话请求。"""
-        if self._chat_in_progress() or self.chat_input.isVisible():
+        if not self._can_show_proactive_greeting():
             return
         self.sprite_player.set_action(action_name)
         self._display_message(text, duration_ms, "proactive")
+        self.behavior_controller.notify_proactive_shown(
+            self.behavior_controller.pending_proactive_type()
+        )
 
     # 接收场景问候请求，并按上下文决定本地或 API 生成。
     def _handle_scenario_greeting(self, payload: dict[str, Any]) -> None:
         """接收场景问候请求，并按上下文决定本地或 API 生成。"""
-        if self._chat_in_progress() or self.chat_input.isVisible():
+        if not self._can_show_proactive_greeting():
             return
         fallback_line = str(payload.get("fallback_line", "")).strip()
         if not self.deepseek_client.is_configured():
@@ -2311,7 +2428,7 @@ class DesktopPetWindow(QWidget):
     # 根据 line 显示场景问候台词内容并安排后续气泡状态。
     def _show_scenario_greeting_line(self, line: str) -> None:
         """根据 line 显示场景问候台词内容并安排后续气泡状态。"""
-        if not line or self.chat_input.isVisible():
+        if not line or not self._can_show_proactive_greeting():
             return
         self.sprite_player.set_action("waving")
         self._display_message(
@@ -2319,11 +2436,14 @@ class DesktopPetWindow(QWidget):
             self._proactive_greeting_duration_ms(),
             "proactive",
         )
+        self.behavior_controller.notify_proactive_shown(
+            self.behavior_controller.pending_proactive_type()
+        )
 
     # 响应主动知识问候请求：基于 memory 调用 API 生成额外内容。
     def _handle_knowledge_speak(self) -> None:
         """响应主动知识问候请求：基于 memory 调用 API 生成额外内容。"""
-        if self._chat_in_progress() or self.chat_input.isVisible():
+        if not self._can_show_proactive_greeting():
             return
 
         if not self.deepseek_client.is_configured():
@@ -2331,7 +2451,6 @@ class DesktopPetWindow(QWidget):
             self.behavior_controller.trigger_test_speak()
             return
 
-        self.sprite_player.set_action("waving")
         self._start_knowledge_worker()
 
     # 创建后台线程执行记忆增强的知识问候 API 请求。
@@ -2376,23 +2495,25 @@ class DesktopPetWindow(QWidget):
     # 知识问候 API 成功返回后，展示内容并在右侧弹出可点击的应答气泡。
     def _on_knowledge_speak_success(self, reply: str) -> None:
         """知识问候 API 成功返回后，展示内容并在右侧弹出可点击的应答气泡。"""
-        if self._closing_or_closed():
+        if self._closing_or_closed() or not self._can_show_proactive_greeting():
             return
         cleaned_reply = reply.strip() or "让我再看看哦。"
-        self.sprite_player.set_action("idle")
+        self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
         parts = split_knowledge_bubble_text(cleaned_reply)
         if len(parts) <= 1:
             self._display_message(parts[0] if parts else cleaned_reply, 15000, "proactive")
+            self.behavior_controller.notify_proactive_shown("extra_knowledge")
             self._show_knowledge_reply_ack()
             return
 
         self._display_message(parts[0], 7000, "proactive")
+        self.behavior_controller.notify_proactive_shown("extra_knowledge")
         QTimer.singleShot(5200, lambda second=parts[1]: self._show_knowledge_second_part(second))
 
     # 根据 text 显示知识问候secondpart内容并安排后续气泡状态。
     def _show_knowledge_second_part(self, text: str) -> None:
         """根据 text 显示知识问候secondpart内容并安排后续气泡状态。"""
-        if self._closing_or_closed() or self.chat_input.isVisible():
+        if self._closing_or_closed() or not self._can_show_proactive_greeting():
             return
         self._display_message(text, 12000, "proactive")
         self._show_knowledge_reply_ack()
@@ -2400,6 +2521,8 @@ class DesktopPetWindow(QWidget):
     # 显示知识问候回复ack内容并安排后续气泡状态。
     def _show_knowledge_reply_ack(self) -> None:
         """显示知识问候回复ack内容并安排后续气泡状态。"""
+        if self._active_reminder_reply_id or self._reminder_reply_queue:
+            return
         ack = self.behavior_controller.pick_reply_ack_line()
         if ack:
             self.reply_bubble.set_always_on_top(
@@ -2419,8 +2542,9 @@ class DesktopPetWindow(QWidget):
     # 用户点击右侧应答气泡，视为回应主动问候并更新间隔。
     def _handle_reply_bubble_clicked(self) -> None:
         """用户点击右侧应答气泡，视为回应主动问候并更新间隔。"""
-        self.behavior_controller.notify_user_interaction()
-        self.behavior_controller.notify_proactive_response()
+        if self.behavior_controller.notify_proactive_response():
+            self._settle_after_user_interaction()
+            self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
 
     # 通过气泡组件显示一条消息。
     def _display_message(self, text: str, duration_ms: int, source: str = "system") -> None:
@@ -2583,7 +2707,7 @@ class DesktopPetWindow(QWidget):
     def _trigger_auto_move(self) -> None:
         """随机触发一次桌宠横向移动动画。"""
         self._refresh_auto_move_timer()
-        if self._chat_in_progress() or self._movement_locked():
+        if self._interaction_busy() or self._movement_locked():
             return
         screen = self._current_screen()
         if not screen:
@@ -2668,6 +2792,40 @@ class DesktopPetWindow(QWidget):
         """判断当前窗口是否处于禁止自动移动的状态。"""
         return self.dragging or self.exit_animation_in_progress
 
+    # 判断互动后是否仍有任务、提醒或输入状态需要保留当前动作。
+    def _interaction_busy(self) -> bool:
+        """判断互动后是否仍有任务、提醒或输入状态需要保留当前动作。"""
+        return (
+            self._chat_in_progress()
+            or self.background_tasks.is_running("clipboard_assistant")
+            or bool(self._active_reminder_reply_id or self._reminder_reply_queue)
+            or self.chat_input.isVisible()
+        )
+
+    # 统一将有效用户操作通知给行为控制器，并终止不合时宜的自主移动。
+    def _record_user_interaction(self, source: str) -> None:
+        """统一将有效用户操作通知给行为控制器。"""
+        self.behavior_controller.notify_user_interaction(source)
+        self._settle_after_user_interaction()
+
+    # 在没有进行中任务时结束自主移动并恢复空闲动作。
+    def _settle_after_user_interaction(self) -> None:
+        """在没有进行中任务时结束自主移动并恢复空闲动作。"""
+        if self._interaction_busy():
+            return
+        self._stop_active_move_animation()
+        self.sprite_player.set_action("idle")
+        self._refresh_auto_move_timer()
+
+    # 返回主动问候可实际展示的前置条件，供行为控制器和窗口回调共用。
+    def _can_show_proactive_greeting(self) -> bool:
+        """返回主动问候可实际展示的前置条件。"""
+        if self._closing_or_closed() or self.config_service.get_bool("behavior.do_not_disturb", False):
+            return False
+        if self._interaction_busy():
+            return False
+        return self.bubble.source != "reminder"
+
     # 根据窗口当前位置查找所在屏幕，缺失时回退主屏幕。
     def _current_screen(self):
         """根据窗口当前位置查找所在屏幕，缺失时回退主屏幕。"""
@@ -2675,14 +2833,22 @@ class DesktopPetWindow(QWidget):
         screen = QApplication.screenAt(anchor_point)
         return screen or QApplication.primaryScreen()
 
-    # 让气泡和输入框跟随角色当前位置，两个气泡互相避让。
+    # 让气泡和输入框跟随角色当前位置，多个应答气泡互相避让。
     def _sync_floating_widgets(self) -> None:
-        """让气泡和输入框跟随角色当前位置，两个气泡互相避让。"""
+        """让气泡和输入框跟随角色当前位置，多个应答气泡互相避让。"""
         anchor_rect = self.geometry()
         bubble_visible = self.bubble.isVisible()
-        reply_visible = self.reply_bubble.isVisible()
+        reply_bubbles = [
+            bubble
+            for bubble in (
+                self.reply_bubble,
+                self.reminder_ack_bubble,
+                self.reminder_snooze_bubble,
+            )
+            if bubble.isVisible()
+        ]
         if bubble_visible:
-            exclusions = [self.reply_bubble.geometry()] if reply_visible else None
+            exclusions = [bubble.geometry() for bubble in reply_bubbles] or None
             self.bubble.move(
                 self.bubble_position_service.speech_bubble_position(
                     (self.bubble.width(), self.bubble.height()),
@@ -2690,15 +2856,19 @@ class DesktopPetWindow(QWidget):
                     exclusions,
                 )
             )
-        if reply_visible:
-            exclusions = [self.bubble.geometry()] if bubble_visible else None
-            self.reply_bubble.move(
+        positioned_replies: list[QRect] = []
+        for reply_bubble in reply_bubbles:
+            exclusions = list(positioned_replies)
+            if bubble_visible:
+                exclusions.append(self.bubble.geometry())
+            reply_bubble.move(
                 self.bubble_position_service.reply_bubble_position(
-                    (self.reply_bubble.width(), self.reply_bubble.height()),
+                    (reply_bubble.width(), reply_bubble.height()),
                     anchor_rect,
-                    exclusions,
+                    exclusions or None,
                 )
             )
+            positioned_replies.append(reply_bubble.geometry())
         if self.chat_input.isVisible():
             self.chat_input.reposition(anchor_rect)
 
@@ -2806,6 +2976,30 @@ class DesktopPetWindow(QWidget):
     def _max_active_reminders(self) -> int:
         """读取进行中提醒数量上限，异常配置回退到 20 条。"""
         return _positive_int(self.config_service.get("reminders.max_active_reminders", 20), 20)
+
+    # 读取已完成提醒自动清理开关，缺失配置时默认启用。
+    def _reminder_auto_cleanup_enabled(self) -> bool:
+        """读取已完成提醒自动清理开关，缺失配置时默认启用。"""
+        return self.config_service.get_bool("reminders.auto_cleanup_enabled", True)
+
+    # 读取已完成提醒保留天数，异常配置回退到 7 天。
+    def _reminder_completed_retention_days(self) -> int:
+        """读取已完成提醒保留天数，异常配置回退到 7 天。"""
+        value = self.config_service.get("reminders.completed_retention_days", 7)
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 7
+
+    # 读取待确认提醒的重复提示间隔，异常配置回退到 5 分钟。
+    def _reminder_ack_repeat_minutes(self) -> int:
+        """读取待确认提醒的重复提示间隔，异常配置回退到 5 分钟。"""
+        return _positive_int(self.config_service.get("reminders.ack_repeat_minutes", 5), 5)
+
+    # 读取提醒延后分钟数，异常配置回退到 10 分钟。
+    def _reminder_snooze_minutes(self) -> int:
+        """读取提醒延后分钟数，异常配置回退到 10 分钟。"""
+        return _positive_int(self.config_service.get("reminders.snooze_minutes", 10), 10)
 
     # 根据提醒和免打扰配置决定当前是否应投递提醒气泡。
     def _can_deliver_reminders(self) -> bool:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -11,7 +11,7 @@ from utils.time_utils import now_iso, now_local
 
 
 DEFAULT_REMINDERS = {"reminders": []}
-_VALID_STATUSES = {"active", "done", "cancelled"}
+_VALID_STATUSES = {"active", "awaiting_ack", "done", "cancelled"}
 
 
 class ReminderStore:
@@ -42,6 +42,8 @@ class ReminderStore:
             "created_at": now_iso(),
             "status": "active",
             "source": str(source).strip() or "manual",
+            "completed_at": "",
+            "notified_at": "",
         }
         with self._lock:
             payload = self._load_payload()
@@ -96,7 +98,13 @@ class ReminderStore:
                 if due_at is not None:
                     raw_reminder["due_at"] = self._normalize_datetime(due_at)
                 if status is not None:
+                    previous_status = str(raw_reminder.get("status", "active"))
                     raw_reminder["status"] = status
+                    if status == "done" and previous_status != "done":
+                        raw_reminder["completed_at"] = now_iso()
+                    elif status == "active":
+                        raw_reminder["completed_at"] = ""
+                        raw_reminder["notified_at"] = ""
                 if source is not None:
                     raw_reminder["source"] = str(source).strip() or "manual"
                 normalized = self._normalize_reminder(raw_reminder)
@@ -133,9 +141,20 @@ class ReminderStore:
             save_json(self.path, payload)
         return True
 
-    # 原子领取所有已到期 active 提醒，并在同次写入中标记为 done。
-    def claim_due_reminders(self, current_time: datetime | None = None) -> list[dict[str, str]]:
-        """原子领取所有已到期 active 提醒，并在同次写入中标记为 done。"""
+    # 原子领取到期或待确认超时的提醒，并在同次写入中标记最近提示时间。
+    def claim_due_reminders(
+        self,
+        current_time: datetime | None = None,
+        ack_repeat_minutes: int = 5,
+    ) -> list[dict[str, str]]:
+        """原子领取到期或待确认超时的提醒，并在同次写入中标记最近提示时间。"""
+        try:
+            normalized_repeat_minutes = int(ack_repeat_minutes)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("提醒确认重试间隔无效") from exc
+        if normalized_repeat_minutes < 1:
+            raise ValueError("提醒确认重试间隔需要大于 0")
+
         now = current_time or now_local()
         claimed: list[dict[str, str]] = []
         with self._lock:
@@ -145,15 +164,89 @@ class ReminderStore:
                 if not isinstance(raw_reminder, dict):
                     continue
                 reminder = self._normalize_reminder(raw_reminder)
-                if reminder["status"] != "active" or not self._is_due(reminder["due_at"], now):
+                is_newly_due = (
+                    reminder["status"] == "active" and self._is_due(reminder["due_at"], now)
+                )
+                is_ack_overdue = (
+                    reminder["status"] == "awaiting_ack"
+                    and self._should_repeat_ack(
+                        reminder["notified_at"],
+                        now,
+                        normalized_repeat_minutes,
+                    )
+                )
+                if not is_newly_due and not is_ack_overdue:
                     continue
                 raw_reminder.update(reminder)
-                raw_reminder["status"] = "done"
+                raw_reminder["status"] = "awaiting_ack"
+                raw_reminder["notified_at"] = now.isoformat(timespec="seconds")
                 claimed.append(dict(raw_reminder))
                 changed = True
             if changed:
                 save_json(self.path, payload)
         return sorted(claimed, key=lambda item: (item["due_at"], item["created_at"], item["id"]))
+
+    # 确认一条待回应提醒，并记录完成时间。
+    def acknowledge_reminder(
+        self,
+        reminder_id: str,
+        current_time: datetime | None = None,
+    ) -> dict[str, str] | None:
+        """确认一条待回应提醒，并记录完成时间。"""
+        completed_at = (current_time or now_local()).isoformat(timespec="seconds")
+        with self._lock:
+            payload = self._load_payload()
+            for raw_reminder in payload["reminders"]:
+                if not isinstance(raw_reminder, dict) or str(raw_reminder.get("id", "")) != reminder_id:
+                    continue
+                reminder = self._normalize_reminder(raw_reminder)
+                if reminder["status"] != "awaiting_ack":
+                    return None
+                raw_reminder.update(reminder)
+                raw_reminder["status"] = "done"
+                raw_reminder["completed_at"] = completed_at
+                normalized = self._normalize_reminder(raw_reminder)
+                raw_reminder.clear()
+                raw_reminder.update(normalized)
+                save_json(self.path, payload)
+                return normalized
+        return None
+
+    # 将一条待回应提醒延后指定分钟数，并恢复为 active 状态。
+    def snooze_reminder(
+        self,
+        reminder_id: str,
+        minutes: int,
+        current_time: datetime | None = None,
+    ) -> dict[str, str] | None:
+        """将一条待回应提醒延后指定分钟数，并恢复为 active 状态。"""
+        try:
+            normalized_minutes = int(minutes)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("提醒延后分钟数无效") from exc
+        if normalized_minutes < 1:
+            raise ValueError("提醒延后分钟数需要大于 0")
+
+        due_at = (current_time or now_local()) + timedelta(minutes=normalized_minutes)
+        with self._lock:
+            payload = self._load_payload()
+            for raw_reminder in payload["reminders"]:
+                if not isinstance(raw_reminder, dict) or str(raw_reminder.get("id", "")) != reminder_id:
+                    continue
+                reminder = self._normalize_reminder(raw_reminder)
+                if reminder["status"] != "awaiting_ack":
+                    return None
+                raw_reminder.update(reminder)
+                raw_reminder["status"] = "active"
+                raw_reminder["due_at"] = due_at.isoformat(timespec="seconds")
+                raw_reminder["completed_at"] = ""
+                raw_reminder["notified_at"] = ""
+                normalized = self._normalize_reminder(raw_reminder)
+                raw_reminder.clear()
+                raw_reminder.update(normalized)
+                save_json(self.path, payload)
+                return normalized
+        return None
 
     # 清除所有已完成提醒，并返回清除数量；active 提醒保持不变。
     def clear_completed_reminders(self) -> int:
@@ -167,6 +260,45 @@ class ReminderStore:
                 if not isinstance(item, dict) or str(item.get("status", "active")) != "done"
             ]
             removed_count = len(reminders) - len(retained)
+            if removed_count:
+                payload["reminders"] = retained
+                save_json(self.path, payload)
+        return removed_count
+
+    # 删除完成时间超过保留期的 done 提醒；active 与 cancelled 保持不变。
+    def delete_expired_completed_reminders(
+        self,
+        retention_days: int,
+        current_time: datetime | None = None,
+    ) -> int:
+        """删除完成时间超过保留期的 done 提醒；active 与 cancelled 保持不变。"""
+        try:
+            normalized_days = int(retention_days)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("提醒保留天数无效") from exc
+        if normalized_days < 0:
+            raise ValueError("提醒保留天数不能小于 0")
+
+        now = current_time or now_local()
+        cutoff = now - timedelta(days=normalized_days)
+        with self._lock:
+            payload = self._load_payload()
+            retained: list[dict[str, Any]] = []
+            removed_count = 0
+            for raw_reminder in payload["reminders"]:
+                if not isinstance(raw_reminder, dict):
+                    retained.append(raw_reminder)
+                    continue
+                reminder = self._normalize_reminder(raw_reminder)
+                completed_at = self._completed_at_for_cleanup(reminder)
+                if (
+                    reminder["status"] == "done"
+                    and completed_at is not None
+                    and completed_at <= cutoff
+                ):
+                    removed_count += 1
+                    continue
+                retained.append(raw_reminder)
             if removed_count:
                 payload["reminders"] = retained
                 save_json(self.path, payload)
@@ -197,6 +329,8 @@ class ReminderStore:
             "created_at": str(reminder.get("created_at", "")),
             "status": status if status in _VALID_STATUSES else "active",
             "source": str(reminder.get("source", "manual")) or "manual",
+            "completed_at": str(reminder.get("completed_at", "")),
+            "notified_at": str(reminder.get("notified_at", "")),
         }
 
     # 将 datetime 或 ISO 文本规范为精确到秒的本地时间文本。
@@ -216,3 +350,26 @@ class ReminderStore:
             return datetime.fromisoformat(due_at) <= current_time
         except (TypeError, ValueError):
             return False
+
+    # 判断待回应提醒是否达到再次提示间隔；缺失旧字段时允许立即补提示。
+    def _should_repeat_ack(
+        self,
+        notified_at: str,
+        current_time: datetime,
+        ack_repeat_minutes: int,
+    ) -> bool:
+        """判断待回应提醒是否达到再次提示间隔；缺失旧字段时允许立即补提示。"""
+        try:
+            last_notified_at = datetime.fromisoformat(notified_at)
+        except (TypeError, ValueError):
+            return True
+        return current_time >= last_notified_at + timedelta(minutes=ack_repeat_minutes)
+
+    # 返回自动清理使用的完成时间；兼容旧版 done 提醒时回退到 due_at。
+    def _completed_at_for_cleanup(self, reminder: dict[str, str]) -> datetime | None:
+        """返回自动清理使用的完成时间；兼容旧版 done 提醒时回退到 due_at。"""
+        value = reminder["completed_at"] or reminder["due_at"]
+        try:
+            return datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
