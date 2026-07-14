@@ -51,6 +51,28 @@ class BubblePositionService:
         ]
         return self._find_position(bubble_width, bubble_height, anchor_rect, candidates, exclusion_rects)
 
+    # 根据菜单尺寸优先将右键卡片放在桌宠右侧，空间不足时再选择其他方向。
+    def context_menu_position(
+        self,
+        menu_size: tuple[int, int],
+        anchor_rect: QRect,
+        exclusion_rects: list[QRect] | None = None,
+    ) -> QPoint:
+        """计算右键微型菜单的右侧优先位置，并确保其留在当前屏幕内。"""
+        menu_width, menu_height = menu_size
+        center_y = anchor_rect.y() + anchor_rect.height() // 2
+        candidates = [
+            QPoint(anchor_rect.x() + anchor_rect.width() + 12, center_y - menu_height // 2),
+            QPoint(anchor_rect.x() + anchor_rect.width() + 12, anchor_rect.y() - menu_height + 20),
+            QPoint(anchor_rect.x() + anchor_rect.width() + 12, anchor_rect.y() + anchor_rect.height() - 20),
+            QPoint(anchor_rect.x() - menu_width - 12, center_y - menu_height // 2),
+            QPoint(anchor_rect.x() - menu_width - 12, anchor_rect.y() - menu_height + 20),
+            QPoint(anchor_rect.x() - menu_width - 12, anchor_rect.y() + anchor_rect.height() - 20),
+            QPoint(anchor_rect.x() + anchor_rect.width() - menu_width + 20, anchor_rect.y() - menu_height - 10),
+            QPoint(anchor_rect.x() + anchor_rect.width() - menu_width + 20, anchor_rect.y() + anchor_rect.height() + 10),
+        ]
+        return self._find_position(menu_width, menu_height, anchor_rect, candidates, exclusion_rects)
+
     # 按候选方向寻找不越界且避开占用区域的气泡位置。
     def _find_position(
         self,

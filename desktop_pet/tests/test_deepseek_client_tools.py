@@ -212,6 +212,41 @@ class DeepSeekClientToolTests(unittest.TestCase):
         )
         self.assertNotIn("messages", post.call_args.kwargs["json"])
 
+    # 验证 KLD AI Responses 发生 SSL 中断时，会改用独立 DeepSeek 配置重试。
+    def test_kldai_ssl_interruption_falls_back_to_deepseek(self) -> None:
+        """验证 SSL 降级保留 KLD AI 主线路优先级且不改变 DeepSeek 载荷。"""
+        config = {
+            "api": {
+                "provider": "openai",
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://www.kldai.cc",
+                    "wire_api": "responses",
+                    "model": "gpt-5.5",
+                },
+                "deepseek": {
+                    "api_key": "deepseek-key",
+                    "base_url": "https://api.deepseek.com",
+                    "model": "deepseek-v4-flash",
+                },
+            }
+        }
+        fallback = FakeResponse({"choices": [{"message": {"content": "DeepSeek 降级回复"}}]})
+        client = DeepSeekClient("unused-kldai.json")
+        with patch("ai.deepseek_client.load_json_prefer_primary", return_value=config):
+            with patch(
+                "ai.deepseek_client.requests.post",
+                side_effect=[requests.exceptions.SSLError("connection reset"), fallback],
+            ) as post:
+                self.assertEqual(client.chat(self.messages), "DeepSeek 降级回复")
+
+        self.assertEqual(post.call_args_list[0].args[0], "https://www.kldai.cc/responses")
+        self.assertEqual(post.call_args_list[1].args[0], "https://api.deepseek.com/chat/completions")
+        fallback_payload = post.call_args_list[1].kwargs["json"]
+        self.assertEqual(fallback_payload["model"], "deepseek-v4-flash")
+        self.assertEqual(fallback_payload["messages"], self.messages)
+        self.assertEqual(fallback_payload["temperature"], 0.7)
+
     # 验证 Responses 协议会将函数调用规范为现有提醒工具参数。
     def test_responses_provider_parses_function_call(self) -> None:
         """验证 Responses 协议会将函数调用规范为现有提醒工具参数。"""

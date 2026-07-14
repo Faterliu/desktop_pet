@@ -39,7 +39,7 @@ from app.conversation_maintenance_worker import (
     ConversationMaintenanceWorker,
     should_run_daily_catchup,
 )
-from app.context_menu import build_context_menu
+from app.context_menu import PetContextMenu, build_pet_context_menu
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
 from app.message_splitter import split_knowledge_bubble_text
@@ -801,6 +801,7 @@ class DesktopPetWindow(QWidget):
         self.screenshot_thread: QThread | None = None
         self.screenshot_worker: QObject | None = None
         self.screenshot_selection_overlay: ScreenshotSelectionOverlay | None = None
+        self._context_menu: PetContextMenu | None = None
         self._pending_screenshot: CapturedScreenshot | None = None
         self._screenshot_visibility: list[tuple[QWidget, bool]] = []
         self._pending_scenario_fallback_line = ""
@@ -1140,6 +1141,9 @@ class DesktopPetWindow(QWidget):
                 return
             self._close_after_workers_finished = False
         self._destroy_formal_answer_panels()
+        if self._context_menu is not None:
+            self._context_menu.close()
+            self._context_menu = None
         self.reminder_controller.stop()
         self._daily_summary_timer.stop()
         self.behavior_controller.flush_runtime_state()
@@ -1157,11 +1161,15 @@ class DesktopPetWindow(QWidget):
         if app is not None:
             app.quit()
 
-    # 在指定屏幕坐标位置弹出右键菜单。
+    # 在人物周围弹出右键微型菜单卡片。
     def _show_context_menu(self, global_pos: QPoint) -> None:
-        """在指定屏幕坐标位置弹出右键菜单。"""
-        menu = build_context_menu(
+        """忽略鼠标坐标，始终把右键卡片停靠在人物附近。"""
+        del global_pos
+        if self._context_menu is not None:
+            self._context_menu.close()
+        menu = build_pet_context_menu(
             self,
+            character_name=self.config_service.get_str("app.character_name", "小桃"),
             test_action_handler=self._handle_test_action,
             on_test_move_left=self._test_move_left,
             on_test_move_right=self._test_move_right,
@@ -1203,8 +1211,19 @@ class DesktopPetWindow(QWidget):
             on_clipboard_assistant=self._handle_clipboard_assistant,
             on_screenshot_analysis=self._handle_screenshot_analysis,
         )
-        menu.triggered.connect(lambda _action: self._record_user_interaction("context_menu"))
-        menu.exec(global_pos)
+        self._context_menu = menu
+        menu.interacted.connect(lambda: self._record_user_interaction("context_menu"))
+
+        def clear_menu_ref() -> None:
+            if self._context_menu is menu:
+                self._context_menu = None
+
+        menu.destroyed.connect(clear_menu_ref)
+        menu.show_near(
+            self.geometry(),
+            self.bubble_position_service,
+            self.config_service.get_bool("ui.always_on_top", True),
+        )
 
     # 响应菜单中的测试动作切换请求。
     def _handle_test_action(self, action_name: str) -> None:
@@ -3440,6 +3459,13 @@ class DesktopPetWindow(QWidget):
     def _sync_floating_widgets(self) -> None:
         """让气泡和输入框跟随角色当前位置，多个应答气泡互相避让。"""
         anchor_rect = self.geometry()
+        context_menu = self._context_menu
+        if context_menu is not None:
+            try:
+                if context_menu.isVisible():
+                    context_menu.reposition(anchor_rect, self.bubble_position_service)
+            except RuntimeError:
+                self._context_menu = None
         bubble_visible = self.bubble.isVisible()
         reply_bubbles = [
             bubble

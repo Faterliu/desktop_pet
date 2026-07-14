@@ -21,6 +21,10 @@ class DeepSeekError(RuntimeError):
     pass
 
 
+class KldaiSslConnectionError(DeepSeekError):
+    """KLD AI Responses 端点发生 SSL 中断，可尝试切换到 DeepSeek。"""
+
+
 class ToolCallingUnsupportedError(DeepSeekError):
     """当前 OpenAI 兼容端点明确不支持 tools 参数。"""
 
@@ -91,6 +95,24 @@ class DeepSeekClient:
             }
 
         return self._openai_api_config(api)
+
+    # 固定读取 DeepSeek 连接配置，供 KLD AI SSL 中断后的兼容降级使用。
+    def _deepseek_api_config(self) -> dict[str, Any]:
+        """读取独立 DeepSeek 配置，不受当前聊天提供商选择影响。"""
+        config = load_json_prefer_primary(self.config_path, self.fallback_config_path, {})
+        raw_api = config.get("api", {}) if isinstance(config, dict) else {}
+        api = raw_api if isinstance(raw_api, dict) else {}
+        deepseek = api.get("deepseek", {})
+        if not isinstance(deepseek, dict):
+            deepseek = api
+        return {
+            "api_key": str(deepseek.get("api_key", "")).strip(),
+            "base_url": str(deepseek.get("base_url", "https://api.deepseek.com")),
+            "model": str(deepseek.get("model", "deepseek-chat")),
+            "timeout_seconds": deepseek.get("timeout_seconds", api.get("timeout_seconds", 30)),
+            "provider": "deepseek",
+            "wire_api": "chat_completions",
+        }
 
     # 固定读取 OpenAI 连接配置，供不跟随聊天提供商的视觉请求使用。
     def _openai_api_config(self, api: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -241,7 +263,15 @@ class DeepSeekClient:
     # 根据 messages 处理聊天消息流程，更新上下文和展示状态。
     def chat(self, messages: list[dict[str, str]]) -> str:
         """根据 messages 处理聊天消息流程，更新上下文和展示状态。"""
-        message = self._request_message(messages)
+        try:
+            message = self._request_message(messages)
+        except KldaiSslConnectionError:
+            fallback_api = self._deepseek_api_config()
+            if not str(fallback_api.get("api_key", "")).strip():
+                logger.warning("KLD AI SSL interrupted; DeepSeek fallback is not configured")
+                raise DeepSeekError("模型连接暂时中断，DeepSeek 降级服务未配置。") from None
+            logger.warning("KLD AI SSL interrupted; retrying chat through DeepSeek fallback")
+            message = self._request_message(messages, api_override=fallback_api)
         return self._message_content(message)
 
     # 优先使用原生工具调用；端点不支持时用严格 JSON 协议降级。
@@ -281,9 +311,10 @@ class DeepSeekClient:
         *,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | None = None,
+        api_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """按当前提供商协议发送一次请求，并返回统一的助手消息结构。"""
-        api = self._api_config()
+        api = api_override if api_override is not None else self._api_config()
         api_key = api.get("api_key", "").strip()
         if not api_key:
             raise DeepSeekError("当前聊天模型的 API key 未配置。")
@@ -315,6 +346,16 @@ class DeepSeekClient:
                 messages_shape(messages),
             )
             raise DeepSeekError("我刚刚没来得及想好。") from exc
+        except requests.exceptions.SSLError as exc:
+            if self._should_fallback_from_kldai(api, is_responses_api):
+                logger.warning("KLD AI Responses SSL connection interrupted; fallback is available")
+                raise KldaiSslConnectionError("KLD AI SSL connection interrupted") from exc
+            logger.error(
+                "Chat API SSL request failed: %s request=%s",
+                safe_exception(exc),
+                messages_shape(messages),
+            )
+            raise DeepSeekError("稍后再试试好不好。") from exc
         except requests.HTTPError as exc:
             if tools is not None and self._tools_are_unsupported(exc):
                 raise ToolCallingUnsupportedError("Tool calling is unsupported.") from exc
@@ -361,6 +402,12 @@ class DeepSeekClient:
             logger.error("Chat API message structure mismatch: response=%s", response_shape(data))
             raise DeepSeekError("回复有点奇怪，我再缓一缓。")
         return message
+
+    # 仅在当前 KLD AI Responses 主线路发生 SSL 中断时启用 DeepSeek 重试。
+    def _should_fallback_from_kldai(self, api: dict[str, Any], is_responses_api: bool) -> bool:
+        """判断当前请求是否符合 KLD AI 到 DeepSeek 的 SSL 降级条件。"""
+        base_url = str(api.get("base_url", "")).rstrip("/").lower()
+        return is_responses_api and base_url == "https://www.kldai.cc"
 
     # 构建 Chat Completions 或 Responses API 对应的请求载荷。
     def _request_payload(

@@ -2,8 +2,342 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtGui import QAction, QActionGroup
-from PySide6.QtWidgets import QMenu, QWidget
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QKeyEvent
+from PySide6.QtWidgets import (
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QPushButton,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+
+MENU_STYLE = """
+QMenu {
+    background: #fff8ee;
+    border: 1px solid #d9b47d;
+    border-radius: 12px;
+    padding: 6px;
+    color: #5a3715;
+}
+QMenu::item {
+    border-radius: 8px;
+    padding: 7px 24px 7px 10px;
+}
+QMenu::item:selected { background: #ffdfae; }
+QMenu::item:checked { background: #ffcf8b; }
+QMenu::separator { height: 1px; background: #efd7b3; margin: 5px 7px; }
+"""
+
+
+class PetContextMenu(QWidget):
+    """显示在桌宠附近的双列微型右键菜单卡片。"""
+
+    interacted = Signal()
+
+    # 初始化菜单卡片布局、标题与基础视觉样式。
+    def __init__(self, parent: QWidget, character_name: str, legacy_menu: QMenu) -> None:
+        """初始化菜单卡片，并持有旧菜单作为二级功能来源。"""
+        super().__init__(
+            parent,
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint,
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setFixedWidth(280)
+        self.setStyleSheet(
+            """
+            PetContextMenu {
+                background: #fff8ee;
+                border: 1px solid #d9b47d;
+                border-radius: 18px;
+            }
+            QLabel#menu_title {
+                background: transparent;
+                border: none;
+                color: #5a3715;
+                font-weight: 700;
+                font-size: 14px;
+            }
+            QPushButton#menu_close {
+                background: #ffe1b9;
+                border: none;
+                border-radius: 12px;
+                color: #8a5a2d;
+                font-size: 16px;
+                font-weight: 700;
+            }
+            QPushButton#menu_close:hover { background: #ffcf8b; }
+            QPushButton#menu_button, QToolButton#menu_button {
+                background: #fffdf8;
+                border: 1px solid #efd7b3;
+                border-radius: 12px;
+                color: #5a3715;
+                font-size: 12px;
+                padding: 6px 8px;
+            }
+            QPushButton#menu_button:hover, QToolButton#menu_button:hover {
+                background: #ffebc9;
+                border-color: #e4b879;
+            }
+            QPushButton#menu_button:checked {
+                background: #ffcf8b;
+                border-color: #d99b4d;
+                color: #5a3715;
+                font-weight: 700;
+            }
+            QPushButton#menu_button[danger="true"] {
+                background: #fff0ed;
+                border-color: #e9b2a6;
+                color: #9a4337;
+            }
+            QPushButton#menu_button[danger="true"]:hover { background: #ffddd5; }
+            """
+        )
+        self._legacy_menu = legacy_menu
+        self.destroyed.connect(self._legacy_menu.deleteLater)
+        self._buttons: dict[str, QPushButton | QToolButton] = {}
+        self._submenu_actions: dict[str, QAction] = {}
+        self._settings_menu: QMenu | None = None
+        self._always_on_top: bool | None = None
+        self._legacy_menu.triggered.connect(self._complete_submenu_action)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 12)
+        root.setSpacing(8)
+        header = QHBoxLayout()
+        header.setContentsMargins(2, 0, 2, 0)
+        title = QLabel(f"{character_name}的小菜单", self)
+        title.setObjectName("menu_title")
+        header.addWidget(title)
+        header.addStretch(1)
+        close_button = QPushButton("×", self)
+        close_button.setObjectName("menu_close")
+        close_button.setFixedSize(26, 26)
+        close_button.setToolTip("关闭菜单")
+        close_button.clicked.connect(self.close)
+        header.addWidget(close_button)
+        root.addLayout(header)
+
+        self.grid = QGridLayout()
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(8)
+        self.grid.setVerticalSpacing(8)
+        root.addLayout(self.grid)
+        self._add_legacy_actions()
+
+    # 按人物窗口和定位服务显示菜单卡片。
+    def show_near(self, anchor_rect: QRect, position_service: object, always_on_top: bool) -> None:
+        """把菜单显示在人物周围合适的位置，并同步置顶设置。"""
+        self._set_always_on_top(always_on_top)
+        self.adjustSize()
+        self.reposition(anchor_rect, position_service)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    # 在人物移动后重新选择附近的安全位置。
+    def reposition(self, anchor_rect: QRect, position_service: object) -> None:
+        """调用既有气泡定位服务，使菜单避开人物和屏幕边缘。"""
+        positioner = getattr(position_service, "context_menu_position", None)
+        if not callable(positioner):
+            positioner = getattr(position_service, "speech_bubble_position", None)
+        if not callable(positioner):
+            return
+        position = positioner((self.width(), self.height()), anchor_rect)
+        if isinstance(position, QPoint):
+            self.move(position)
+
+    # 返回指定标题的按钮，供测试和局部状态验证使用。
+    def button_for(self, title: str) -> QPushButton | QToolButton | None:
+        """返回指定一级菜单按钮，不存在时返回空值。"""
+        return self._buttons.get(title)
+
+    # 返回指定标题对应的二级菜单，供测试和回归验证使用。
+    def submenu_for(self, title: str) -> QMenu | None:
+        """返回指定二级菜单，不存在时返回空值。"""
+        action = self._submenu_actions.get(title)
+        return action.menu() if action is not None else None
+
+    # 处理 Esc 关闭，其他按键保持 Qt 默认行为。
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """按下 Esc 时关闭悬浮菜单卡片。"""
+        if event.key() == Qt.Key.Key_Escape:
+            self.close()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    # 将旧一级菜单动作映射为卡片按钮，二级菜单继续复用 QMenu。
+    def _add_legacy_actions(self) -> None:
+        """把常用入口放在一级，其余设置动作收纳到二级菜单。"""
+        primary_titles = {"提醒", "剪贴板助手", "截图", "免打扰模式"}
+        primary_actions: dict[str, QAction] = {}
+        settings_actions: list[QAction] = []
+        for action in self._legacy_menu.actions():
+            if action.isSeparator():
+                continue
+            title = action.text()
+            if title == "退出":
+                continue
+            if title not in primary_titles:
+                settings_actions.append(action)
+                continue
+            primary_actions[title] = action
+
+        for title in ("剪贴板助手", "提醒", "免打扰模式", "截图"):
+            action = primary_actions.get(title)
+            if action is not None:
+                self._add_legacy_entry(title, action)
+
+        self._add_settings_menu(settings_actions)
+        exit_action = next(
+            (action for action in self._legacy_menu.actions() if action.text() == "退出"),
+            None,
+        )
+        if exit_action is not None:
+            self._add_action("退出", exit_action, danger=True)
+
+    # 按动作类型添加一个一级卡片入口。
+    def _add_legacy_entry(self, title: str, action: QAction) -> None:
+        """把一个既有动作转换为普通按钮、开关或二级入口。"""
+        submenu = action.menu()
+        if submenu is not None:
+            self._add_submenu(title, action)
+            return
+        if action.isCheckable():
+            self._add_toggle(title, action)
+            return
+        self._add_action(title, action, danger=False)
+
+    # 收纳非高频配置动作，避免一级卡片内容过多。
+    def _add_settings_menu(self, actions: list[QAction]) -> None:
+        """创建“设置”二级菜单，并保留每个既有 QAction 的回调。"""
+        if not actions:
+            return
+        settings_menu = QMenu("设置", self._legacy_menu)
+        for action in actions:
+            settings_menu.addAction(action)
+        settings_menu.triggered.connect(self._complete_submenu_action)
+        self._settings_menu = settings_menu
+        self._add_submenu("设置", settings_menu.menuAction())
+
+    # 添加执行旧 QAction 的普通卡片按钮。
+    def _add_action(self, title: str, action: QAction, *, danger: bool) -> None:
+        """添加普通按钮，并在点击时触发原有 QAction 回调。"""
+        button = self._new_button(title)
+        if danger:
+            button.setProperty("danger", "true")
+            button.style().unpolish(button)
+            button.style().polish(button)
+        button.clicked.connect(lambda checked=False, target=action: self._trigger_action(target))
+        self._add_button(title, button)
+
+    # 添加能显示勾选状态的旧 QAction 开关按钮。
+    def _add_toggle(self, title: str, action: QAction) -> None:
+        """添加开关按钮，并让文字与旧 QAction 的状态保持一致。"""
+        button = self._new_button(title)
+        button.setCheckable(True)
+        button.setChecked(action.isChecked())
+        self._update_toggle_title(button, title, button.isChecked())
+        button.toggled.connect(
+            lambda enabled, target=button, label=title: self._update_toggle_title(
+                target,
+                label,
+                enabled,
+            )
+        )
+        button.clicked.connect(
+            lambda enabled=False, target=action: self._trigger_action(target)
+        )
+        self._add_button(title, button)
+
+    # 添加打开原有二级 QMenu 的卡片入口。
+    def _add_submenu(self, title: str, action: QAction) -> None:
+        """添加二级菜单入口，并为其套用统一的轻量菜单样式。"""
+        submenu = action.menu()
+        if submenu is None:
+            return
+        self._style_menu_tree(submenu)
+        button = QToolButton(self)
+        button.setObjectName("menu_button")
+        button.setProperty("class", "menu_button")
+        button.setText(f"{title}  ›")
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        button.setFixedHeight(38)
+        button.clicked.connect(
+            lambda checked=False, target=button, target_action=action: self._show_submenu(
+                target,
+                target_action,
+            )
+        )
+        self._submenu_actions[title] = action
+        self._add_button(title, button)
+
+    # 在卡片按钮旁弹出原有二级菜单，避免转移 QMenu 的所有权。
+    def _show_submenu(self, button: QToolButton, action: QAction) -> None:
+        """显示二级菜单，并让 Qt 自动处理屏幕边缘位置。"""
+        submenu = action.menu()
+        if submenu is None:
+            return
+        self._style_menu_tree(submenu)
+        submenu.popup(button.mapToGlobal(QPoint(button.width() - 8, 0)))
+
+    # 创建统一尺寸和属性的一级普通按钮。
+    def _new_button(self, title: str) -> QPushButton:
+        """创建用于一级菜单的圆角按钮。"""
+        button = QPushButton(title, self)
+        button.setObjectName("menu_button")
+        button.setProperty("class", "menu_button")
+        button.setFixedHeight(38)
+        return button
+
+    # 将按钮顺序填充到双列网格。
+    def _add_button(self, title: str, button: QPushButton | QToolButton) -> None:
+        """把新按钮按当前数量插入双列卡片网格。"""
+        index = len(self._buttons)
+        self.grid.addWidget(button, index // 2, index % 2)
+        self._buttons[title] = button
+
+    # 更新开关按钮的勾选文字，不依赖外部图标资源。
+    def _update_toggle_title(self, button: QPushButton, title: str, enabled: bool) -> None:
+        """同步按钮勾选状态及可读文字。"""
+        button.setText(f"✓ {title}" if enabled else title)
+
+    # 执行旧 QAction 并关闭卡片。
+    def _trigger_action(self, action: QAction) -> None:
+        """通知互动、关闭菜单，再触发原有动作。"""
+        self.interacted.emit()
+        self.close()
+        action.trigger()
+
+    # 二级菜单动作触发后关闭一级卡片并记录互动。
+    def _complete_submenu_action(self, action: QAction) -> None:
+        """在二级菜单选择叶子动作后完成一级菜单交互。"""
+        if action.isSeparator() or not self.isVisible():
+            return
+        self.interacted.emit()
+        self.close()
+
+    # 为当前二级菜单及其嵌套菜单应用奶油色列表样式。
+    def _style_menu_tree(self, menu: QMenu) -> None:
+        """递归设置二级菜单样式，保持一级与二级视觉一致。"""
+        menu.setStyleSheet(MENU_STYLE)
+        for child_menu in menu.findChildren(QMenu):
+            child_menu.setStyleSheet(MENU_STYLE)
+
+    # 按窗口置顶配置更新弹窗标志。
+    def _set_always_on_top(self, enabled: bool) -> None:
+        """让菜单卡片与桌宠窗口保持相同的置顶策略。"""
+        if self._always_on_top == enabled:
+            return
+        self._always_on_top = enabled
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
 
 
 # 构建桌宠右键菜单，并绑定各项操作回调。
@@ -253,3 +587,15 @@ def build_context_menu(
     exit_action.triggered.connect(on_request_exit)
     menu.addAction(exit_action)
     return menu
+
+
+# 用既有 QMenu 作为二级动作来源，构建桌宠实际显示的微型卡片菜单。
+def build_pet_context_menu(
+    parent: QWidget,
+    *,
+    character_name: str,
+    **menu_kwargs: object,
+) -> PetContextMenu:
+    """创建环绕式右键卡片，同时保留所有既有菜单动作和子菜单。"""
+    legacy_menu = build_context_menu(parent, **menu_kwargs)
+    return PetContextMenu(parent, character_name, legacy_menu)
