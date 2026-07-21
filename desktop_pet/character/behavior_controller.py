@@ -665,6 +665,11 @@ class BehaviorController(QObject):
         """从输入等待台词组中随机选择一条可展示文本。"""
         return self._random_line("waiting")
 
+    # 从右键菜单打开台词组中随机选择一条可展示文本。
+    def pick_context_menu_line(self) -> str:
+        """从右键菜单打开台词组中随机选择一条可展示文本。"""
+        return self._random_line("context_menu")
+
     # 从知识问候确认台词组中随机选择一条可展示文本。
     def pick_reply_ack_line(self) -> str:
         """从知识问候确认台词组中随机选择一条可展示文本。"""

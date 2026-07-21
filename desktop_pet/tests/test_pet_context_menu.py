@@ -14,7 +14,7 @@ sys.path.insert(0, str(DESKTOP_PET_ROOT))
 
 from PySide6.QtCore import QEvent, QRect, Qt  # noqa: E402
 from PySide6.QtGui import QKeyEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication, QPushButton, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QFrame, QPushButton, QWidget  # noqa: E402
 
 from app.bubble_position_service import BubblePositionService  # noqa: E402
 from app.context_menu import build_context_menu, build_pet_context_menu  # noqa: E402
@@ -65,6 +65,12 @@ class PetContextMenuTests(unittest.TestCase):
         card = build_pet_context_menu(parent, character_name="小桃", **self._menu_kwargs())
         anchor = QRect(160, 160, 80, 80)
         positioner = BubblePositionService(QApplication)
+        self.assertTrue(
+            card.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        )
+        surface = card.findChild(QWidget, "menu_surface")
+        self.assertIsNotNone(surface)
+        self.assertTrue(surface.testAttribute(Qt.WidgetAttribute.WA_StyledBackground))
         card.show_near(anchor, positioner, always_on_top=True)
 
         screen = QApplication.screenAt(anchor.center()) or QApplication.primaryScreen()
@@ -72,6 +78,13 @@ class PetContextMenuTests(unittest.TestCase):
         self.assertFalse(card.geometry().intersects(anchor))
         self.assertTrue(screen.availableGeometry().contains(card.geometry()))
         self.assertGreaterEqual(card.geometry().left(), anchor.right() + 12)
+        self.assertEqual(card.width(), 280)
+        self.assertEqual(
+            card.button_for("剪贴板助手").width(),
+            card.button_for("提醒").width(),
+        )
+        self.assertEqual(card.button_for("剪贴板助手").width(), 120)
+        self.assertEqual(card.button_for("剪贴板助手").height(), 32)
 
         card.close()
         parent.close()
@@ -90,12 +103,19 @@ class PetContextMenuTests(unittest.TestCase):
                 show_reload_config=True,
             ),
         )
-        for title in ("提醒", "剪贴板助手", "截图", "免打扰模式", "设置", "退出"):
+        for title in ("提醒", "剪贴板助手", "截图", "免打扰模式", "设置", "关闭菜单"):
             self.assertIsNotNone(card.button_for(title), title)
+        self.assertIsNone(card.button_for("退出"))
         self.assertIsNone(card.button_for("人物缩放"))
         self.assertIsNone(card.button_for("正式问答模式"))
-        self.assertEqual(card.grid.itemAtPosition(0, 0).widget().text(), "剪贴板助手  ›")
-        self.assertEqual(card.grid.itemAtPosition(1, 0).widget().text(), "免打扰模式")
+        self.assertEqual(card.grid.itemAtPosition(0, 0).widget().text(), "剪贴板助手")
+        self.assertEqual(card.grid.itemAtPosition(1, 0).widget().text(), "截图")
+        self.assertEqual(card.grid.itemAtPosition(1, 1).widget().text(), "免打扰模式")
+        self.assertEqual(card.grid.itemAtPosition(2, 0).widget().objectName(), "menu_divider")
+        self.assertIsNotNone(
+            card.grid.itemAtPosition(2, 0).widget().findChild(QFrame, "menu_divider_line")
+        )
+        self.assertEqual(card.grid.itemAtPosition(3, 0).widget().text(), "设置")
 
         settings_menu = card.submenu_for("设置")
         self.assertIsNotNone(settings_menu)
@@ -145,6 +165,10 @@ class PetContextMenuTests(unittest.TestCase):
         )
         screenshot_menu = card.submenu_for("截图")
         self.assertIsNotNone(screenshot_menu)
+        self.assertTrue(
+            screenshot_menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        )
+        self.assertIn("border-radius: 10px", screenshot_menu.styleSheet())
         actions = {action.text(): action for action in screenshot_menu.actions()}
         actions["全屏快速解析"].trigger()
         actions["框选截图并提问"].trigger()
@@ -181,6 +205,41 @@ class PetContextMenuTests(unittest.TestCase):
         card = build_pet_context_menu(parent, character_name="小桃", **self._menu_kwargs())
         card.show_near(QRect(160, 160, 80, 80), BubblePositionService(QApplication), True)
         card.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier))
+        self.assertFalse(card.isVisible())
+        parent.close()
+
+    # 验证底部关闭菜单按钮只关闭卡片，不触发退出程序。
+    def test_bottom_close_button_closes_card(self) -> None:
+        """验证“关闭菜单”按钮可安全收起当前菜单卡片。"""
+        parent = QWidget()
+        card = build_pet_context_menu(parent, character_name="小桃", **self._menu_kwargs())
+        card.show_near(QRect(160, 160, 80, 80), BubblePositionService(QApplication), True)
+        close_button = card.button_for("关闭菜单")
+        self.assertIsNotNone(close_button)
+
+        close_button.click()
+        self.assertFalse(card.isVisible())
+        parent.close()
+
+    # 验证标题右上角符号会触发既有退出程序回调。
+    def test_header_exit_button_triggers_program_exit(self) -> None:
+        """验证“×”不再只是关闭菜单，而是请求退出桌宠。"""
+        parent = QWidget()
+        exit_requests: list[bool] = []
+        card = build_pet_context_menu(
+            parent,
+            character_name="小桃",
+            **self._menu_kwargs(on_request_exit=lambda: exit_requests.append(True)),
+        )
+        card.show_near(QRect(160, 160, 80, 80), BubblePositionService(QApplication), True)
+        exit_button = card.findChild(QPushButton, "menu_exit")
+        self.assertIsNotNone(exit_button)
+        self.assertEqual(exit_button.text(), "退出程序")
+        self.assertEqual(exit_button.size().width(), 52)
+        self.assertEqual(exit_button.size().height(), 18)
+
+        exit_button.click()
+        self.assertEqual(exit_requests, [True])
         self.assertFalse(card.isVisible())
         parent.close()
 

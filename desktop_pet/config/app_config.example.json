@@ -171,6 +171,9 @@
       "waiting": {
         "enabled": false
       },
+      "context_menu": {
+        "enabled": false
+      },
       "feedback": {
         "enabled": false
       },

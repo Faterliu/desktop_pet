@@ -99,6 +99,7 @@ LOCAL_LINE_REFRESH_LABELS = {
     "happy": "开心反馈",
     "sad": "低落反馈",
     "waiting": "输入等待提醒",
+    "context_menu": "右键菜单招呼",
     "feedback": "主动问候反馈",
     "scenario_greeting_templates": "场景问候模板",
     "low_interrupt": "低打扰问候",
@@ -123,6 +124,54 @@ CLIPBOARD_ASSISTANT_LABELS = {
     "explain": "解释",
     "answer": "正式回答",
 }
+
+MOVEMENT_ACTIONS = frozenset({"running_right", "running_left", "jumping"})
+
+
+# 统一记录动作来源；非移动动作会先安全停止旧移动，避免其完成回调覆盖新动作。
+def _set_pet_action(
+    window: Any,
+    action_name: str,
+    *,
+    fallback_action: str = "idle",
+    force_single_cycle: bool = False,
+    owner: str | None = None,
+    interrupt_movement: bool = True,
+) -> None:
+    """设置人物动作，并记录当前动作归属以隔离异步回调。"""
+    if interrupt_movement and action_name not in MOVEMENT_ACTIONS:
+        animation = getattr(window, "move_animation", None)
+        stop_animation = getattr(window, "_stop_active_move_animation", None)
+        if animation is not None and callable(stop_animation):
+            stop_animation()
+    window.sprite_player.set_action(
+        action_name,
+        fallback_action=fallback_action,
+        force_single_cycle=force_single_cycle,
+    )
+    window._sprite_action_owner = owner or action_name
+
+
+# 仅在指定异步流程仍拥有当前动作时，才允许它切换到结束状态。
+def _finish_pet_action_if_owned(
+    window: Any,
+    owner: str,
+    action_name: str = "idle",
+    *,
+    fallback_action: str = "idle",
+    force_single_cycle: bool = False,
+) -> bool:
+    """避免过期后台回调覆盖后续用户或提醒动作。"""
+    if getattr(window, "_sprite_action_owner", "idle") != owner:
+        return False
+    _set_pet_action(
+        window,
+        action_name,
+        fallback_action=fallback_action,
+        force_single_cycle=force_single_cycle,
+        owner="idle" if action_name == "idle" else f"{owner}:{action_name}",
+    )
+    return True
 
 
 # 根据 value、default 转换为正整数，失败或小于等于零时返回默认值。
@@ -949,6 +998,7 @@ class DesktopPetWindow(QWidget):
         )
 
         self.sprite_player = SpritePlayer(self.sprite_config_path, self._ui_scale())
+        self._sprite_action_owner = "idle"
         self.bubble = SpeechBubble()
         self.reply_bubble = ReplyBubble()
         self.reminder_ack_bubble = ReplyBubble()
@@ -977,7 +1027,7 @@ class DesktopPetWindow(QWidget):
         self._restore_position()
         self._refresh_auto_move_timer()
         self._update_sprite(self.sprite_player.current_pixmap())
-        self.sprite_player.set_action("idle")
+        _set_pet_action(self, "idle", owner="idle")
         self._start_mem0_initialization(close_existing=False)
 
     # 设置主窗口的透明、无边框和置顶属性。
@@ -1070,8 +1120,7 @@ class DesktopPetWindow(QWidget):
             self.drag_start_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self.mouse_press_position = event.globalPosition().toPoint()
             if self.move_animation and self.move_animation.state() == QPropertyAnimation.State.Running:
-                self.move_animation.stop()
-                self.sprite_player.set_action("idle")
+                self._stop_active_move_animation()
         elif event.button() == Qt.MouseButton.RightButton:
             self._show_context_menu(event.globalPosition().toPoint())
         super().mousePressEvent(event)
@@ -1109,18 +1158,34 @@ class DesktopPetWindow(QWidget):
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """双击人物视为回复/打招呼；若在主动问候后窗口内则回复 feedback 话术。"""
         if event.button() == Qt.MouseButton.LeftButton:
-            self._click_timer.stop()
-            self._suppress_click = True
-            if self.behavior_controller.is_within_proactive_reply_window():
-                reply = self.behavior_controller.pick_feedback_line()
-                self.behavior_controller.notify_proactive_response()
-            else:
-                reply = self.behavior_controller.pick_reply_line()
-            if reply:
-                self._settle_after_user_interaction()
-                self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
-                self._display_message(reply, 7000, "system")
+            self._respond_to_pet_double_click()
         super().mouseDoubleClickEvent(event)
+
+    # 处理双击后的回应话术，并在鼠标事件结束后再播放挥手动作。
+    def _respond_to_pet_double_click(self) -> None:
+        """展示双击回应，并避免鼠标事件尾部的动作切换覆盖挥手。"""
+        self._click_timer.stop()
+        self._suppress_click = True
+        if self.behavior_controller.is_within_proactive_reply_window():
+            reply = self.behavior_controller.pick_feedback_line()
+            self.behavior_controller.notify_proactive_response()
+        else:
+            reply = self.behavior_controller.pick_reply_line()
+        if not reply:
+            return
+        QTimer.singleShot(30, lambda text=reply: self._show_pet_double_click_reply(text))
+
+    # 在双击鼠标事件完全结束后，展示回应并播放完整一轮挥手。
+    def _show_pet_double_click_reply(self, reply: str) -> None:
+        """播放双击回应的挥手动作并显示气泡。"""
+        _set_pet_action(
+            self,
+            "waving",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="user_reply",
+        )
+        self._display_message(reply, 7000, "system")
 
     # 关闭窗口前保存位置并安全回收后台线程。
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
@@ -1165,6 +1230,9 @@ class DesktopPetWindow(QWidget):
     def _show_context_menu(self, global_pos: QPoint) -> None:
         """忽略鼠标坐标，始终把右键卡片停靠在人物附近。"""
         del global_pos
+        # 打开菜单本身应终止自主移动；后续菜单动作只记录互动，
+        # 不能在 QAction 已启动新动作后再把它强制切回 idle。
+        self._record_user_interaction("context_menu_open")
         if self._context_menu is not None:
             self._context_menu.close()
         menu = build_pet_context_menu(
@@ -1212,7 +1280,9 @@ class DesktopPetWindow(QWidget):
             on_screenshot_analysis=self._handle_screenshot_analysis,
         )
         self._context_menu = menu
-        menu.interacted.connect(lambda: self._record_user_interaction("context_menu"))
+        menu.interacted.connect(
+            lambda: self._record_user_interaction("context_menu", settle=False)
+        )
 
         def clear_menu_ref() -> None:
             if self._context_menu is menu:
@@ -1224,14 +1294,20 @@ class DesktopPetWindow(QWidget):
             self.bubble_position_service,
             self.config_service.get_bool("ui.always_on_top", True),
         )
+        line = self.behavior_controller.pick_context_menu_line()
+        if line:
+            self._display_message(line, 4500, "system")
 
     # 响应菜单中的测试动作切换请求。
     def _handle_test_action(self, action_name: str) -> None:
         """响应菜单中的测试动作切换请求。"""
-        if action_name == "idle":
-            self.sprite_player.set_action("idle")
-            return
-        self.sprite_player.set_action(action_name, fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            action_name,
+            fallback_action="idle",
+            force_single_cycle=action_name != "idle",
+            owner="test",
+        )
 
     # 请求优雅退出：播放 waving 并显示道别语，再关闭窗口。
     def request_exit(self) -> None:
@@ -1242,7 +1318,13 @@ class DesktopPetWindow(QWidget):
         self.exit_animation_in_progress = True
         self.chat_input.hide()
         farewell = self.behavior_controller.pick_farewell_line()
-        self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "waving",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="exit",
+        )
         duration_ms = self.sprite_player.action_duration_ms("waving", force_single_cycle=True)
         if farewell:
             self.bubble.show_message(farewell, self.geometry(), duration_ms + 400, "system")
@@ -1276,22 +1358,45 @@ class DesktopPetWindow(QWidget):
     # 手动测试人物向左平滑移动。
     def _test_move_left(self) -> None:
         """手动测试人物向左平滑移动。"""
-        QTimer.singleShot(120, lambda: self._start_horizontal_move_test(-140))
+        self._schedule_test_move(-140)
 
     # 手动测试人物向右平滑移动。
     def _test_move_right(self) -> None:
         """手动测试人物向右平滑移动。"""
-        QTimer.singleShot(120, lambda: self._start_horizontal_move_test(140))
+        self._schedule_test_move(140)
 
     # 手动测试人物原地跳跃。
     def _test_jump(self) -> None:
         """手动测试人物原地跳跃。"""
-        QTimer.singleShot(120, self._run_jump_test)
+        expected_owner = getattr(self, "_sprite_action_owner", "idle")
+        QTimer.singleShot(120, lambda: self._run_jump_test(expected_owner))
+
+    # 延迟到菜单关闭后执行移动测试；期间出现新动作则不再抢占。
+    def _schedule_test_move(self, delta_x: int) -> None:
+        """延迟启动移动测试，并忽略已被新交互取代的旧请求。"""
+        expected_owner = getattr(self, "_sprite_action_owner", "idle")
+        QTimer.singleShot(
+            120,
+            lambda: self._run_delayed_horizontal_move_test(delta_x, expected_owner),
+        )
+
+    # 验证延迟移动请求仍有效后，启动横向移动。
+    def _run_delayed_horizontal_move_test(self, delta_x: int, expected_owner: str) -> None:
+        """仅在没有后续动作时执行延迟横向移动测试。"""
+        if (
+            self._movement_locked()
+            or getattr(self, "_sprite_action_owner", "idle") != expected_owner
+        ):
+            return
+        self._start_horizontal_move_test(delta_x)
 
     # 在菜单关闭后真正执行一次原地跳跃测试。
-    def _run_jump_test(self) -> None:
+    def _run_jump_test(self, expected_owner: str | None = None) -> None:
         """在菜单关闭后真正执行一次原地跳跃测试。"""
-        if self._movement_locked():
+        if self._movement_locked() or (
+            expected_owner is not None
+            and getattr(self, "_sprite_action_owner", "idle") != expected_owner
+        ):
             return
         screen = self._current_screen()
         if not screen:
@@ -1312,7 +1417,7 @@ class DesktopPetWindow(QWidget):
             )
             return
 
-        self.sprite_player.set_action("waving")
+        _set_pet_action(self, "waving", owner="proactive_api")
         self._display_message("我在努力思考，想要和你打个招呼。", 2800, "system")
         self._start_proactive_api_worker()
 
@@ -1329,7 +1434,7 @@ class DesktopPetWindow(QWidget):
         """念一首诗，将换行诗文字展示为气泡消息。"""
         line = self.behavior_controller.pick_poetry_line()
         if line:
-            self.sprite_player.set_action("running", force_single_cycle=True)
+            _set_pet_action(self, "running", force_single_cycle=True, owner="poetry")
             self._display_message(line, 12000, "system")
 
     # 设置人物显示缩放比例并持久化到配置文件。
@@ -1506,7 +1611,7 @@ class DesktopPetWindow(QWidget):
                 "truncated": truncated,
             },
         )
-        self.sprite_player.set_action("review")
+        _set_pet_action(self, "review", owner="clipboard")
         self._display_message("我来看看剪贴板里的内容。", 2800, "system")
         self._start_clipboard_assistant_worker(mode, clipboard_text)
         self._start_conversation_maintenance(["clipboard"], "round_threshold")
@@ -1582,7 +1687,13 @@ class DesktopPetWindow(QWidget):
             return
 
         self._restore_screenshot_widgets(self._take_screenshot_visibility())
-        self.sprite_player.set_action("review", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "review",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="screenshot",
+        )
         self._display_message("我来看看这张截图。", 2800, "system")
         self._start_screenshot_analysis_worker(
             screenshot.image_bytes,
@@ -1647,7 +1758,13 @@ class DesktopPetWindow(QWidget):
             placeholder_text="想问这张截图什么？",
             max_length=self._screenshot_question_max_chars(),
         )
-        self.sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "waiting",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="screenshot_input",
+        )
         self._waiting_timer.start(30_000)
 
     # 取消框选时恢复原界面且不上传或落盘。
@@ -1720,6 +1837,16 @@ class DesktopPetWindow(QWidget):
         """显示队列中的下一条待确认提醒及其两个快捷回复气泡。"""
         if self._closing_or_closed() or self._active_reminder_reply_id:
             return
+        # 提醒不应在聊天、截图或输入中的动作上直接抢占；保留队列，
+        # 待当前交互结束后再尝试展示。
+        if (
+            self._chat_in_progress()
+            or self.screenshot_selection_overlay is not None
+            or self._pending_screenshot is not None
+            or self.chat_input.isVisible()
+        ):
+            QTimer.singleShot(1000, self._show_next_reminder_reply)
+            return
         while self._reminder_reply_queue:
             reminder = self._reminder_reply_queue.pop(0)
             reminder_id = str(reminder.get("id", "")).strip()
@@ -1732,7 +1859,13 @@ class DesktopPetWindow(QWidget):
                 continue
             self._active_reminder_reply_id = reminder_id
             self.reply_bubble.hide()
-            self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
+            _set_pet_action(
+                self,
+                "waving",
+                fallback_action="idle",
+                force_single_cycle=True,
+                owner="reminder",
+            )
             reminder_text = f"提醒你一下：{title}"
             self.chat_store_remind.append_message(
                 "assistant",
@@ -1765,7 +1898,13 @@ class DesktopPetWindow(QWidget):
         if reminder is None:
             self._show_next_reminder_reply()
             return
-        self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "waving",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="reminder",
+        )
         confirmation = f"好的，已完成提醒：{reminder['title']}"
         self._record_remind_exchange(
             "好的，我知道了",
@@ -1788,7 +1927,13 @@ class DesktopPetWindow(QWidget):
         if reminder is None:
             self._show_next_reminder_reply()
             return
-        self.sprite_player.set_action("running", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "running",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="reminder",
+        )
         confirmation = f"好，{minutes} 分钟后再提醒你：{reminder['title']}"
         self._record_remind_exchange(
             f"{minutes}分钟后再提醒我",
@@ -2037,7 +2182,13 @@ class DesktopPetWindow(QWidget):
         self._record_user_interaction("open_chat_input")
         self.chat_input.set_always_on_top(self.config_service.get_bool("ui.always_on_top", True))
         self.chat_input.show_near(self.geometry())
-        self.sprite_player.set_action("waiting", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "waiting",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="chat_input",
+        )
         self._waiting_timer.start(30_000)
 
     _poetry_keywords = {"诗", "诗歌", "写诗", "念诗", "吟诗", "背诗", "来首", "作诗", "赋诗"}
@@ -2052,7 +2203,13 @@ class DesktopPetWindow(QWidget):
             return
         self._pending_screenshot = None
         self._waiting_timer.stop()
-        self.sprite_player.set_action("review", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "review",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="screenshot",
+        )
         self._display_message("我来看看你框选的内容。", 2800, "system")
         self._start_screenshot_analysis_worker(
             screenshot.image_bytes,
@@ -2098,21 +2255,21 @@ class DesktopPetWindow(QWidget):
             poetry_line = self.behavior_controller.pick_poetry_line()
             if poetry_line:
                 self.chat_flow_controller.append_assistant_reply(chat_context, poetry_line)
-                self.sprite_player.set_action("running", force_single_cycle=True)
+                _set_pet_action(self, "running", force_single_cycle=True, owner="chat")
                 self._show_answer_output(poetry_line, source="assistant", question=message)
                 return
 
         self._display_message("我收到啦，让我想一想。", 3200, "system")
-        self.sprite_player.set_action("review" if len(message) > 24 else "running")
+        _set_pet_action(self, "review" if len(message) > 24 else "running", owner="chat")
 
         decision = self.chat_flow_controller.decide_after_thinking(chat_context)
         if decision.kind == "local_reply":
-            self.sprite_player.set_action("idle")
+            _set_pet_action(self, "idle", owner="idle")
             self._show_answer_output(decision.reply, source="assistant", question=decision.question)
             return
 
         if decision.kind == "missing_api_config":
-            self.sprite_player.set_action("failed")
+            _set_pet_action(self, "failed", owner="chat_failure")
             self._show_answer_output(decision.reply, source="assistant", question=decision.question)
             return
 
@@ -2758,8 +2915,7 @@ class DesktopPetWindow(QWidget):
             move_to_remind = False
         completion = self.chat_flow_controller.complete_success(reply, move_to_remind)
         self._sync_chat_flow_state()
-        if not self._active_reminder_reply_id:
-            self.sprite_player.set_action("idle")
+        _finish_pet_action_if_owned(self, "chat")
         self._show_answer_output(
             completion.reply,
             source="assistant",
@@ -2774,8 +2930,13 @@ class DesktopPetWindow(QWidget):
             return
         failure = self.chat_flow_controller.complete_failure(error_message)
         self._sync_chat_flow_state()
-        if not self._active_reminder_reply_id:
-            self.sprite_player.set_action("failed", fallback_action="idle", force_single_cycle=True)
+        _finish_pet_action_if_owned(
+            self,
+            "chat",
+            "failed",
+            fallback_action="idle",
+            force_single_cycle=True,
+        )
         self._display_message(failure.error_message, 12000, "assistant")
 
     # 展示剪贴板辅助结果；此路径不写入聊天记录，也不会触发摘要或记忆更新。
@@ -2784,8 +2945,7 @@ class DesktopPetWindow(QWidget):
         if self._closing_or_closed():
             return
         cleaned_reply = reply.strip() or "没有得到可显示的处理结果。"
-        if not self._active_reminder_reply_id:
-            self.sprite_player.set_action("idle")
+        _finish_pet_action_if_owned(self, "clipboard")
         if len(cleaned_reply) > 360:
             self._show_clipboard_assistant_panel(mode, cleaned_reply)
             return
@@ -2796,8 +2956,13 @@ class DesktopPetWindow(QWidget):
         """展示剪贴板辅助失败提示，不影响当前聊天状态和历史数据。"""
         if self._closing_or_closed():
             return
-        if not self._active_reminder_reply_id:
-            self.sprite_player.set_action("failed", fallback_action="idle", force_single_cycle=True)
+        _finish_pet_action_if_owned(
+            self,
+            "clipboard",
+            "failed",
+            fallback_action="idle",
+            force_single_cycle=True,
+        )
         self._display_message(error_message, 10000, "assistant")
 
     # 展示截图解析结果，并只把模型文字写入独立 screenshot 历史。
@@ -2807,8 +2972,7 @@ class DesktopPetWindow(QWidget):
             return
         cleaned_reply = reply.strip() or "没有得到可显示的截图解析结果。"
         self.chat_store_screenshot.append_message("assistant", cleaned_reply)
-        if not self._active_reminder_reply_id:
-            self.sprite_player.set_action("idle")
+        _finish_pet_action_if_owned(self, "screenshot")
         self._display_message(
             cleaned_reply,
             self._assistant_reply_bubble_duration_ms(),
@@ -2820,8 +2984,13 @@ class DesktopPetWindow(QWidget):
         """显示截图解析失败状态，不保存失败记录。"""
         if self._closing_or_closed():
             return
-        if not self._active_reminder_reply_id:
-            self.sprite_player.set_action("failed", fallback_action="idle", force_single_cycle=True)
+        _finish_pet_action_if_owned(
+            self,
+            "screenshot",
+            "failed",
+            fallback_action="idle",
+            force_single_cycle=True,
+        )
         self._display_message(error_message, 10000, "assistant")
 
     # 处理 API 主动说话测试成功后的界面更新。
@@ -2830,7 +2999,7 @@ class DesktopPetWindow(QWidget):
         if self._closing_or_closed():
             return
         cleaned_reply = reply.strip() or "我在这里哦。"
-        self.sprite_player.set_action("idle")
+        _finish_pet_action_if_owned(self, "proactive_api")
         self._display_message(cleaned_reply, 12000, "assistant")
 
     # 处理 API 主动说话测试失败后的界面更新。
@@ -2838,7 +3007,7 @@ class DesktopPetWindow(QWidget):
         """处理 API 主动说话测试失败后的界面更新。"""
         if self._closing_or_closed():
             return
-        self.sprite_player.set_action("failed")
+        _finish_pet_action_if_owned(self, "proactive_api", "failed")
         self._display_message(error_message, 12000, "assistant")
 
     # 为普通聊天追加对应模式的后台维护请求。
@@ -2962,7 +3131,7 @@ class DesktopPetWindow(QWidget):
         """响应主动行为控制器的说话请求。"""
         if not self._can_show_proactive_greeting():
             return
-        self.sprite_player.set_action(action_name)
+        _set_pet_action(self, action_name, owner="proactive")
         self._display_message(text, duration_ms, "proactive")
         self.behavior_controller.notify_proactive_shown(
             self.behavior_controller.pending_proactive_type()
@@ -3019,6 +3188,7 @@ class DesktopPetWindow(QWidget):
                 self._clear_chat_task_refs,
             )
             return
+        self._sprite_action_owner = "scenario_pending"
         self.chat_thread.start()
 
     # 展示模型生成的场景问候，并记录主动展示状态。
@@ -3026,6 +3196,9 @@ class DesktopPetWindow(QWidget):
     def _on_scenario_greeting_success(self, reply: str) -> None:
         """展示模型生成的场景问候，并记录主动展示状态。"""
         if self._closing_or_closed():
+            return
+        owner = getattr(self, "_sprite_action_owner", None)
+        if owner is not None and owner != "scenario_pending":
             return
         self._pending_scenario_fallback_line = ""
         self._show_scenario_greeting_line(reply)
@@ -3038,6 +3211,10 @@ class DesktopPetWindow(QWidget):
         if self._closing_or_closed():
             self._pending_scenario_fallback_line = ""
             return
+        owner = getattr(self, "_sprite_action_owner", None)
+        if owner is not None and owner != "scenario_pending":
+            self._pending_scenario_fallback_line = ""
+            return
         fallback = self._pending_scenario_fallback_line
         self._pending_scenario_fallback_line = ""
         if fallback:
@@ -3048,7 +3225,7 @@ class DesktopPetWindow(QWidget):
         """根据 line 显示场景问候台词内容并安排后续气泡状态。"""
         if not line or not self._can_show_proactive_greeting():
             return
-        self.sprite_player.set_action("waving")
+        _set_pet_action(self, "waving", owner="scenario")
         self._display_message(
             line,
             self._proactive_greeting_duration_ms(),
@@ -3109,15 +3286,27 @@ class DesktopPetWindow(QWidget):
                 self._clear_chat_task_refs,
             )
             return
+        self._sprite_action_owner = "knowledge_pending"
         self.chat_thread.start()
 
     # 知识问候 API 成功返回后，展示内容并在右侧弹出可点击的应答气泡。
     def _on_knowledge_speak_success(self, reply: str) -> None:
         """知识问候 API 成功返回后，展示内容并在右侧弹出可点击的应答气泡。"""
-        if self._closing_or_closed() or not self._can_show_proactive_greeting():
+        owner = getattr(self, "_sprite_action_owner", None)
+        if owner is not None and owner != "knowledge_pending":
+            return
+        if self._closing_or_closed() or not self._can_show_proactive_greeting(
+            ignore_chat_task=True
+        ):
             return
         cleaned_reply = reply.strip() or "让我再看看哦。"
-        self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "waving",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="knowledge",
+        )
         parts = split_knowledge_bubble_text(cleaned_reply)
         if len(parts) <= 1:
             self._display_message(parts[0] if parts else cleaned_reply, 15000, "proactive")
@@ -3132,7 +3321,12 @@ class DesktopPetWindow(QWidget):
     # 根据 text 显示知识问候secondpart内容并安排后续气泡状态。
     def _show_knowledge_second_part(self, text: str) -> None:
         """根据 text 显示知识问候secondpart内容并安排后续气泡状态。"""
-        if self._closing_or_closed() or not self._can_show_proactive_greeting():
+        owner = getattr(self, "_sprite_action_owner", None)
+        if owner is not None and owner != "knowledge":
+            return
+        if self._closing_or_closed() or not self._can_show_proactive_greeting(
+            allow_existing_proactive_bubble=True
+        ):
             return
         self._display_message(text, 12000, "proactive")
         self._show_knowledge_reply_ack()
@@ -3155,15 +3349,21 @@ class DesktopPetWindow(QWidget):
         """知识问候 API 失败后展示错误提示。"""
         if self._closing_or_closed():
             return
-        self.sprite_player.set_action("failed")
+        if getattr(self, "_sprite_action_owner", None) == "knowledge_pending":
+            _set_pet_action(self, "failed", owner="knowledge_failure")
         self._display_message(error_message, 8000, "assistant")
 
     # 用户点击右侧应答气泡，视为回应主动问候并更新间隔。
     def _handle_reply_bubble_clicked(self) -> None:
         """用户点击右侧应答气泡，视为回应主动问候并更新间隔。"""
         if self.behavior_controller.notify_proactive_response():
-            self._settle_after_user_interaction()
-            self.sprite_player.set_action("waving", fallback_action="idle", force_single_cycle=True)
+            _set_pet_action(
+                self,
+                "waving",
+                fallback_action="idle",
+                force_single_cycle=True,
+                owner="proactive_reply",
+            )
 
     # 通过气泡组件显示一条消息。
     def _display_message(self, text: str, duration_ms: int, source: str = "system") -> None:
@@ -3328,6 +3528,8 @@ class DesktopPetWindow(QWidget):
         self._refresh_auto_move_timer()
         if self._interaction_busy() or self._movement_locked():
             return
+        if self.bubble.isVisible() or self.sprite_player.current_action != "idle":
+            return
         screen = self._current_screen()
         if not screen:
             return
@@ -3362,14 +3564,15 @@ class DesktopPetWindow(QWidget):
             return
 
         action = "running_right" if target.x() > current.x() else "running_left"
-        self.sprite_player.set_action(action)
-        self.move_animation = QPropertyAnimation(self, b"pos", self)
-        self.move_animation.setDuration(1200)
-        self.move_animation.setStartValue(current)
-        self.move_animation.setEndValue(target)
-        self.move_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self.move_animation.finished.connect(self._finish_auto_move)
-        self.move_animation.start()
+        _set_pet_action(self, action, owner="movement", interrupt_movement=False)
+        animation = QPropertyAnimation(self, b"pos", self)
+        self.move_animation = animation
+        animation.setDuration(1200)
+        animation.setStartValue(current)
+        animation.setEndValue(target)
+        animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        animation.finished.connect(self._finish_auto_move)
+        animation.start()
 
     # 执行一次带 jumping 动作的自主跳跃。
     def _start_jump_auto_move(self, current: QPoint, available: QRect) -> None:
@@ -3379,31 +3582,48 @@ class DesktopPetWindow(QWidget):
         peak_y = max(available.top(), current.y() - jump_height)
         peak = QPoint(current.x(), peak_y)
 
-        self.sprite_player.set_action("jumping", fallback_action="idle", force_single_cycle=True)
+        _set_pet_action(
+            self,
+            "jumping",
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner="movement",
+            interrupt_movement=False,
+        )
         duration_ms = self.sprite_player.action_duration_ms("jumping", force_single_cycle=True)
 
-        self.move_animation = QPropertyAnimation(self, b"pos", self)
-        self.move_animation.setDuration(duration_ms)
-        self.move_animation.setStartValue(current)
-        self.move_animation.setKeyValueAt(0.5, peak)
-        self.move_animation.setEndValue(current)
-        self.move_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self.move_animation.finished.connect(self._finish_auto_move)
-        self.move_animation.start()
+        animation = QPropertyAnimation(self, b"pos", self)
+        self.move_animation = animation
+        animation.setDuration(duration_ms)
+        animation.setStartValue(current)
+        animation.setKeyValueAt(0.5, peak)
+        animation.setEndValue(current)
+        animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        animation.finished.connect(self._finish_auto_move)
+        animation.start()
 
     # 在自主移动结束后恢复 idle 动作并保存位置。
     def _finish_auto_move(self) -> None:
         """在自主移动结束后恢复 idle 动作并保存位置。"""
-        self.sprite_player.set_action("idle")
+        animation = self.sender()
+        if animation is not None and animation is not self.move_animation:
+            return
         self.move_animation = None
+        _finish_pet_action_if_owned(self, "movement")
         self._save_window_position()
         self._sync_floating_widgets()
 
     # 停止当前移动动画并清空动画引用。
     def _stop_active_move_animation(self) -> None:
         """停止当前移动动画并清空动画引用。"""
-        if self.move_animation and self.move_animation.state() == QPropertyAnimation.State.Running:
-            self.move_animation.stop()
+        animation = self.move_animation
+        if animation is not None:
+            try:
+                animation.finished.disconnect(self._finish_auto_move)
+            except (RuntimeError, TypeError):
+                pass
+            if animation.state() == QPropertyAnimation.State.Running:
+                animation.stop()
         self.move_animation = None
 
     # 判断当前窗口是否处于禁止自动移动的状态。
@@ -3412,10 +3632,10 @@ class DesktopPetWindow(QWidget):
         return self.dragging or self.exit_animation_in_progress
 
     # 判断互动后是否仍有任务、提醒或输入状态需要保留当前动作。
-    def _interaction_busy(self) -> bool:
+    def _interaction_busy(self, *, ignore_chat_task: bool = False) -> bool:
         """判断互动后是否仍有任务、提醒或输入状态需要保留当前动作。"""
         return (
-            self._chat_in_progress()
+            (not ignore_chat_task and self._chat_in_progress())
             or self.background_tasks.is_running("clipboard_assistant")
             or self.background_tasks.is_running("screenshot_analysis")
             or self.screenshot_selection_overlay is not None
@@ -3425,10 +3645,11 @@ class DesktopPetWindow(QWidget):
         )
 
     # 统一将有效用户操作通知给行为控制器，并终止不合时宜的自主移动。
-    def _record_user_interaction(self, source: str) -> None:
+    def _record_user_interaction(self, source: str, *, settle: bool = True) -> None:
         """统一将有效用户操作通知给行为控制器。"""
         self.behavior_controller.notify_user_interaction(source)
-        self._settle_after_user_interaction()
+        if settle:
+            self._settle_after_user_interaction()
 
     # 在没有进行中任务时结束自主移动并恢复空闲动作。
     def _settle_after_user_interaction(self) -> None:
@@ -3436,15 +3657,24 @@ class DesktopPetWindow(QWidget):
         if self._interaction_busy():
             return
         self._stop_active_move_animation()
-        self.sprite_player.set_action("idle")
+        _set_pet_action(self, "idle", owner="idle")
         self._refresh_auto_move_timer()
 
     # 返回主动问候可实际展示的前置条件，供行为控制器和窗口回调共用。
-    def _can_show_proactive_greeting(self) -> bool:
+    def _can_show_proactive_greeting(
+        self,
+        *,
+        ignore_chat_task: bool = False,
+        allow_existing_proactive_bubble: bool = False,
+    ) -> bool:
         """返回主动问候可实际展示的前置条件。"""
         if self._closing_or_closed() or self.config_service.get_bool("behavior.do_not_disturb", False):
             return False
-        if self._interaction_busy():
+        if self._interaction_busy(ignore_chat_task=ignore_chat_task):
+            return False
+        if self.bubble.isVisible() and (
+            not allow_existing_proactive_bubble or self.bubble.source != "proactive"
+        ):
             return False
         return self.bubble.source != "reminder"
 

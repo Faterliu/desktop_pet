@@ -374,6 +374,22 @@ class BehaviorControllerTests(unittest.TestCase):
                 controller.last_user_interaction_at,
             )
 
+    # 验证右键菜单招呼只从专用本地台词组读取。
+    def test_context_menu_line_uses_dedicated_local_group(self) -> None:
+        """验证打开右键菜单不会误用主动问候台词。"""
+        with tempfile.TemporaryDirectory() as temp:
+            controller = self._controller(
+                Path(temp),
+                {},
+                local_lines={
+                    "idle": ["空闲问候"],
+                    "context_menu": ["有什么可以帮你的吗？"],
+                    "first_start": {"enable": False, "data": []},
+                },
+            )
+
+            self.assertEqual(controller.pick_context_menu_line(), "有什么可以帮你的吗？")
+
     # 验证主动问候未被窗口实际展示时不会更新展示时间或日用量。
     def test_blocked_proactive_request_does_not_record_shown_time(self) -> None:
         """验证主动问候未被窗口实际展示时不会更新展示时间。"""

@@ -9,7 +9,7 @@ from pathlib import Path
 DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
 
-from app.desktop_pet_window import KnowledgeSpeakWorker  # noqa: E402
+from app.desktop_pet_window import DesktopPetWindow, KnowledgeSpeakWorker  # noqa: E402
 from storage.memory_store import MemoryStore  # noqa: E402
 
 
@@ -32,6 +32,52 @@ class FakePromptBuilder:
         self.prompts.append(prompt)
         self.options.append(kwargs)
         return [{"role": "user", "content": prompt}]
+
+
+class FakeKnowledgeSuccessWindow:
+    """模拟知识问候成功回调所需的最小窗口状态。"""
+
+    # 初始化成功回调使用的动作、气泡和状态记录。
+    def __init__(self) -> None:
+        """准备知识问候成功回调的记录字段。"""
+        self.ignore_chat_task_values: list[bool] = []
+        self.displayed: list[tuple[str, int, str]] = []
+        self.actions: list[tuple[str, str, bool]] = []
+        self.notified: list[str] = []
+        self.ack_shown = False
+        self.sprite_player = self
+        self.behavior_controller = self
+
+    # 模拟窗口处于可展示状态。
+    def _closing_or_closed(self) -> bool:
+        """返回窗口尚未关闭。"""
+        return False
+
+    # 记录是否忽略知识问候自身的聊天任务。
+    def _can_show_proactive_greeting(self, *, ignore_chat_task: bool = False) -> bool:
+        """记录展示检查参数并允许显示。"""
+        self.ignore_chat_task_values.append(ignore_chat_task)
+        return True
+
+    # 记录知识问候触发的人物动作。
+    def set_action(self, action: str, *, fallback_action: str, force_single_cycle: bool) -> None:
+        """保存人物动作参数。"""
+        self.actions.append((action, fallback_action, force_single_cycle))
+
+    # 记录知识问候气泡内容。
+    def _display_message(self, text: str, duration_ms: int, source: str) -> None:
+        """保存气泡展示参数。"""
+        self.displayed.append((text, duration_ms, source))
+
+    # 记录知识问候已实际展示。
+    def notify_proactive_shown(self, greeting_type: str) -> None:
+        """保存主动问候类型。"""
+        self.notified.append(greeting_type)
+
+    # 记录右侧应答气泡已进入显示流程。
+    def _show_knowledge_reply_ack(self) -> None:
+        """标记知识问候应答气泡已触发。"""
+        self.ack_shown = True
 
 
 class KnowledgeSpeakMemoryTests(unittest.TestCase):
@@ -215,6 +261,21 @@ class KnowledgeSpeakMemoryTests(unittest.TestCase):
             "不需要频繁追问",
         ):
             self.assertIn(value, prompt)
+
+    # 验证知识问候成功回调不会被自身仍在运行的聊天任务拦截。
+    def test_success_callback_ignores_its_own_chat_task(self) -> None:
+        """验证 Worker 成功返回后会正常显示知识问候气泡。"""
+        window = FakeKnowledgeSuccessWindow()
+
+        DesktopPetWindow._on_knowledge_speak_success(window, "给自己留一点缓冲也很好。")
+
+        self.assertEqual(window.ignore_chat_task_values, [True])
+        self.assertEqual(
+            window.displayed,
+            [("给自己留一点缓冲也很好。", 15000, "proactive")],
+        )
+        self.assertEqual(window.notified, ["extra_knowledge"])
+        self.assertTrue(window.ack_shown)
 
 
 if __name__ == "__main__":
