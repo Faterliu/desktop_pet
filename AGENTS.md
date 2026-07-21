@@ -10,7 +10,7 @@ Project handoff notes for future AI coding agents. This file is meant to be read
 - Main coordinator: `desktop_pet/app/desktop_pet_window.py`.
 - Default config template: `desktop_pet/config/app_config.example.json`.
 - Runtime user data: `desktop_pet/config/app_config.json`, `desktop_pet/data/`, logs, caches, and virtual environments must not be committed.
-- Tests: `desktop_pet/tests/` uses `unittest`; there is no pytest, packaging, formatter, lint, or CI setup.
+- Tests: `desktop_pet/tests/` uses `unittest`; there is no pytest, packaging, formatter, lint, or CI setup. `test_interaction_action_conflicts.py` covers movement, delayed interaction and stale callback action conflicts.
 - Older planning and asset notes live under `xiaohu_codex_package/xiaohu_codex/`.
 
 ## Run And Setup
@@ -48,10 +48,11 @@ Startup diagnostics:
 ## Core Behavior
 
 - Transparent, borderless, always-on-top desktop character window.
-- Sprite animation from `desktop_pet/assets/spritesheet.webp` and `desktop_pet/assets/sprite_config.json`.
+- Sprite animation is configured by `desktop_pet/assets/sprite_config.json` (the current atlas is `assets/raw_spritesheet_short_arm.webp`).
 - Click opens a floating chat input; double-click triggers reply or proactive-feedback behavior.
-- Right-click menu controls testing entries, reload config, scaling, do-not-disturb, always-on-top, autonomous movement, API chat, formal Q&A, cleanup, and exit.
-- Chat can use local scripted replies or the DeepSeek OpenAI-compatible Chat Completions API.
+- Right-click opens a compact card beside the character: clipboard assistant, reminders, screenshots and do-not-disturb are first-level entries; other settings remain in submenus. “关闭菜单” only closes the card; “退出程序” exits the pet.
+- Screenshot supports full-screen quick analysis and frozen single-screen region selection with a follow-up question. Images exist only in memory; only the returned text enters the isolated `screenshot` history.
+- Chat can use local scripted replies or compatible APIs. Chat prefers the configured KLD Responses endpoint and falls back to DeepSeek when its SSL connection is interrupted; vision always uses the configured OpenAI Responses API.
 - Local JSON/JSONL stores keep chat history, append-only mode summaries, memory, usage counters, generated local lines, and window position. Chat history is shared `data/chat_history.jsonl`; `formal`, `informal`, and `clipboard` feed their own summaries through one background maintenance task, while `remind` and reserved `screenshot` remain outside summaries and memory. `memory.json` stores each semantic field as numbered description/timestamp records; only the three-summary memory pipeline may add or update them.
 - Optional Mem0 / DashScope-backed long-term semantic memory is off by default and must degrade gracefully.
 - Proactive behavior includes startup greetings, idle greetings, scenario-based greetings, knowledge greetings, time-period greetings, and low-interruption fallback. Knowledge greetings no longer show a local intro line before the generated content.
@@ -66,7 +67,8 @@ Startup diagnostics:
 `desktop_pet/app/desktop_pet_window.py`
 
 - Main UI and flow coordinator: window flags, mouse/menu events, chat flow, background worker wiring, formal Q&A panels, bubbles, movement, topmost enforcement, config reload, and exit animation.
-- Large and stateful. Be careful around `QThread` lifecycle, `closeEvent()`, chat pending state, timers, topmost state, formal/informal mode, and floating-widget positioning.
+- Large and stateful. Be careful around `QThread` lifecycle, `closeEvent()`, chat pending state, timers, topmost state, formal/informal mode, floating-widget positioning, and action ownership.
+- All character actions must go through `_set_pet_action()`; it stops active movement before non-movement actions and records ownership. Async worker callbacks must use `_finish_pet_action_if_owned()` so stale completions cannot replace newer actions. Do not reintroduce direct `sprite_player.set_action()` calls in this window.
 
 `desktop_pet/app/background_task_registry.py`
 
@@ -94,7 +96,7 @@ Startup diagnostics:
 
 `desktop_pet/app/context_menu.py`
 
-- Builds the right-click menu. New menu items usually require both this file and callback wiring in `DesktopPetWindow`.
+- Builds the right-click card and legacy-backed submenus. New menu items usually require both this file and callback wiring in `DesktopPetWindow`; card interaction signals must not perform a late idle reset after an action has started.
 
 `desktop_pet/app/chat_input.py`, `speech_bubble.py`, `formal_answer_panel.py`
 
@@ -106,7 +108,7 @@ Startup diagnostics:
 
 `desktop_pet/ai/deepseek_client.py`
 
-- Calls `base_url + /chat/completions` with `requests.post()`. Handle missing keys, API errors, timeout, and response-shape differences.
+- Handles compatible chat and vision requests with `requests.post()`. Preserve missing-key, API-error, timeout and response-shape handling; vision sends Data URL images to `/responses` and must not log image data or keys.
 
 `desktop_pet/ai/prompt_builder.py`
 
@@ -142,11 +144,12 @@ Startup diagnostics:
 - Chat behavior: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `ChatWorker`, `deepseek_client.py`, `prompt_builder.py`, `context_manager.py`, and `summarizer.py`.
 - Formal Q&A: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `formal_answer_panel.py`, dual chat stores, and prompt mode handling.
 - Proactive greetings and local line refresh: inspect `behavior_controller.py`, `proactive_context.py`, `DesktopPetWindow` worker callbacks, `local_lines_service.py`, `local_lines.json`, and `config/app_config.example.json`.
+- Screenshot and vision: inspect `screenshot_capture_service.py`, `screenshot_selection_overlay.py`, `ScreenshotAnalysisWorker`, `DeepSeekClient`, `DesktopPetWindow`, and `tests/test_screenshot_analysis.py`.
 - Memory changes: inspect `memory_store.py`, `summarizer.py`, `prompt_builder.py`, `mem0_memory_service.py`, `memory_vector_store.py`, and related tests.
 - Bubbles and positioning: inspect `speech_bubble.py`, `bubble_position_service.py`, `chat_input.py`, and `_sync_floating_widgets()`.
 - Background work: use `background_task_registry.py`; verify duplicate task handling and shutdown behavior.
 - Config changes: update both code and `config/app_config.example.json`; never commit real keys or local `app_config.json`.
-- Sprites/actions: update `sprite_config.json`, assets, `SpritePlayer`, and all action call sites together.
+- Sprites/actions: update `sprite_config.json`, assets, `SpritePlayer`, and all action call sites together. Use `_set_pet_action()` in `DesktopPetWindow`; also verify movement completion, delayed callbacks and worker completion do not overwrite the new action.
 
 ## Project Conventions
 
@@ -164,7 +167,7 @@ Startup diagnostics:
 
 ## High-Risk Areas
 
-- `desktop_pet_window.py`: many UI states and timers interact; regressions can appear only during exit, reload, or background task completion.
+- `desktop_pet_window.py`: many UI states and timers interact; regressions can appear only during exit, reload, movement completion, delayed interaction, or background task completion. Direct action changes and unguarded callbacks are especially high risk.
 - `closeEvent()` and worker cleanup: avoid unbounded waits and avoid callbacks mutating UI during shutdown.
 - `json_store.py`: affects all runtime persistence; preserve atomic write, corrupt-file recovery, and old data compatibility.
 - `app_config.example.json`: missing defaults can break first launch on new devices.

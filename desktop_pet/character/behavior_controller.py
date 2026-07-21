@@ -310,9 +310,41 @@ class BehaviorController(QObject):
             return 10
         return value if value > 0 else 10
 
+    # 判断当前时间是否处于启用的深夜专属问候窗口。
+    def _is_night_greeting_window(self, behavior: dict[str, Any], now: datetime) -> bool:
+        """判断当前时间是否处于启用的深夜专属问候窗口。"""
+        night_config = behavior.get("night_greeting", {})
+        return (
+            isinstance(night_config, dict)
+            and bool(night_config.get("enabled", False))
+            and 0 <= now.hour < 7
+        )
+
+    # 读取深夜专属问候最小间隔，配置无效时回退默认分钟数。
+    def _night_greeting_minimum_interval_minutes(self, behavior: dict[str, Any]) -> int:
+        """读取深夜专属问候最小间隔，配置无效时回退默认分钟数。"""
+        night_config = behavior.get("night_greeting", {})
+        if not isinstance(night_config, dict):
+            return 10
+        try:
+            value = int(night_config.get("min_interval_minutes", 10))
+        except (TypeError, ValueError):
+            return 10
+        return value if value > 0 else 10
+
     # 合并最小间隔和动态间隔，得到最终主动问候间隔。
-    def _effective_proactive_interval_minutes(self, behavior: dict[str, Any]) -> int:
+    def _effective_proactive_interval_minutes(
+        self,
+        behavior: dict[str, Any],
+        now: datetime | None = None,
+    ) -> int:
         """合并最小间隔和动态间隔，得到最终主动问候间隔。"""
+        current_time = now or now_local()
+        if self._is_night_greeting_window(behavior, current_time):
+            minimum_interval = self._night_greeting_minimum_interval_minutes(behavior)
+            if self._consecutive_unanswered == 0:
+                return min(minimum_interval, 30)
+            return min(30, max(minimum_interval, self._dynamic_proactive_interval_minutes()))
         return max(
             self._minimum_proactive_interval_minutes(behavior),
             self._dynamic_proactive_interval_minutes(),
@@ -353,10 +385,11 @@ class BehaviorController(QObject):
         if not self.usage_store.can_use_local(max_daily):
             return
 
-        interval_minutes = self._effective_proactive_interval_minutes(behavior)
+        now = now_local()
+        is_night_greeting = self._is_night_greeting_window(behavior, now)
+        interval_minutes = self._effective_proactive_interval_minutes(behavior, now)
         if not self.can_show_proactive():
             return
-        now = now_local()
         if elapsed_seconds(self.last_user_interaction_at, self._last_user_interaction_monotonic) < interval_minutes * 60:
             return
         if elapsed_seconds(self.last_proactive_shown_at, self._last_proactive_shown_monotonic) < interval_minutes * 60:
@@ -367,24 +400,28 @@ class BehaviorController(QObject):
             self._consecutive_unanswered += 1
             self._unanswered_counted_for = shown_key
 
-        if self._try_scenario_greeting(behavior, now):
-            return
-
-        ratio = self._proactive_ratio()
-        extra_weight = ratio.get("extra_knowledge", 0.5)
-        if random.random() < extra_weight:
-            memory_available = self._has_memory_content()
-            if memory_available is None:
-                return
-            if memory_available:
-                self._requested_proactive_type = "extra_knowledge"
-                self.knowledge_speak_requested.emit()
+        if is_night_greeting:
+            # 深夜只展示休息提醒或困倦提示，不发起场景和知识类主动问候。
+            line_types = ["break_reminder", "sleepy"]
+        else:
+            if self._try_scenario_greeting(behavior, now):
                 return
 
-        line_types = ["idle", "quiet", "encourage", "break_reminder"]
-        time_key = self._time_greeting_key()
-        if time_key:
-            line_types.append(time_key)
+            ratio = self._proactive_ratio()
+            extra_weight = ratio.get("extra_knowledge", 0.5)
+            if random.random() < extra_weight:
+                memory_available = self._has_memory_content()
+                if memory_available is None:
+                    return
+                if memory_available:
+                    self._requested_proactive_type = "extra_knowledge"
+                    self.knowledge_speak_requested.emit()
+                    return
+
+            line_types = ["idle", "quiet", "encourage", "break_reminder"]
+            time_key = self._time_greeting_key()
+            if time_key:
+                line_types.append(time_key)
         line_type = random.choice(line_types)
         line = self._random_line(line_type)
         if not line:

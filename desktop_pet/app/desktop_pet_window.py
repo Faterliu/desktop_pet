@@ -109,6 +109,47 @@ LOCAL_LINE_REFRESH_LABELS = {
     "reply": "知识问候回应气泡",
 }
 
+# 将具体台词组收敛到用户可配置的五类问候，避免配置文件暴露过多实现细节。
+LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE = {
+    "time": (
+        "sleepy",
+        "greeting_morning",
+        "greeting_noon",
+        "greeting_afternoon",
+        "greeting_evening",
+        "greeting_spring",
+        "greeting_summer",
+        "greeting_autumn",
+        "greeting_winter",
+    ),
+    "arrival": ("first_start", "startup", "return_after_idle", "farewell"),
+    "care": (
+        "idle",
+        "quiet",
+        "encourage",
+        "work_focus",
+        "break_reminder",
+        "comfort",
+        "happy",
+        "sad",
+    ),
+    "scenario": (
+        "scenario_greeting_templates",
+        "low_interrupt",
+        "knowledge_speak_intro",
+        "poetry",
+    ),
+    "interaction": (
+        "thinking",
+        "api_error",
+        "ignored",
+        "waiting",
+        "context_menu",
+        "feedback",
+        "reply",
+    ),
+}
+
 CLIPBOARD_ASSISTANT_INSTRUCTIONS = {
     "summarize": "总结下面文本的重点，使用清晰的要点，不补充原文没有的信息。",
     "translate": "翻译下面文本，准确保留原意；若原文主要是中文，则翻译为自然英文，否则翻译为自然中文。",
@@ -2849,15 +2890,44 @@ class DesktopPetWindow(QWidget):
         refresh_config = self.app_config.get("local_lines_refresh", {})
         if not isinstance(refresh_config, dict):
             return []
-        groups_config = refresh_config.get("groups", {})
-        if not isinstance(groups_config, dict):
-            return []
 
         default_interval = _positive_int(refresh_config.get("interval_days"), 14)
         default_max_chars = _positive_int(refresh_config.get("max_chars"), 80)
         default_max_items = _positive_int(refresh_config.get("max_items"), 8)
         default_monthly_refresh = bool(refresh_config.get("monthly_refresh", False))
         targets: list[dict[str, Any]] = []
+
+        greeting_types = refresh_config.get("greeting_types", {})
+        if isinstance(greeting_types, dict):
+            for greeting_type, groups in LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE.items():
+                type_config = greeting_types.get(greeting_type, {})
+                if not isinstance(type_config, dict) or not type_config.get("enabled", True):
+                    continue
+                for group_name in groups:
+                    targets.append(
+                        {
+                            "group": group_name,
+                            "label": LOCAL_LINE_REFRESH_LABELS.get(group_name, group_name),
+                            "interval_days": _positive_int(
+                                type_config.get("interval_days"), default_interval
+                            ),
+                            "monthly_refresh": bool(
+                                type_config.get("monthly_refresh", default_monthly_refresh)
+                            ),
+                            "max_chars": _positive_int(
+                                type_config.get("max_chars"), default_max_chars
+                            ),
+                            "max_items": _positive_int(
+                                type_config.get("max_items"), default_max_items
+                            ),
+                        }
+                    )
+            return targets
+
+        # 兼容旧版按具体台词组配置的用户文件；新配置应使用 greeting_types。
+        groups_config = refresh_config.get("groups", {})
+        if not isinstance(groups_config, dict):
+            return []
 
         for group, config in groups_config.items():
             if not isinstance(config, dict) or not config.get("enabled", False):

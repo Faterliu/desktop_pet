@@ -5,6 +5,7 @@ import sys
 import tempfile
 import types
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -430,6 +431,129 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertGreaterEqual(
                 controller._dynamic_proactive_interval_minutes(),
                 30,
+            )
+
+    # 验证深夜专属问候只从休息提醒和困倦提示中等概率选择，且跳过场景和知识分支。
+    def test_night_greeting_uses_only_local_rest_and_sleepy_lines(self) -> None:
+        """验证深夜专属问候只从休息提醒和困倦提示中等概率选择。"""
+        with tempfile.TemporaryDirectory() as temp:
+            fixed_now = now_local().replace(hour=0, minute=30, second=0, microsecond=0)
+            config = {
+                "behavior": {
+                    "proactive_chat": True,
+                    "do_not_disturb": False,
+                    "max_local_lines_per_day": 10,
+                    "min_proactive_interval_minutes": 20,
+                    "night_greeting": {"enabled": True, "min_interval_minutes": 10},
+                    "enable_scenario_greeting": True,
+                },
+                "proactive_content_ratio": {"extra_knowledge": 1.0, "regular_greeting": 0.0},
+            }
+            controller = self._controller(
+                Path(temp),
+                config,
+                local_lines={
+                    "break_reminder": ["该休息一下啦。"],
+                    "sleepy": ["已经很晚啦。"],
+                    "scenario_greeting_templates": ["场景问候"],
+                    "first_start": {"enable": False, "data": []},
+                },
+            )
+            controller.last_user_interaction = fixed_now - timedelta(minutes=11)
+            selected_candidates: list[list[str]] = []
+            spoken: list[tuple[str, int, str]] = []
+            controller.speak_requested.connect(lambda *args: spoken.append(args))
+
+            def choose_night_line(candidates: list[str]) -> str:
+                """记录深夜候选并固定选择困倦提示，便于验证分支。"""
+                selected_candidates.append(candidates)
+                return "sleepy"
+
+            with (
+                patch("character.behavior_controller.now_local", return_value=fixed_now),
+                patch("character.behavior_controller.random.choice", side_effect=choose_night_line),
+                patch.object(controller, "_try_scenario_greeting") as scenario_greeting,
+                patch.object(controller, "_has_memory_content") as memory_content,
+            ):
+                controller._maybe_idle_prompt()
+
+            self.assertEqual(selected_candidates, [["break_reminder", "sleepy"]])
+            self.assertEqual(spoken[0][0], "已经很晚啦。")
+            scenario_greeting.assert_not_called()
+            memory_content.assert_not_called()
+
+    # 验证深夜首次间隔为十分钟，未回应后恢复现有动态降频。
+    def test_night_greeting_interval_uses_ten_minutes_then_dynamic_backoff(self) -> None:
+        """验证深夜首次间隔为十分钟，未回应后恢复现有动态降频。"""
+        with tempfile.TemporaryDirectory() as temp:
+            fixed_now = now_local().replace(hour=1, minute=0, second=0, microsecond=0)
+            behavior = {
+                "min_proactive_interval_minutes": 20,
+                "night_greeting": {"enabled": True, "min_interval_minutes": 10},
+            }
+            controller = self._controller(Path(temp), {"behavior": behavior})
+
+            self.assertEqual(controller._effective_proactive_interval_minutes(behavior, fixed_now), 10)
+            controller._consecutive_unanswered = 1
+            self.assertEqual(controller._effective_proactive_interval_minutes(behavior, fixed_now), 15)
+            controller._consecutive_unanswered = 2
+            self.assertEqual(controller._effective_proactive_interval_minutes(behavior, fixed_now), 30)
+            controller._consecutive_unanswered = 3
+            with patch("character.behavior_controller.random.randint", return_value=60):
+                self.assertEqual(controller._effective_proactive_interval_minutes(behavior, fixed_now), 30)
+            controller._consecutive_unanswered = 4
+            self.assertEqual(controller._effective_proactive_interval_minutes(behavior, fixed_now), 30)
+
+    # 验证早晨恢复普通候选，且旧配置不会意外启用深夜策略。
+    def test_daytime_and_legacy_config_keep_existing_proactive_behavior(self) -> None:
+        """验证早晨恢复普通候选，且旧配置不会意外启用深夜策略。"""
+        with tempfile.TemporaryDirectory() as temp:
+            morning = now_local().replace(hour=7, minute=30, second=0, microsecond=0)
+            behavior = {
+                "proactive_chat": True,
+                "do_not_disturb": False,
+                "max_local_lines_per_day": 10,
+                "min_proactive_interval_minutes": 20,
+                "night_greeting": {"enabled": True, "min_interval_minutes": 10},
+            }
+            controller = self._controller(
+                Path(temp),
+                {"behavior": behavior, "proactive_content_ratio": {"extra_knowledge": 0.0}},
+                local_lines={
+                    "idle": ["空闲"],
+                    "quiet": ["安静"],
+                    "encourage": ["加油"],
+                    "break_reminder": ["休息"],
+                    "greeting_morning": ["早上好"],
+                    "first_start": {"enable": False, "data": []},
+                },
+            )
+            controller.last_user_interaction = morning - timedelta(minutes=21)
+            selected_candidates: list[list[str]] = []
+
+            def choose_morning_line(candidates: list[str]) -> str:
+                """记录日间候选并固定选择早晨问候，便于验证分支。"""
+                selected_candidates.append(candidates)
+                return "greeting_morning"
+
+            with (
+                patch("character.behavior_controller.now_local", return_value=morning),
+                patch("character.behavior_controller.random.choice", side_effect=choose_morning_line),
+                patch.object(controller, "_try_scenario_greeting", return_value=False),
+            ):
+                controller._maybe_idle_prompt()
+
+            self.assertEqual(
+                selected_candidates,
+                [["idle", "quiet", "encourage", "break_reminder", "greeting_morning"]],
+            )
+
+            legacy_behavior = {"min_proactive_interval_minutes": 20}
+            midnight = morning.replace(hour=0)
+            self.assertFalse(controller._is_night_greeting_window(legacy_behavior, midnight))
+            self.assertEqual(
+                controller._effective_proactive_interval_minutes(legacy_behavior, midnight),
+                20,
             )
 
     # 验证运行状态跨重启保存带时区时间，损坏字段不会阻止控制器启动。
