@@ -3004,6 +3004,9 @@ class DesktopPetWindow(QWidget):
             return
         cleaned_reply = reply.strip() or "没有得到可显示的处理结果。"
         _finish_pet_action_if_owned(self, "clipboard")
+        if self._formal_qa_enabled():
+            self._show_formal_answer_panel("剪贴板处理结果", cleaned_reply)
+            return
         if len(cleaned_reply) > 360:
             self._show_clipboard_assistant_panel(mode, cleaned_reply)
             return
@@ -3031,6 +3034,9 @@ class DesktopPetWindow(QWidget):
         cleaned_reply = reply.strip() or "没有得到可显示的截图解析结果。"
         self.chat_store_screenshot.append_message("assistant", cleaned_reply)
         _finish_pet_action_if_owned(self, "screenshot")
+        if self._formal_qa_enabled():
+            self._show_formal_answer_panel("截图解析结果", cleaned_reply)
+            return
         self._display_message(
             cleaned_reply,
             self._assistant_reply_bubble_duration_ms(),

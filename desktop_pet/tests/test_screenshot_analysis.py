@@ -203,6 +203,7 @@ class ScreenshotAnalysisWorkerTests(unittest.TestCase):
             _active_reminder_reply_id="",
             sprite_player=FakeSpritePlayer(),
             _assistant_reply_bubble_duration_ms=lambda: 15000,
+            _formal_qa_enabled=lambda: False,
             displayed=[],
         )
         fake._display_message = lambda *args: fake.displayed.append(args)
@@ -211,6 +212,111 @@ class ScreenshotAnalysisWorkerTests(unittest.TestCase):
 
         self.assertEqual(fake.chat_store_screenshot.messages, [("assistant", "解析文字")])
         self.assertEqual(fake.displayed, [("解析文字", 15000, "assistant")])
+
+    # 验证正式模式下截图结果写入独立历史后改由正式面板展示。
+    def test_success_callback_uses_formal_panel_when_formal_mode_is_enabled(self) -> None:
+        """验证正式截图结果不显示气泡，且仍不保存图片数据。"""
+        panels: list[tuple[str, str]] = []
+        fake = types.SimpleNamespace(
+            _closing_or_closed=lambda: False,
+            chat_store_screenshot=FakeStore(),
+            _active_reminder_reply_id="",
+            sprite_player=FakeSpritePlayer(),
+            _formal_qa_enabled=lambda: True,
+            _show_formal_answer_panel=lambda question, answer: panels.append((question, answer)),
+            displayed=[],
+        )
+        fake._display_message = lambda *args: fake.displayed.append(args)
+
+        DesktopPetWindow._on_screenshot_analysis_success(fake, "  解析文字  ")
+
+        self.assertEqual(fake.chat_store_screenshot.messages, [("assistant", "解析文字")])
+        self.assertEqual(panels, [("截图解析结果", "解析文字")])
+        self.assertEqual(fake.displayed, [])
+
+
+class ResultDisplayRoutingTests(unittest.TestCase):
+    """验证剪贴板结果在正式与非正式模式下使用正确的展示容器。"""
+
+    # 构建剪贴板回调所需的最小窗口替身。
+    @staticmethod
+    def _clipboard_window(formal_mode: bool) -> types.SimpleNamespace:
+        """返回可记录气泡和面板展示请求的剪贴板窗口替身。"""
+        fake = types.SimpleNamespace(
+            _closing_or_closed=lambda: False,
+            _active_reminder_reply_id="",
+            sprite_player=FakeSpritePlayer(),
+            _formal_qa_enabled=lambda: formal_mode,
+            _assistant_reply_bubble_duration_ms=lambda: 15000,
+            displayed=[],
+            formal_panels=[],
+            clipboard_panels=[],
+        )
+        fake._display_message = lambda *args: fake.displayed.append(args)
+        fake._show_formal_answer_panel = (
+            lambda question, answer: fake.formal_panels.append((question, answer))
+        )
+        fake._show_clipboard_assistant_panel = (
+            lambda mode, answer: fake.clipboard_panels.append((mode, answer))
+        )
+        return fake
+
+    # 验证正式模式下剪贴板短、长结果均进入统一正式回答面板。
+    def test_clipboard_results_use_formal_panel_when_formal_mode_is_enabled(self) -> None:
+        """验证正式模式不再按 360 字阈值显示气泡或独立剪贴板面板。"""
+        fake = self._clipboard_window(True)
+
+        DesktopPetWindow._on_clipboard_assistant_success(fake, "summarize", "简短结果")
+        DesktopPetWindow._on_clipboard_assistant_success(fake, "summarize", "长" * 361)
+
+        self.assertEqual(
+            fake.formal_panels,
+            [("剪贴板处理结果", "简短结果"), ("剪贴板处理结果", "长" * 361)],
+        )
+        self.assertEqual(fake.displayed, [])
+        self.assertEqual(fake.clipboard_panels, [])
+
+    # 验证非正式模式保持短结果气泡、长结果独立面板的既有行为。
+    def test_clipboard_results_keep_existing_nonformal_display_behavior(self) -> None:
+        """验证关闭正式模式时不改变剪贴板结果的既有展示规则。"""
+        fake = self._clipboard_window(False)
+
+        DesktopPetWindow._on_clipboard_assistant_success(fake, "summarize", "简短结果")
+        DesktopPetWindow._on_clipboard_assistant_success(fake, "summarize", "长" * 361)
+
+        self.assertEqual(fake.displayed, [("简短结果", 15000, "assistant")])
+        self.assertEqual(fake.formal_panels, [])
+        self.assertEqual(fake.clipboard_panels, [("summarize", "长" * 361)])
+
+    # 验证三类正式结果共享 new_panel 与 append 的现有面板语义。
+    def test_formal_result_sources_share_panel_display_modes(self) -> None:
+        """验证普通问答、剪贴板和截图均由同一正式面板逻辑处理。"""
+        app = QApplication.instance() or QApplication([])
+        del app
+        fake = types.SimpleNamespace(
+            _formal_answer_display_mode=lambda: "new_panel",
+            active_formal_answer_panel=None,
+            formal_answer_panels=[],
+            geometry=lambda: QRect(20, 20, 80, 80),
+            _on_formal_answer_panel_destroyed=lambda _panel_id: None,
+        )
+
+        DesktopPetWindow._show_formal_answer_panel(fake, "普通问答", "普通回答")
+        DesktopPetWindow._show_formal_answer_panel(fake, "剪贴板处理结果", "剪贴板回答")
+
+        self.assertEqual(len(fake.formal_answer_panels), 2)
+        for panel in list(fake.formal_answer_panels):
+            panel.close()
+
+        fake._formal_answer_display_mode = lambda: "append"
+        fake.active_formal_answer_panel = None
+        fake.formal_answer_panels = []
+        DesktopPetWindow._show_formal_answer_panel(fake, "普通问答", "普通回答")
+        DesktopPetWindow._show_formal_answer_panel(fake, "截图解析结果", "截图回答")
+
+        self.assertEqual(len(fake.formal_answer_panels), 1)
+        self.assertEqual(fake.active_formal_answer_panel.text_edit.toPlainText(), "普通回答\n\n截图回答")
+        fake.active_formal_answer_panel.close()
 
     # 验证待处理截图问题提交后才启动 Worker，且不进入普通聊天。
     def test_pending_screenshot_routes_input_to_vision_worker(self) -> None:
