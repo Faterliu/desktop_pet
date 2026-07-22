@@ -64,39 +64,11 @@ class FakeChatStore:
     def __init__(self) -> None:
         """初始化当前对象及其依赖。"""
         self.cleared = False
-        self.cleaned_at = ""
 
     # 为 FakeChatStore 测试替身提供clear 历史记录行为。
     def clear_history(self) -> None:
         """为 FakeChatStore 测试替身提供clear 历史记录行为。"""
         self.cleared = True
-
-    # 为 FakeChatStore 测试替身提供updatelastcleanedat行为。
-    def update_last_cleaned_at(self, timestamp: str) -> None:
-        """为 FakeChatStore 测试替身提供updatelastcleanedat行为。"""
-        self.cleaned_at = timestamp
-
-
-class FakeAtomicChatStore(FakeChatStore):
-    # 初始化当前对象及其依赖。
-    def __init__(self) -> None:
-        """初始化当前对象及其依赖。"""
-        super().__init__()
-        self.atomic_clear_calls = 0
-        self.update_calls = 0
-
-    # 清空聊天记录并记录清理时间。
-    def clear_history_with_timestamp(self, timestamp: str) -> None:
-        """清空聊天记录并记录清理时间。"""
-        self.atomic_clear_calls += 1
-        self.cleared = True
-        self.cleaned_at = timestamp
-
-    # 记录旧式更新时间接口是否被调用。
-    def update_last_cleaned_at(self, timestamp: str) -> None:
-        """记录旧式更新时间接口是否被调用。"""
-        self.update_calls += 1
-        super().update_last_cleaned_at(timestamp)
 
 
 class HistoryClearWorkerTests(unittest.TestCase):
@@ -116,26 +88,6 @@ class HistoryClearWorkerTests(unittest.TestCase):
 
         self.assertEqual(summarizer.calls, [(0, True)])
         self.assertTrue(store.cleared)
-        self.assertTrue(store.cleaned_at)
-
-    # 存储支持合并清理时，worker 不再分两次写入。
-    def test_worker_prefers_atomic_clear_when_available(self) -> None:
-        """存储支持合并清理时，worker 不再分两次写入。"""
-        summarizer = FakeSummarizer()
-        store = FakeAtomicChatStore()
-        worker = ChatHistoryClearWorker(
-            mode="informal",
-            summarizer=summarizer,
-            chat_store=store,
-            force_summarize=False,
-        )
-
-        worker.run()
-
-        self.assertEqual(store.atomic_clear_calls, 1)
-        self.assertEqual(store.update_calls, 0)
-        self.assertTrue(store.cleared)
-        self.assertTrue(store.cleaned_at)
 
 
 if __name__ == "__main__":

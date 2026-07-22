@@ -5,7 +5,6 @@ from typing import Any
 from PySide6.QtCore import QObject, Signal
 
 from utils.logger import get_logger
-from utils.time_utils import now_iso
 
 
 logger = get_logger(__name__)
@@ -36,13 +35,7 @@ class ChatHistoryClearWorker(QObject):
         try:
             if self.force_summarize:
                 self.summarizer.maybe_summarize(0, force=True)
-            timestamp = now_iso()
-            clear_with_timestamp = getattr(self.chat_store, "clear_history_with_timestamp", None)
-            if callable(clear_with_timestamp):
-                clear_with_timestamp(timestamp)
-            else:
-                self.chat_store.clear_history()
-                self.chat_store.update_last_cleaned_at(timestamp)
+            self.chat_store.clear_history()
             self.finished.emit(self.mode)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to clear %s chat history", self.mode)

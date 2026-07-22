@@ -52,8 +52,6 @@ class ChatStoreTests(unittest.TestCase):
         self.assertTrue(all("+00:00" in item["timestamp"] for item in records))
         self.assertEqual([item["content"] for item in formal.all_messages()], ["正式问题", "正式回答"])
         self.assertEqual([item["content"] for item in informal.all_messages()], ["普通聊天"])
-        self.assertTrue(formal.should_trigger_summary(1, 0))
-        self.assertTrue(informal.should_trigger_summary(1, 0))
 
     # 验证提醒、剪贴板和截图预留模式合法且不混入普通聊天模式。
     def test_extended_modes_are_valid_and_isolated(self) -> None:
@@ -91,7 +89,7 @@ class ChatStoreTests(unittest.TestCase):
         formal.append_message("user", "正式问题")
         informal.append_message("user", "普通聊天")
 
-        formal.clear_history_with_timestamp("2026-06-24T21:00:00")
+        formal.clear_history()
 
         self.assertEqual(formal.all_messages(), [])
         self.assertEqual([item["content"] for item in informal.all_messages()], ["普通聊天"])

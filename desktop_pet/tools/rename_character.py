@@ -12,8 +12,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-TARGET_DIR = Path(__file__).resolve().parent / "desktop_pet"
-OLD_NAME = "小胡"  
+TARGET_DIR = Path(__file__).resolve().parent.parent / "desktop_pet"
+OLD_NAME = "小桃"  
 
 TEXT_EXTENSIONS = {
     ".py", ".json", ".md", ".txt", ".bat", ".vbs", ".cfg", ".ini", ".yml", ".yaml"

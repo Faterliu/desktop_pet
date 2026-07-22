@@ -56,7 +56,6 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
                     "max_memory_chars": 1200,
                     "max_mem0_chars": 1000,
                     "summary_max_input_chars": 5000,
-                    "memory_extract_max_input_chars": 3500,
                 }
             },
         )

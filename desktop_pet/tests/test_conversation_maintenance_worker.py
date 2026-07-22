@@ -29,21 +29,34 @@ from storage.json_store import load_json  # noqa: E402
 
 class MaintenanceClient:
     # 返回摘要或完整记忆 JSON。
+    def __init__(self) -> None:
+        """初始化摘要与记忆批处理请求计数。"""
+        self.summary_calls = 0
+        self.memory_calls = 0
+
     def is_configured(self) -> bool:
         """返回摘要或完整记忆 JSON。"""
         return True
 
     def chat(self, messages: list[dict[str, str]]) -> str:
         """依据系统提示返回摘要或记忆结果。"""
-        if "完整最新的长期记忆" in messages[0]["content"]:
+        if "同一模式最近三条对话摘要" in messages[0]["content"]:
+            self.memory_calls += 1
             return json.dumps(
                 {
-                    "user_profile": {"preferences": ["测试偏好"], "communication_style": [], "important_personal_notes": []},
-                    "work_study": {"current_learning_topics": [], "current_projects": [], "useful_context": []},
-                    "relationship_memory": {},
+                    "operations": [
+                        {
+                            "action": "add",
+                            "field": "user_profile.preferences",
+                            "description": ["测试偏好"],
+                            "reason": "测试三摘要批处理",
+                        }
+                    ],
+                    "conclusion": {"added": 1, "updated": 0, "unchanged": 0},
                 },
                 ensure_ascii=False,
             )
+        self.summary_calls += 1
         return json.dumps({"summary": "本次摘要", "highlights": ["高光"]}, ensure_ascii=False)
 
 
@@ -61,7 +74,6 @@ class ConversationMaintenanceWorkerTests(unittest.TestCase):
         self.summarizer = Summarizer(
             self.temp_dir / "conversation_summary_formal.json",
             self.store,
-            self.memory_store,
             self.client,  # type: ignore[arg-type]
             config_path=self.temp_dir / "missing_config.json",
         )
@@ -79,13 +91,18 @@ class ConversationMaintenanceWorkerTests(unittest.TestCase):
             shutil.rmtree(self.temp_dir)
 
     # 创建并同步运行一次工作器。
-    def _run(self, source: str = "round_threshold", force: bool = False) -> None:
+    def _run(
+        self,
+        source: str = "round_threshold",
+        force: bool = False,
+        trigger_rounds: int = 1,
+    ) -> None:
         """创建并同步运行一次工作器。"""
         worker = ConversationMaintenanceWorker(
             {"formal": self.summarizer},
             self.memory_summarizer,
             self.state_path,
-            1,
+            trigger_rounds,
             ["formal"],
             source,
             force=force,
@@ -99,12 +116,40 @@ class ConversationMaintenanceWorkerTests(unittest.TestCase):
             self.store.append_message("user", f"消息{index}")
             self._run()
             self.assertEqual(self.store.all_messages(), [])
+            self.assertEqual(self.client.summary_calls, index + 1)
+            self.assertEqual(self.client.memory_calls, 0 if index < 2 else 1)
 
         archive = self.summarizer.load_summary()
         memory = self.memory_store.load()
-        self.assertEqual(archive["covered_message_count"], 3)
         self.assertEqual(len(archive["summaries"]), 3)
         self.assertEqual(memory["memory_meta"]["summary_batches"]["formal"], 3)
+        self.assertEqual(
+            memory["user_profile"]["preferences"]["preferences_1"]["description"],
+            ["测试偏好"],
+        )
+
+    # 验证快照清理后的新增消息重新从零累计摘要阈值。
+    def test_summary_threshold_uses_only_messages_remaining_after_snapshot_cleanup(self) -> None:
+        """验证快照清理后的新增消息重新从零累计摘要阈值。"""
+        self.store.append_message("user", "第一条")
+        self.store.append_message("user", "第二条")
+
+        self._run(trigger_rounds=3)
+
+        self.assertEqual(self.client.summary_calls, 0)
+        self.assertEqual([item["content"] for item in self.store.all_messages()], ["第一条", "第二条"])
+
+        self.store.append_message("user", "第三条")
+        self._run(trigger_rounds=3)
+
+        self.assertEqual(self.client.summary_calls, 1)
+        self.assertEqual(self.store.all_messages(), [])
+
+        self.store.append_message("user", "摘要后的新消息")
+        self._run(trigger_rounds=3)
+
+        self.assertEqual(self.client.summary_calls, 1)
+        self.assertEqual([item["content"] for item in self.store.all_messages()], ["摘要后的新消息"])
 
     # 验证每日任务没有可总结记录时不写入完成日期。
     def test_daily_without_history_does_not_write_completion_state(self) -> None:
@@ -148,7 +193,6 @@ class ConversationMaintenanceWorkerTests(unittest.TestCase):
         clipboard_summarizer = Summarizer(
             self.temp_dir / "conversation_summary_clipboard.json",
             clipboard_store,
-            self.memory_store,
             self.client,  # type: ignore[arg-type]
             config_path=self.temp_dir / "missing_config.json",
         )
@@ -165,7 +209,7 @@ class ConversationMaintenanceWorkerTests(unittest.TestCase):
         worker.run()
 
         self.assertEqual(clipboard_store.all_messages(), [])
-        self.assertEqual(clipboard_summarizer.load_summary()["covered_message_count"], 1)
+        self.assertEqual(len(clipboard_summarizer.load_summary()["summaries"]), 1)
 
 
 if __name__ == "__main__":

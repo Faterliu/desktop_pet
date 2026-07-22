@@ -1004,30 +1004,21 @@ class DesktopPetWindow(QWidget):
         self.summarizer_formal = Summarizer(
             self.summary_formal_path,
             self.chat_store_formal,
-            self.memory_store,
             self.deepseek_client,
-            mem0_memory_service=self.mem0_memory_service,
-            user_id=self._memory_user_id(),
             config_path=self.config_path,
             fallback_config_path=self.example_config_path,
         )
         self.summarizer_informal = Summarizer(
             self.summary_informal_path,
             self.chat_store_informal,
-            self.memory_store,
             self.deepseek_client,
-            mem0_memory_service=self.mem0_memory_service,
-            user_id=self._memory_user_id(),
             config_path=self.config_path,
             fallback_config_path=self.example_config_path,
         )
         self.summarizer_clipboard = Summarizer(
             self.summary_clipboard_path,
             self.chat_store_clipboard,
-            self.memory_store,
             self.deepseek_client,
-            mem0_memory_service=self.mem0_memory_service,
-            user_id=self._memory_user_id(),
             config_path=self.config_path,
             fallback_config_path=self.example_config_path,
         )
@@ -2183,9 +2174,6 @@ class DesktopPetWindow(QWidget):
         )
         self.memory_vector_store.update_config(self.app_config)
         self._start_mem0_initialization(close_existing=True)
-        self.summarizer_formal.user_id = self._memory_user_id()
-        self.summarizer_informal.user_id = self._memory_user_id()
-        self.summarizer_clipboard.user_id = self._memory_user_id()
         self.sprite_player.set_scale(self._ui_scale())
         self.sprite_player.load()
         self._setup_window()
@@ -2661,8 +2649,6 @@ class DesktopPetWindow(QWidget):
     def _set_mem0_memory_service(self, service: Mem0MemoryService | None) -> None:
         """根据 service 更新mem0记忆服务状态，并同步相关缓存或界面。"""
         self.mem0_memory_service = service
-        self.summarizer_formal.mem0_memory_service = service
-        self.summarizer_informal.mem0_memory_service = service
 
     # 启动 Mem0 初始化后台任务，避免阻塞主界面。
     def _start_mem0_initialization(self, close_existing: bool) -> None:

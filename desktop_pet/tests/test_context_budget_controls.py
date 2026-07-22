@@ -26,10 +26,6 @@ from storage.chat_store import ChatStore  # noqa: E402
 from storage.json_store import load_json, save_json  # noqa: E402
 
 
-class FakeMemoryStore:
-    """摘要测试使用的最小记忆存储替身。"""
-
-
 class BudgetRecordingClient:
     # 初始化当前对象及其依赖。
     def __init__(self) -> None:
@@ -64,7 +60,6 @@ class ContextBudgetControlsTests(unittest.TestCase):
             self.summary_path,
             {
                 "summary": "",
-                "covered_message_count": 0,
                 "highlights": [],
                 "last_updated": "",
             },
@@ -129,7 +124,7 @@ class ContextBudgetControlsTests(unittest.TestCase):
         formal_summary_path = self.temp_dir / "conversation_summary_formal.json"
         informal_summary_path = self.temp_dir / "conversation_summary_informal.json"
         for summary_path in (formal_summary_path, informal_summary_path):
-            save_json(summary_path, {"summary": "", "covered_message_count": 0, "highlights": [], "last_updated": ""})
+            save_json(summary_path, {"summary": "", "highlights": [], "last_updated": ""})
 
         path = self.temp_dir / "chat_history_summary_modes.jsonl"
         formal_store = ChatStore(path, "formal")
@@ -138,9 +133,18 @@ class ContextBudgetControlsTests(unittest.TestCase):
         informal_store.append_message("user", "今天有点累。")
         formal_client = BudgetRecordingClient()
         informal_client = BudgetRecordingClient()
-        memory_store = FakeMemoryStore()
-        formal_summarizer = Summarizer(formal_summary_path, formal_store, memory_store, formal_client, config_path=self.config_path)
-        informal_summarizer = Summarizer(informal_summary_path, informal_store, memory_store, informal_client, config_path=self.config_path)
+        formal_summarizer = Summarizer(
+            formal_summary_path,
+            formal_store,
+            formal_client,
+            config_path=self.config_path,
+        )
+        informal_summarizer = Summarizer(
+            informal_summary_path,
+            informal_store,
+            informal_client,
+            config_path=self.config_path,
+        )
 
         formal_summarizer.maybe_summarize(trigger_rounds=1, force=True)
         informal_summarizer.maybe_summarize(trigger_rounds=1, force=True)
@@ -153,7 +157,6 @@ class ContextBudgetControlsTests(unittest.TestCase):
         self.assertNotIn("如何部署这个项目？", informal_prompt)
         self.assertEqual(load_json(formal_summary_path, {})["summary"], "summary")
         self.assertEqual(load_json(informal_summary_path, {})["summary"], "summary")
-        self.assertEqual(load_json(formal_summary_path, {})["covered_message_count"], 1)
         self.assertEqual(len(load_json(informal_summary_path, {})["summaries"]), 1)
 
     # 验证摘要 输入 respects 预算场景下的预期结果。
@@ -164,7 +167,6 @@ class ContextBudgetControlsTests(unittest.TestCase):
             {
                 "api": {
                     "summary_max_input_chars": 220,
-                    "memory_extract_max_input_chars": 180,
                     "max_history_message_chars": 120,
                     "max_summary_chars": 100,
                 }
@@ -179,7 +181,6 @@ class ContextBudgetControlsTests(unittest.TestCase):
         summarizer = Summarizer(
             self.summary_path,
             chat_store,
-            FakeMemoryStore(),  # type: ignore[arg-type]
             client,  # type: ignore[arg-type]
             config_path=self.config_path,
         )
@@ -202,7 +203,6 @@ class ContextBudgetControlsTests(unittest.TestCase):
         summarizer = Summarizer(
             self.summary_path,
             store,
-            FakeMemoryStore(),  # type: ignore[arg-type]
             BudgetRecordingClient(),  # type: ignore[arg-type]
             config_path=self.config_path,
         )
@@ -211,7 +211,7 @@ class ContextBudgetControlsTests(unittest.TestCase):
         payload = load_json(self.summary_path, {})
 
         self.assertIsNotNone(result)
-        self.assertEqual(payload["covered_message_count"], 2)
+        self.assertNotIn("covered_message_count", payload)
         self.assertEqual([item["summary"] for item in payload["summaries"]], ["旧摘要", "summary"])
         self.assertEqual(payload["summaries"][-1]["trigger_source"], "daily")
 

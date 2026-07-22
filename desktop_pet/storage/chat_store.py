@@ -128,34 +128,12 @@ class ChatStore:
         """按当前模式用户消息数量估算对话轮数。"""
         return self._user_message_count(self.all_messages())
 
-    # 判断当前模式历史是否达到需要生成摘要的条件。
-    def should_trigger_summary(
-        self,
-        trigger_rounds: int = 12,
-        covered_message_count: int = 0,
-    ) -> bool:
-        """判断当前模式历史是否达到需要生成摘要的条件。"""
-        del covered_message_count
-        messages = self.all_messages()
-        return self._user_message_count(messages) >= max(1, int(trigger_rounds))
-
-    # 兼容旧调用方的清理时间接口；JSONL 仅保存对话行，不额外写入状态行。
-    def update_last_cleaned_at(self, timestamp: str) -> None:
-        """兼容旧调用方的清理时间接口。"""
-        del timestamp
-
     # 删除当前模式的全部历史，保留另一模式记录。
     def clear_history(self) -> None:
         """删除当前模式的全部历史，保留另一模式记录。"""
         with self._lock:
             retained = [record for record in self._read_records() if record["mode"] != self.mode]
             self._write_records_atomically(self.path, retained)
-
-    # 兼容历史清理工作器，在同一次原子重写中清理当前模式。
-    def clear_history_with_timestamp(self, timestamp: str) -> None:
-        """兼容历史清理工作器，在同一次原子重写中清理当前模式。"""
-        del timestamp
-        self.clear_history()
 
     # 按内部会话标识把当前模式的记录原子改标为目标模式。
     def reassign_conversation(self, conversation_id: str, target_mode: str) -> int:

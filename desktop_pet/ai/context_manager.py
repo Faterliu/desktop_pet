@@ -42,11 +42,3 @@ class ContextManager:
             for item in messages
             if str(item.get("content", "")).strip()
         ]
-
-    # 根据配置和已覆盖消息数判断是否需要触发摘要，按模式选择存储。
-    def should_trigger_summary(self, covered_message_count: int, formal_qa_mode: bool = False) -> bool:
-        """根据配置和已覆盖消息数判断是否需要触发摘要，按模式选择存储。"""
-        api_config = self._config().get("api", {})
-        trigger_rounds = int(api_config.get("summary_trigger_rounds", 12))
-        store = self.chat_store_formal if formal_qa_mode else self.chat_store_informal
-        return store.should_trigger_summary(trigger_rounds, covered_message_count)
