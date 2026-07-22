@@ -66,7 +66,6 @@ from storage.local_lines_service import LocalLinesService
 from storage.memory_store import MemoryStore, memory_descriptions, normalize_memory_schema
 from storage.memory_vector_store import MemoryVectorStore
 from storage.reminder_store import ReminderStore
-from storage.usage_store import UsageStore
 from utils.dwm_border import apply_transparent_window_fixes, force_window_topmost, suppress_dwm_border
 from utils.logger import get_logger
 
@@ -137,7 +136,6 @@ LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE = {
         "scenario_greeting_templates",
         "low_interrupt",
         "knowledge_speak_intro",
-        "poetry",
     ),
     "interaction": (
         "thinking",
@@ -149,6 +147,9 @@ LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE = {
         "reply",
     ),
 }
+
+# 这些本地台词仅供固定功能使用，禁止被自动刷新任务改写。
+LOCAL_LINE_REFRESH_EXCLUDED_GROUPS = {"poetry"}
 
 CLIPBOARD_ASSISTANT_INSTRUCTIONS = {
     "summarize": "总结下面文本的重点，使用清晰的要点，不补充原文没有的信息。",
@@ -863,7 +864,6 @@ class DesktopPetWindow(QWidget):
         self.summary_clipboard_path = self.data_dir / "conversation_summary_clipboard.json"
         self.conversation_maintenance_state_path = self.data_dir / "conversation_maintenance_state.json"
         self.memory_path = self.data_dir / "memory.json"
-        self.daily_usage_path = self.data_dir / "daily_usage.json"
         self.reminders_path = self.data_dir / "reminders.json"
         self.window_state_path = self.data_dir / "window_state.json"
         self.runtime_state_path = self.data_dir / "runtime_state.json"
@@ -955,7 +955,6 @@ class DesktopPetWindow(QWidget):
         self.chat_store_remind = ChatStore(self.chat_history_path, "remind")
         self.chat_store_clipboard = ChatStore(self.chat_history_path, "clipboard")
         self.chat_store_screenshot = ChatStore(self.chat_history_path, "screenshot")
-        self.usage_store = UsageStore(self.daily_usage_path)
         self.reminder_store = ReminderStore(self.reminders_path)
         self.clipboard_service = ClipboardService()
         self.reminder_tool = ReminderTool(
@@ -1048,7 +1047,6 @@ class DesktopPetWindow(QWidget):
         self.behavior_controller = BehaviorController(
             self.config_path,
             self.local_lines_path,
-            self.usage_store,
             self._config_snapshot,
             self._has_knowledge_memory,
             config_saver=self._save_app_config,
@@ -2904,6 +2902,8 @@ class DesktopPetWindow(QWidget):
                 if not isinstance(type_config, dict) or not type_config.get("enabled", True):
                     continue
                 for group_name in groups:
+                    if group_name in LOCAL_LINE_REFRESH_EXCLUDED_GROUPS:
+                        continue
                     targets.append(
                         {
                             "group": group_name,
@@ -2933,7 +2933,7 @@ class DesktopPetWindow(QWidget):
             if not isinstance(config, dict) or not config.get("enabled", False):
                 continue
             group_name = str(group).strip()
-            if not group_name:
+            if not group_name or group_name in LOCAL_LINE_REFRESH_EXCLUDED_GROUPS:
                 continue
             targets.append(
                 {

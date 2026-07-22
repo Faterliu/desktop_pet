@@ -85,42 +85,23 @@ from character.behavior_controller import BehaviorController  # noqa: E402
 from utils.time_utils import now_local  # noqa: E402
 
 
-class FakeUsageStore:
-    # 初始化当前对象及其依赖。
-    def __init__(self) -> None:
-        """初始化当前对象及其依赖。"""
-        self.max_values: list[int] = []
-        self.local_count = 0
-        self.api_count = 0
-
-    # 为 FakeUsageStore 测试替身提供canuse本地行为。
-    def can_use_local(self, max_per_day: int) -> bool:
-        """为 FakeUsageStore 测试替身提供canuse本地行为。"""
-        self.max_values.append(max_per_day)
-        return True
-
-    # 为 FakeUsageStore 测试替身提供canuseAPI行为。
-    def can_use_api(self, max_per_day: int) -> bool:
-        """为 FakeUsageStore 测试替身提供canuseAPI行为。"""
-        return True
-
-    # 为 FakeUsageStore 测试替身提供increment本地台词行为。
-    def increment_local_line(self) -> None:
-        """为 FakeUsageStore 测试替身提供increment本地台词行为。"""
-        self.local_count += 1
-
-    # 为 FakeUsageStore 测试替身提供incrementAPI台词行为。
-    def increment_api_line(self) -> None:
-        """为 FakeUsageStore 测试替身提供incrementAPI台词行为。"""
-        self.api_count += 1
-
-
 class BehaviorControllerTests(unittest.TestCase):
     # 准备当前测试类共用的环境和数据。
     @classmethod
     def setUpClass(cls) -> None:
         """准备当前测试类共用的环境和数据。"""
         cls.app = QCoreApplication.instance() or QCoreApplication([])
+
+    # 验证默认配置不再提供主动问候每日次数配额。
+    def test_default_configs_remove_proactive_daily_limits(self) -> None:
+        """验证默认配置不再提供主动问候每日次数配额。"""
+        for filename in ("app_config.json", "app_config.example.json"):
+            config = json.loads(
+                (DESKTOP_PET_ROOT / "config" / filename).read_text(encoding="utf-8")
+            )
+            behavior = config["behavior"]
+            self.assertNotIn("max_local_lines_per_day", behavior)
+            self.assertNotIn("max_api_proactive_per_day", behavior)
 
     # 为测试准备控制器数据或断言辅助结果。
     def _controller(
@@ -160,7 +141,6 @@ class BehaviorControllerTests(unittest.TestCase):
         controller = BehaviorController(
             config_dir / "app_config.json",
             local_lines_path,
-            FakeUsageStore(),  # type: ignore[arg-type]
             lambda: config,
             config_saver=saver,
         )
@@ -168,27 +148,28 @@ class BehaviorControllerTests(unittest.TestCase):
         controller.period_check_timer.stop()
         return controller
 
-    # 验证invalid daily limit falls back to 默认值场景下的预期结果。
-    def test_invalid_daily_limit_falls_back_to_default(self) -> None:
-        """验证invalid daily limit falls back to 默认值场景下的预期结果。"""
+    # 验证旧版每日配额字段不会阻断本地主动问候。
+    def test_legacy_daily_limits_do_not_block_local_proactive_greeting(self) -> None:
+        """验证旧版每日配额字段不会阻断本地主动问候。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
                 "behavior": {
                     "proactive_chat": True,
                     "do_not_disturb": False,
-                    "max_local_lines_per_day": "not-a-number",
+                    "max_local_lines_per_day": 0,
                     "min_proactive_interval_minutes": 1,
                 },
                 "proactive_content_ratio": {"extra_knowledge": 0.0, "regular_greeting": 1.0},
             }
             controller = self._controller(Path(temp), config)
-            usage = controller.usage_store  # type: ignore[assignment]
             controller.last_user_interaction = now_local().replace(year=2000)
+            spoken: list[tuple[str, int, str]] = []
+            controller.speak_requested.connect(lambda *args: spoken.append(args))
 
             with patch("character.behavior_controller.random.choice", side_effect=lambda items: items[0]):
                 controller._maybe_idle_prompt()
 
-            self.assertEqual(usage.max_values[-1], 10)
+            self.assertTrue(spoken)
 
     # 验证主动行为 ratio adjustment calls save callback场景下的预期结果。
     def test_proactive_ratio_adjustment_calls_save_callback(self) -> None:
@@ -241,7 +222,6 @@ class BehaviorControllerTests(unittest.TestCase):
                 "behavior": {
                     "proactive_chat": True,
                     "do_not_disturb": False,
-                    "max_local_lines_per_day": 10,
                     "min_proactive_interval_minutes": 1,
                     "enable_scenario_greeting": True,
                     "scenario_greeting_low_interrupt_after_ignored": 2,
@@ -274,10 +254,10 @@ class BehaviorControllerTests(unittest.TestCase):
                 "behavior": {
                     "proactive_chat": True,
                     "do_not_disturb": False,
-                    "max_local_lines_per_day": 10,
                     "min_proactive_interval_minutes": 1,
                     "enable_scenario_greeting": True,
                     "scenario_greeting_api_enabled": True,
+                    "max_api_proactive_per_day": 0,
                     "scenario_greeting_cooldown_minutes": 0,
                     "scenario_greeting_min_memory_items": 1,
                     "scenario_greeting_max_chars": 80,
@@ -327,7 +307,6 @@ class BehaviorControllerTests(unittest.TestCase):
                 "behavior": {
                     "proactive_chat": True,
                     "do_not_disturb": False,
-                    "max_local_lines_per_day": 10,
                     "min_proactive_interval_minutes": 1,
                     "enable_scenario_greeting": True,
                     "scenario_greeting_api_enabled": False,
@@ -391,7 +370,7 @@ class BehaviorControllerTests(unittest.TestCase):
 
             self.assertEqual(controller.pick_context_menu_line(), "有什么可以帮你的吗？")
 
-    # 验证主动问候未被窗口实际展示时不会更新展示时间或日用量。
+    # 验证主动问候未被窗口实际展示时不会更新展示时间。
     def test_blocked_proactive_request_does_not_record_shown_time(self) -> None:
         """验证主动问候未被窗口实际展示时不会更新展示时间。"""
         with tempfile.TemporaryDirectory() as temp:
@@ -399,7 +378,6 @@ class BehaviorControllerTests(unittest.TestCase):
                 "behavior": {
                     "proactive_chat": True,
                     "do_not_disturb": False,
-                    "max_local_lines_per_day": 10,
                     "min_proactive_interval_minutes": 1,
                 },
                 "proactive_content_ratio": {"extra_knowledge": 0.0, "regular_greeting": 1.0},
@@ -411,7 +389,6 @@ class BehaviorControllerTests(unittest.TestCase):
             controller._maybe_idle_prompt()
 
             self.assertIsNone(controller.last_proactive_shown_at)
-            self.assertEqual(controller.usage_store.local_count, 0)  # type: ignore[union-attr]
 
     # 验证同一条未回应问候只会增加一次计数，并按次数拉长间隔。
     def test_unanswered_prompt_is_counted_once_and_extends_interval(self) -> None:
@@ -442,7 +419,6 @@ class BehaviorControllerTests(unittest.TestCase):
                 "behavior": {
                     "proactive_chat": True,
                     "do_not_disturb": False,
-                    "max_local_lines_per_day": 10,
                     "min_proactive_interval_minutes": 20,
                     "night_greeting": {"enabled": True, "min_interval_minutes": 10},
                     "enable_scenario_greeting": True,
@@ -512,7 +488,6 @@ class BehaviorControllerTests(unittest.TestCase):
             behavior = {
                 "proactive_chat": True,
                 "do_not_disturb": False,
-                "max_local_lines_per_day": 10,
                 "min_proactive_interval_minutes": 20,
                 "night_greeting": {"enabled": True, "min_interval_minutes": 10},
             }

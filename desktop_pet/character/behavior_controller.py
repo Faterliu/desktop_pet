@@ -16,7 +16,6 @@ from character.proactive_context import (
 from storage.json_store import load_json
 from storage.local_lines_service import LocalLinesService
 from storage.runtime_state_store import RuntimeStateStore
-from storage.usage_store import UsageStore
 from utils.time_utils import elapsed_seconds, now_local, now_utc, parse_iso_datetime, to_utc
 
 
@@ -30,7 +29,6 @@ class BehaviorController(QObject):
         self,
         app_config_path: str | Path,
         local_lines_path: str | Path,
-        usage_store: UsageStore,
         config_loader: Callable[[], dict[str, Any]],
         memory_checker: Callable[[], bool | None] | None = None,
         config_saver: Callable[[], None] | None = None,
@@ -43,7 +41,6 @@ class BehaviorController(QObject):
         self.app_config_path = Path(app_config_path)
         self.local_lines_path = Path(local_lines_path)
         self.local_lines_service = LocalLinesService(self.local_lines_path)
-        self.usage_store = usage_store
         self.config_loader = config_loader
         self.memory_checker = memory_checker
         self.config_saver = config_saver
@@ -147,10 +144,6 @@ class BehaviorController(QObject):
         self.awaiting_user_reply = True
         self._last_proactive_type = proactive_type
         self._unanswered_counted_for = ""
-        if proactive_type == "extra_knowledge":
-            self.usage_store.increment_api_line()
-        else:
-            self.usage_store.increment_local_line()
         self._schedule_runtime_state_save()
 
     # 根据上一条主动问候类型调整后续内容比例。
@@ -292,24 +285,6 @@ class BehaviorController(QObject):
             return 15
         return value if value > 0 else 15
 
-    # 读取每日本地台词上限，配置无效时回退默认值。
-    def _max_local_lines_per_day(self, behavior: dict[str, Any]) -> int:
-        """读取每日本地台词上限，配置无效时回退默认值。"""
-        try:
-            value = int(behavior.get("max_local_lines_per_day", 10))
-        except (TypeError, ValueError):
-            return 10
-        return value if value > 0 else 10
-
-    # 读取每日 API 主动生成上限，配置无效时回退默认值。
-    def _max_api_proactive_per_day(self, behavior: dict[str, Any]) -> int:
-        """读取每日 API 主动生成上限，配置无效时回退默认值。"""
-        try:
-            value = int(behavior.get("max_api_proactive_per_day", 10))
-        except (TypeError, ValueError):
-            return 10
-        return value if value > 0 else 10
-
     # 判断当前时间是否处于启用的深夜专属问候窗口。
     def _is_night_greeting_window(self, behavior: dict[str, Any], now: datetime) -> bool:
         """判断当前时间是否处于启用的深夜专属问候窗口。"""
@@ -379,10 +354,6 @@ class BehaviorController(QObject):
         config = self.config_loader()
         behavior = config.get("behavior", {})
         if behavior.get("do_not_disturb") or not behavior.get("proactive_chat", True):
-            return
-
-        max_daily = self._max_local_lines_per_day(behavior)
-        if not self.usage_store.can_use_local(max_daily):
             return
 
         now = now_local()
@@ -478,7 +449,7 @@ class BehaviorController(QObject):
             return False
 
         self.last_scenario_greeting_at = now
-        if behavior.get("scenario_greeting_api_enabled", True) and self._can_use_api(behavior):
+        if behavior.get("scenario_greeting_api_enabled", True):
             self._requested_proactive_type = "memory_context_greeting"
             self.scenario_greeting_requested.emit(
                 {
@@ -504,13 +475,6 @@ class BehaviorController(QObject):
             action_name,
             proactive_type,
         )
-
-    # 根据 behavior 判断useAPI是否满足条件并返回布尔结果。
-    def _can_use_api(self, behavior: dict[str, Any]) -> bool:
-        """根据 behavior 判断useAPI是否满足条件并返回布尔结果。"""
-        if not hasattr(self.usage_store, "can_use_api"):
-            return True
-        return bool(self.usage_store.can_use_api(self._max_api_proactive_per_day(behavior)))
 
     # 根据 behavior 整理场景 max chars，并把结果交给调用方或写回状态。
     def _scenario_max_chars(self, behavior: dict[str, Any]) -> int:
@@ -589,10 +553,6 @@ class BehaviorController(QObject):
         behavior = config.get("behavior", {})
         if behavior.get("do_not_disturb"):
             return
-        max_daily = self._max_local_lines_per_day(behavior)
-        if not self.usage_store.can_use_local(max_daily):
-            return
-
         time_key = self._time_greeting_key()
         season_key = self._season_key()
         if time_key != self._last_time_key or season_key != self._last_season_key:
@@ -657,7 +617,7 @@ class BehaviorController(QObject):
         if result_type == "regular_greeting":
             return f"普通问候(比例 extra={extra:.2f} regular={regular:.2f})"
         return (
-            f"未触发(可能被免打扰/上限/无话术阻断; "
+            f"未触发(可能被免打扰/间隔/无话术阻断; "
             f"比例 extra={extra:.2f} regular={regular:.2f})"
         )
 

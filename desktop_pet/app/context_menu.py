@@ -180,6 +180,8 @@ class PetContextMenu(QWidget):
         self.destroyed.connect(self._legacy_menu.deleteLater)
         self._buttons: dict[str, QPushButton | QToolButton] = {}
         self._submenu_actions: dict[str, QAction] = {}
+        self._active_submenu: QMenu | None = None
+        self._active_submenu_button: QToolButton | None = None
         self._settings_menu: QMenu | None = None
         self._exit_action: QAction | None = None
         self._always_on_top: bool | None = None
@@ -376,6 +378,12 @@ class PetContextMenu(QWidget):
                 target_action,
             )
         )
+        submenu.aboutToHide.connect(
+            lambda target=button, target_menu=submenu: self._reset_submenu_button(
+                target,
+                target_menu,
+            )
+        )
         self._submenu_actions[title] = action
         self._add_button(title, button)
 
@@ -385,8 +393,24 @@ class PetContextMenu(QWidget):
         submenu = action.menu()
         if submenu is None:
             return
+        if self._active_submenu is not None and self._active_submenu is not submenu:
+            self._active_submenu.hide()
+        if self._active_submenu_button is not None and self._active_submenu_button is not button:
+            self._active_submenu_button.setDown(False)
         self._style_menu_tree(submenu)
+        self._active_submenu = submenu
+        self._active_submenu_button = button
+        button.setDown(True)
         submenu.popup(button.mapToGlobal(QPoint(button.width() - 8, 0)))
+
+    # 在二级菜单收起后复位对应一级按钮，避免点击卡片空白处时残留高亮。
+    def _reset_submenu_button(self, button: QToolButton, submenu: QMenu) -> None:
+        """在二级菜单隐藏后清除对应一级按钮的按下状态。"""
+        button.setDown(False)
+        button.update()
+        if self._active_submenu is submenu:
+            self._active_submenu = None
+            self._active_submenu_button = None
 
     # 创建统一尺寸和属性的一级普通按钮。
     def _new_button(self, title: str) -> QPushButton:

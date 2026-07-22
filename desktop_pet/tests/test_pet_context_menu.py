@@ -198,6 +198,27 @@ class PetContextMenuTests(unittest.TestCase):
         self.assertEqual(interactions, [True])
         parent.close()
 
+    # 验证二级菜单关闭后不会让一级入口残留按下高亮。
+    def test_submenu_close_resets_primary_button_highlight(self) -> None:
+        """验证点击卡片空白处关闭二级菜单时一级按钮会复位。"""
+        parent = QWidget()
+        card = build_pet_context_menu(parent, character_name="小桃", **self._menu_kwargs())
+        card.show_near(QRect(160, 160, 80, 80), BubblePositionService(QApplication), True)
+        button = card.button_for("剪贴板助手")
+        submenu = card.submenu_for("剪贴板助手")
+        self.assertIsNotNone(button)
+        self.assertIsNotNone(submenu)
+
+        button.click()
+        self.app.processEvents()
+        self.assertTrue(submenu.isVisible())
+        self.assertTrue(button.isDown())
+
+        submenu.hide()
+        self.app.processEvents()
+        self.assertFalse(button.isDown())
+        parent.close()
+
     # 验证 Esc 可关闭卡片，免打扰以外的普通动作不受影响。
     def test_escape_closes_card(self) -> None:
         """验证键盘关闭路径不会保留悬浮卡片。"""

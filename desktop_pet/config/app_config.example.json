@@ -2,7 +2,7 @@
   "app": {
     "name": "Desktop AI Pet",
     "character_name": "小桃",
-    "version": "1.0"
+    "version": "2.0"
   },
   "api": {
     "provider": "deepseek",
@@ -63,8 +63,6 @@
       "min_interval_minutes": 10
     },
     "max_consecutive_active_replies": 5,
-    "max_local_lines_per_day": 50,
-    "max_api_proactive_per_day": 30,
     "enable_scenario_greeting": true,
     "scenario_greeting_api_enabled": true,
     "scenario_greeting_max_chars": 80,
