@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
 
-from ai.deepseek_client import DeepSeekClient, DeepSeekError
+from ai.llm_client import LlmClient, LlmError
 from utils.logger import get_logger
 
 
@@ -41,7 +41,7 @@ class ScreenshotAnalysisWorker(QObject):
         self,
         image_bytes: bytes,
         mime_type: str,
-        client: DeepSeekClient,
+        client: LlmClient,
         *,
         question: str = "",
         detail: str = "auto",
@@ -68,7 +68,7 @@ class ScreenshotAnalysisWorker(QObject):
                 max_output_tokens=self.max_output_tokens,
             )
             self.finished.emit(reply)
-        except DeepSeekError as exc:
+        except LlmError as exc:
             self.failed.emit(str(exc))
         except Exception:  # noqa: BLE001
             logger.exception("Unexpected screenshot analysis worker failure")

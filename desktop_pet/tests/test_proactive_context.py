@@ -18,29 +18,40 @@ from character.proactive_context import (  # noqa: E402
 )
 
 
+def _records(prefix: str, *texts: str) -> dict[str, dict[str, object]]:
+    """为测试构造当前 schema 的编号记忆记录集合。"""
+    return {
+        f"{prefix}_{index}": {
+            "description": [text],
+            "timestamp": "2026-07-01T00:00:00+00:00",
+        }
+        for index, text in enumerate(texts, start=1)
+    }
+
+
 class ProactiveContextTests(unittest.TestCase):
     # 验证build 上下文 uses 任务 and relationship 记忆 without full dump场景下的预期结果。
     def test_build_context_uses_task_and_relationship_memory_without_full_dump(self) -> None:
         """验证build 上下文 uses 任务 and relationship 记忆 without full dump场景下的预期结果。"""
         memory = {
             "work_study": {
-                "current_projects": ["桌宠记忆系统", "Mem0 接入", "很久以前的旧任务"],
-                "current_learning_topics": ["Prompt 分区"],
+                "current_projects": _records("projects", "桌宠记忆系统", "Mem0 接入", "很久以前的旧任务"),
+                "current_learning_topics": _records("topics", "Prompt 分区"),
             },
             "relationship_memory": {
                 "communication_style": {
-                    "preferred_response_style": "direct_actionable",
-                    "detail_level": "high",
-                    "confirmation_preference": "avoid_unnecessary_confirmation",
+                    "preferred_response_style": _records("preferred_response_style", "direct_actionable"),
+                    "detail_level": _records("detail_level", "high"),
+                    "confirmation_preference": _records("confirmation_preference", "avoid_unnecessary_confirmation"),
                 },
                 "companionship_style": {
-                    "proactive_boundary": "low_frequency_when_busy",
-                    "encouragement_style": "specific_and_low_pressure",
-                    "avoid_behaviors": ["机械化记忆表达"],
+                    "proactive_boundary": _records("proactive_boundary", "low_frequency_when_busy"),
+                    "encouragement_style": _records("encouragement_style", "specific_and_low_pressure"),
+                    "avoid_behaviors": _records("avoid_behaviors", "机械化记忆表达"),
                 },
                 "interaction_patterns": {
-                    "recent_interaction_mode": "focused_work",
-                    "interruption_tolerance": "low",
+                    "recent_interaction_mode": _records("recent_interaction_mode", "focused_work"),
+                    "interruption_tolerance": _records("interruption_tolerance", "low"),
                 },
             },
         }
@@ -135,24 +146,24 @@ class ProactiveContextTests(unittest.TestCase):
                 "current_projects": {
                     "projects_1": {"description": ["异常时间任务"], "timestamp": "invalid"},
                 },
-                "current_learning_topics": ["旧格式学习主题"],
+                "current_learning_topics": _records("topics", "规范学习主题"),
             }
         }
 
         context = build_proactive_context(memory)
 
-        self.assertCountEqual(context["recent_task_focus"], ["异常时间任务", "旧格式学习主题"])
+        self.assertCountEqual(context["recent_task_focus"], ["异常时间任务", "规范学习主题"])
 
     # 验证存在短期任务关注时不再混入项目和学习主题。
     def test_task_focus_takes_priority_over_project_and_learning_topics(self) -> None:
         """验证短期任务关注独立作为主动问候主题。"""
         memory = {
             "relationship_memory": {
-                "interaction_patterns": {"task_focus": ["短期任务"]},
+                "interaction_patterns": {"task_focus": _records("task_focus", "短期任务")},
             },
             "work_study": {
-                "current_projects": ["长期项目"],
-                "current_learning_topics": ["学习主题"],
+                "current_projects": _records("projects", "长期项目"),
+                "current_learning_topics": _records("topics", "学习主题"),
             },
         }
 

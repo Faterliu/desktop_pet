@@ -14,6 +14,17 @@ from character.persona_state import PersonaState, read_persona_state  # noqa: E4
 from storage.json_store import save_json  # noqa: E402
 
 
+def _records(prefix: str, *texts: str) -> dict[str, dict[str, object]]:
+    """为测试构造当前 schema 的编号记忆记录集合。"""
+    return {
+        f"{prefix}_{index}": {
+            "description": [text],
+            "timestamp": "2026-07-01T00:00:00+00:00",
+        }
+        for index, text in enumerate(texts, start=1)
+    }
+
+
 class PromptBuilderMemorySectionsTests(unittest.TestCase):
     # 准备当前测试所需的环境和数据。
     def setUp(self) -> None:
@@ -42,8 +53,8 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
             },
         )
         save_json(self.safety_path, {"rules": ["安全第一。"]})
-        save_json(self.summary_formal_path, {"summary": "", "highlights": []})
-        save_json(self.summary_informal_path, {"summary": "", "highlights": []})
+        save_json(self.summary_formal_path, {"summaries": []})
+        save_json(self.summary_informal_path, {"summaries": []})
         save_json(
             self.config_path,
             {
@@ -62,14 +73,14 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         save_json(
             self.memory_path,
             {
-                "work_study": {"current_learning_topics": ["桌宠记忆系统"]},
+                "work_study": {"current_learning_topics": _records("topics", "桌宠记忆系统")},
                 "relationship_memory": {
                     "communication_style": {
-                        "preferred_response_style": "direct_actionable",
-                        "confirmation_preference": "avoid_unnecessary_confirmation",
+                        "preferred_response_style": _records("preferred_response_style", "direct_actionable"),
+                        "confirmation_preference": _records("confirmation_preference", "avoid_unnecessary_confirmation"),
                     },
                     "companionship_style": {
-                        "avoid_behaviors": ["避免机械化记忆表达"],
+                        "avoid_behaviors": _records("avoid_behaviors", "避免机械化记忆表达"),
                     },
                 },
             },
@@ -248,19 +259,32 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
                 }
             },
         )
-        save_json(self.summary_informal_path, {"summary": "S" * 1000, "highlights": []})
+        save_json(
+            self.summary_informal_path,
+            {
+                "summaries": [
+                    {
+                        "sequence": 1,
+                        "summary": "S" * 1000,
+                        "highlights": [],
+                        "created_at": "2026-07-01T00:00:00+00:00",
+                        "trigger_source": "test",
+                    }
+                ]
+            },
+        )
         save_json(
             self.memory_path,
             {
                 "user_profile": {
-                    "preferences": ["P" * 300, "Q" * 300],
-                    "important_personal_notes": ["N" * 300],
+                    "preferences": _records("preferences", "P" * 300, "Q" * 300),
+                    "important_personal_notes": _records("notes", "N" * 300),
                 },
-                "work_study": {"current_learning_topics": ["T" * 300]},
+                "work_study": {"current_learning_topics": _records("topics", "T" * 300)},
                 "relationship_memory": {
                     "communication_style": {
-                        "preferred_response_style": "direct_actionable",
-                        "avoid_styles": ["M" * 200],
+                        "preferred_response_style": _records("preferred_response_style", "direct_actionable"),
+                        "avoid_styles": _records("avoid_styles", "M" * 200),
                     }
                 },
             },

@@ -120,7 +120,14 @@ class MemorySummarizerTests(unittest.TestCase):
         """验证失败不覆盖已有记忆，也不标记批次完成。"""
         self.memory_store.save(
             {
-                "user_profile": {"preferences": ["已有偏好"]},
+                "user_profile": {
+                    "preferences": {
+                        "preferences_1": {
+                            "description": ["已有偏好"],
+                            "timestamp": "2026-07-01T00:00:00+00:00",
+                        }
+                    }
+                },
                 "work_study": {},
                 "relationship_memory": {},
             }

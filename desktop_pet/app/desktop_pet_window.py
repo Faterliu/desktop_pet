@@ -23,7 +23,7 @@ from PySide6.QtGui import QAction, QCloseEvent, QMouseEvent, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QWidget
 
 from ai.context_manager import ContextManager
-from ai.deepseek_client import DeepSeekClient, DeepSeekError
+from ai.llm_client import LlmClient, LlmError
 from ai.memory_summarizer import MemorySummarizer
 from ai.mem0_memory_service import Mem0MemoryService
 from ai.prompt_builder import PromptBuilder
@@ -153,7 +153,7 @@ LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE = {
 }
 
 # 这些本地台词仅供固定功能使用，禁止被自动刷新任务改写。
-LOCAL_LINE_REFRESH_EXCLUDED_GROUPS = {"poetry"}
+LOCAL_LINE_REFRESH_EXCLUDED_GROUPS = {"first_start", "poetry"}
 
 CLIPBOARD_ASSISTANT_INSTRUCTIONS = {
     "summarize": "总结下面文本的重点，使用清晰的要点，不补充原文没有的信息。",
@@ -246,7 +246,7 @@ class ChatWorker(QObject):
     def __init__(
         self,
         user_message: str,
-        client: DeepSeekClient,
+        client: LlmClient,
         prompt_builder: PromptBuilder,
         context_manager: ContextManager,
         formal_qa_mode: bool,
@@ -288,7 +288,7 @@ class ChatWorker(QObject):
             )
             result = self._request_chat_reply(messages)
             self.finished.emit(result)
-        except DeepSeekError as exc:
+        except LlmError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected chat worker failure")
@@ -404,7 +404,7 @@ class UtilityPromptWorker(QObject):
         self,
         mode: str,
         clipboard_text: str,
-        client: DeepSeekClient,
+        client: LlmClient,
         prompt_builder: PromptBuilder,
     ) -> None:
         """初始化剪贴板辅助任务所需的模式、文本和模型依赖。"""
@@ -432,7 +432,7 @@ class UtilityPromptWorker(QObject):
                 max_user_message_chars=len(user_message),
             )
             self.finished.emit(self.mode, self.client.chat(messages))
-        except DeepSeekError as exc:
+        except LlmError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Clipboard assistant worker failed: mode=%s", self.mode)
@@ -446,7 +446,7 @@ class ProactiveSpeakWorker(QObject):
     # 初始化 API 主动说话测试任务。
     def __init__(
         self,
-        client: DeepSeekClient,
+        client: LlmClient,
         prompt_builder: PromptBuilder,
     ) -> None:
         """初始化 API 主动说话测试任务。"""
@@ -464,7 +464,7 @@ class ProactiveSpeakWorker(QObject):
             )
             reply = self.client.chat(messages)
             self.finished.emit(reply)
-        except DeepSeekError as exc:
+        except LlmError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected proactive API worker failure")
@@ -478,7 +478,7 @@ class ScenarioGreetingWorker(QObject):
     # 初始化当前对象及其依赖。
     def __init__(
         self,
-        client: DeepSeekClient,
+        client: LlmClient,
         context: dict[str, Any],
         fallback_line: str,
         max_chars: int = 80,
@@ -499,7 +499,7 @@ class ScenarioGreetingWorker(QObject):
             if not is_scenario_greeting_acceptable(reply):
                 reply = sanitize_scenario_greeting(self.fallback_line, self.max_chars)
             self.finished.emit(reply)
-        except DeepSeekError as exc:
+        except LlmError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected scenario greeting worker failure")
@@ -513,7 +513,7 @@ class KnowledgeSpeakWorker(QObject):
     # 初始化记忆增强的知识问候 API 任务。
     def __init__(
         self,
-        client: DeepSeekClient,
+        client: LlmClient,
         prompt_builder: PromptBuilder,
         memory: dict[str, Any],
         formal_qa_mode: bool = False,
@@ -551,7 +551,7 @@ class KnowledgeSpeakWorker(QObject):
             )
             reply = self.client.chat(messages)
             self.finished.emit(reply)
-        except DeepSeekError as exc:
+        except LlmError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Unexpected knowledge worker failure")
@@ -732,7 +732,7 @@ class LocalLinesRefreshWorker(QObject):
     # 初始化当前对象及其依赖。
     def __init__(
         self,
-        client: DeepSeekClient,
+        client: LlmClient,
         local_lines_service: LocalLinesService,
         targets: list[dict[str, Any]],
     ) -> None:
@@ -795,7 +795,7 @@ class LocalLinesRefreshWorker(QObject):
                     "results": results,
                 }
             )
-        except DeepSeekError as exc:
+        except LlmError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Local lines refresh worker failed")
@@ -981,13 +981,13 @@ class DesktopPetWindow(QWidget):
             self.app_config,
         )
         self.memory_store = MemoryStore(self.memory_path, self.memory_vector_store)
-        self.deepseek_client = DeepSeekClient(self.config_path, self.example_config_path)
+        self.llm_client = LlmClient(self.config_path, self.example_config_path)
         self.chat_flow_controller = ChatFlowController(
             self.chat_store_formal,
             self.chat_store_informal,
             self._formal_qa_enabled,
             self._api_chat_enabled,
-            self.deepseek_client.is_configured,
+            self.llm_client.is_configured,
             self._generate_local_reply,
         )
         self.prompt_builder = PromptBuilder(
@@ -1008,27 +1008,27 @@ class DesktopPetWindow(QWidget):
         self.summarizer_formal = Summarizer(
             self.summary_formal_path,
             self.chat_store_formal,
-            self.deepseek_client,
+            self.llm_client,
             config_path=self.config_path,
             fallback_config_path=self.example_config_path,
         )
         self.summarizer_informal = Summarizer(
             self.summary_informal_path,
             self.chat_store_informal,
-            self.deepseek_client,
+            self.llm_client,
             config_path=self.config_path,
             fallback_config_path=self.example_config_path,
         )
         self.summarizer_clipboard = Summarizer(
             self.summary_clipboard_path,
             self.chat_store_clipboard,
-            self.deepseek_client,
+            self.llm_client,
             config_path=self.config_path,
             fallback_config_path=self.example_config_path,
         )
         self.memory_summarizer = MemorySummarizer(
             self.memory_store,
-            self.deepseek_client,
+            self.llm_client,
             self._config_snapshot,
         )
 
@@ -1446,7 +1446,7 @@ class DesktopPetWindow(QWidget):
         if self._chat_in_progress():
             self._display_message("我还在忙上一个问题呢，等我一下下。", 3200, "system")
             return
-        if not self.deepseek_client.is_configured():
+        if not self.llm_client.is_configured():
             self._display_message(
                 "还没有配置可用的 API key，暂时没法测试 API 主动说话哦。",
                 4200,
@@ -1631,7 +1631,7 @@ class DesktopPetWindow(QWidget):
         if not self._api_chat_enabled():
             self._display_message("聊天 API 当前已关闭，暂时不能处理剪贴板内容。", 3600, "system")
             return
-        if not self.deepseek_client.is_configured():
+        if not self.llm_client.is_configured():
             self._display_message("还没有配置可用的 API key，暂时不能处理剪贴板内容。", 4200, "system")
             return
         if self.background_tasks.is_registered("clipboard_assistant"):
@@ -1664,7 +1664,7 @@ class DesktopPetWindow(QWidget):
         if not self._screenshot_analysis_enabled():
             self._display_message("截图解析当前未启用。", 3200, "system")
             return
-        if not self.deepseek_client.is_vision_configured():
+        if not self.llm_client.is_vision_configured():
             self._display_message("还没有配置可用的 OpenAI API，暂时不能解析截图。", 4200, "system")
             return
         if (
@@ -1904,11 +1904,6 @@ class DesktopPetWindow(QWidget):
                 owner="reminder",
             )
             reminder_text = f"提醒你一下：{title}"
-            self.chat_store_remind.append_message(
-                "assistant",
-                reminder_text,
-                {"operation": "reminder_due", "reminder_id": reminder_id},
-            )
             self._display_message(reminder_text, 8000, "reminder")
             always_on_top = self.config_service.get_bool("ui.always_on_top", True)
             self.reminder_ack_bubble.set_always_on_top(always_on_top)
@@ -2369,7 +2364,7 @@ class DesktopPetWindow(QWidget):
         self.chat_worker = ChatWorker(
             **self.chat_flow_controller.chat_worker_kwargs(
                 message,
-                client=self.deepseek_client,
+                client=self.llm_client,
                 prompt_builder=self.prompt_builder,
                 context_manager=self.context_manager,
                 mem0_memory_service=self.mem0_memory_service,
@@ -2407,7 +2402,7 @@ class DesktopPetWindow(QWidget):
 
         self.chat_thread = QThread(self)
         self.chat_worker = ProactiveSpeakWorker(
-            self.deepseek_client,
+            self.llm_client,
             self.prompt_builder,
         )
         self.chat_worker.moveToThread(self.chat_thread)
@@ -2441,7 +2436,7 @@ class DesktopPetWindow(QWidget):
         self.clipboard_worker = UtilityPromptWorker(
             mode,
             clipboard_text,
-            self.deepseek_client,
+            self.llm_client,
             self.prompt_builder,
         )
         self.clipboard_worker.moveToThread(self.clipboard_thread)
@@ -2482,7 +2477,7 @@ class DesktopPetWindow(QWidget):
         self.screenshot_worker = ScreenshotAnalysisWorker(
             image_bytes,
             mime_type,
-            self.deepseek_client,
+            self.llm_client,
             question=question,
             detail=self._screenshot_detail(),
             max_output_tokens=self._screenshot_max_output_tokens(),
@@ -2850,7 +2845,7 @@ class DesktopPetWindow(QWidget):
 
         self.local_lines_refresh_thread = QThread(self)
         self.local_lines_refresh_worker = LocalLinesRefreshWorker(
-            self.deepseek_client,
+            self.llm_client,
             self.local_lines_service,
             targets=targets,
         )
@@ -3206,7 +3201,7 @@ class DesktopPetWindow(QWidget):
         if not self._can_show_proactive_greeting():
             return
         fallback_line = str(payload.get("fallback_line", "")).strip()
-        if not self.deepseek_client.is_configured():
+        if not self.llm_client.is_configured():
             self._pending_scenario_fallback_line = ""
             self._show_scenario_greeting_line(fallback_line)
             return
@@ -3220,7 +3215,7 @@ class DesktopPetWindow(QWidget):
         self.chat_thread = QThread(self)
         self._pending_scenario_fallback_line = str(payload.get("fallback_line", ""))
         self.chat_worker = ScenarioGreetingWorker(
-            self.deepseek_client,
+            self.llm_client,
             context=payload.get("context", {}),
             fallback_line=self._pending_scenario_fallback_line,
             max_chars=int(payload.get("max_chars", 80) or 80),
@@ -3304,7 +3299,7 @@ class DesktopPetWindow(QWidget):
         if not self._can_show_proactive_greeting():
             return
 
-        if not self.deepseek_client.is_configured():
+        if not self.llm_client.is_configured():
             # API 不可用时回退到本地主动说话
             self.behavior_controller.trigger_test_speak()
             return
@@ -3320,7 +3315,7 @@ class DesktopPetWindow(QWidget):
         memory = load_json(self.memory_path, {})
         self.chat_thread = QThread(self)
         self.chat_worker = KnowledgeSpeakWorker(
-            self.deepseek_client,
+            self.llm_client,
             self.prompt_builder,
             memory,
             formal_qa_mode=self._formal_qa_enabled(),
@@ -3892,7 +3887,7 @@ class DesktopPetWindow(QWidget):
     def _api_provider(self) -> str:
         """返回当前配置的聊天模型提供商。"""
         provider = self.config_service.get_str("api.provider", "deepseek").strip().lower()
-        return "openai" if provider in {"openai", "gpt", "gpt_openai"} else "deepseek"
+        return "openai" if provider == "openai" else "deepseek"
 
     # 判断当前是否开启正式问答模式。
     def _formal_qa_enabled(self) -> bool:

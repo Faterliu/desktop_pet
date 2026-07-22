@@ -164,7 +164,7 @@ desktop_pet\start_main.vbs
 1. 新增 log_sanitizer.py (line 11)。
 2. 提供 API key 脱敏、Bearer/api_key= 形态清理。
 3. 增加长文本截断、异常摘要、messages 统计和响应结构摘要。
-4. DeepSeekClient、Summarizer、Mem0MemoryService 的日志已改为记录结构信息和截断异常，不再输出完整 payload、prompt、memory、模型回复或 API response。
+4. LlmClient、Summarizer、Mem0MemoryService 的日志已改为记录结构信息和截断异常，不再输出完整 payload、prompt、memory、模型回复或 API response。
 
 [v1.2.5] - 20260609
 1. memory_vector_store.py 改为紧凑 JSON 保存：separators=(",", ":")，不再缩进。
@@ -225,3 +225,7 @@ desktop_pet\start_main.vbs
 [v2.0.3] - 20260722
 1. 清理旧版对话摘要触发、记忆总结、旧时间戳。
 2. 修复高亮显示错误。
+3. 清理针对旧字段兼容。
+
+[v2.0.4] - 20260722
+1. 优化模型降级处理。

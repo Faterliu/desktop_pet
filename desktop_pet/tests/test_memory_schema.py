@@ -35,23 +35,20 @@ class MemorySchemaTests(unittest.TestCase):
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.memory_path = self.temp_dir / "memory.json"
 
-    # 验证load把旧版重复字段迁移到规范字段且不丢失描述。
-    def test_load_migrates_legacy_memory_fields_to_canonical_paths(self) -> None:
-        """验证旧版重复字段迁移、去重和元数据收敛。"""
+    # 验证load保留规范记录并补齐当前 schema 的缺失分区。
+    def test_load_preserves_canonical_records_and_fills_schema(self) -> None:
+        """验证load保留规范记录并补齐当前 schema 的缺失分区。"""
         self.memory_path.write_text(
             json.dumps(
                 {
-                    "preferences": {"likes": ["直接的回答"]},
                     "user_profile": {
-                        "preferences": ["喜欢简洁"],
-                        "communication_style": {
-                            "communication_style_1": {
-                                "description": ["回答直接、可执行"],
+                        "preferences": {
+                            "preferences_1": {
+                                "description": ["喜欢简洁"],
                                 "timestamp": "2026-01-02T03:04:05+00:00",
                             }
                         },
                     },
-                    "memory_meta": {"last_updated": "legacy"},
                 },
                 ensure_ascii=False,
             ),
@@ -61,25 +58,8 @@ class MemorySchemaTests(unittest.TestCase):
         store = MemoryStore(self.memory_path)
         memory = store.load()
 
-        self.assertNotIn("preferences", memory)
-        self.assertNotIn("communication_style", memory["user_profile"])
-        self.assertCountEqual(
-            [
-                text
-                for record in memory["user_profile"]["preferences"].values()
-                for text in record["description"]
-            ],
-            ["喜欢简洁", "直接的回答"],
-        )
-        response_style = memory["relationship_memory"]["communication_style"][
-            "preferred_response_style"
-        ]
         self.assertEqual(
-            response_style["preferred_response_style_1"]["description"],
-            ["回答直接、可执行"],
-        )
-        self.assertEqual(
-            response_style["preferred_response_style_1"]["timestamp"],
+            memory["user_profile"]["preferences"]["preferences_1"]["timestamp"],
             "2026-01-02T03:04:05+00:00",
         )
         self.assertEqual(memory["memory_meta"]["schema_version"], 5)
@@ -95,11 +75,23 @@ class MemorySchemaTests(unittest.TestCase):
         )
         self.assertEqual(store.load(), memory)
 
-    # 验证迁移写回后会立即同步规范后的向量输入。
-    def test_load_migration_syncs_canonical_memory_to_vector_store(self) -> None:
-        """验证旧字段迁移不会让向量索引保留旧路径。"""
+    # 验证补齐 schema 写回后会立即同步规范记忆到向量索引。
+    def test_load_schema_completion_syncs_canonical_memory_to_vector_store(self) -> None:
+        """验证补齐 schema 写回后会立即同步规范记忆到向量索引。"""
         self.memory_path.write_text(
-            json.dumps({"preferences": ["旧版偏好"]}, ensure_ascii=False),
+            json.dumps(
+                {
+                    "user_profile": {
+                        "preferences": {
+                            "preferences_1": {
+                                "description": ["当前偏好"],
+                                "timestamp": "2026-01-02T03:04:05+00:00",
+                            }
+                        }
+                    }
+                },
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
         vector_store = RecordingVectorStore()
@@ -107,46 +99,32 @@ class MemorySchemaTests(unittest.TestCase):
         memory = MemoryStore(self.memory_path, vector_store).load()
 
         self.assertEqual(len(vector_store.snapshots), 1)
-        self.assertNotIn("preferences", vector_store.snapshots[0])
         self.assertEqual(
             memory["user_profile"]["preferences"]["preferences_1"]["description"],
-            ["旧版偏好"],
+            ["当前偏好"],
         )
 
-    # 验证merge preserves old 记忆 and saves relationship schema场景下的预期结果。
-    def test_merge_preserves_old_memory_and_saves_relationship_schema(self) -> None:
-        """验证merge preserves old 记忆 and saves relationship schema场景下的预期结果。"""
-        self.memory_path.write_text(
-            json.dumps(
+    # 验证结构化操作写入关系记忆，并保存当前 schema。
+    def test_structured_operations_save_relationship_schema(self) -> None:
+        """验证结构化操作写入关系记忆，并保存当前 schema。"""
+        MemoryStore(self.memory_path).apply_summary_operations(
+            "formal",
+            3,
+            [
                 {
-                    "user_profile": {"preferences": ["喜欢简洁"]},
-                    "work_study": {"current_projects": ["桌宠项目"]},
+                    "action": "add",
+                    "field": "relationship_memory.communication_style.preferred_response_style",
+                    "description": ["direct_actionable"],
                 },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-
-        MemoryStore(self.memory_path).merge(
-            {
-                "relationship_memory": {
-                    "communication_style": {
-                        "preferred_response_style": "direct_actionable",
-                        "avoid_styles": ["机械化记忆表达"],
-                    }
-                }
-            }
+                {
+                    "action": "add",
+                    "field": "relationship_memory.communication_style.avoid_styles",
+                    "description": ["机械化记忆表达"],
+                },
+            ],
         )
 
         saved = load_json(self.memory_path, {})
-        self.assertEqual(
-            saved["user_profile"]["preferences"]["preferences_1"]["description"],
-            ["喜欢简洁"],
-        )
-        self.assertEqual(
-            saved["work_study"]["current_projects"]["projects_1"]["description"],
-            ["桌宠项目"],
-        )
         self.assertEqual(saved["memory_meta"]["schema_version"], 5)
         communication_style = saved["relationship_memory"]["communication_style"]
         self.assertEqual(
@@ -158,9 +136,9 @@ class MemorySchemaTests(unittest.TestCase):
             ["机械化记忆表达"],
         )
 
-    # 验证旧 data 时间字段被迁移为带时区的 timestamp。
-    def test_legacy_record_data_timestamp_is_migrated(self) -> None:
-        """验证旧 data 时间字段被迁移为带时区的 timestamp。"""
+    # 验证非规范记录不会被迁移为当前记录。
+    def test_noncanonical_records_are_not_migrated(self) -> None:
+        """验证非规范记录不会被迁移为当前记录。"""
         self.memory_path.write_text(
             json.dumps(
                 {
@@ -179,11 +157,8 @@ class MemorySchemaTests(unittest.TestCase):
         )
 
         memory = MemoryStore(self.memory_path).load()
-        record = memory["work_study"]["current_learning_topics"]["topics_1"]
 
-        self.assertEqual(record["description"], ["旧学习主题"])
-        self.assertIn("+00:00", record["timestamp"])
-        self.assertNotIn("data", record)
+        self.assertEqual(memory["work_study"]["current_learning_topics"], {})
 
     # 验证程序分配连续编号、更新保留编号并刷新时间戳。
     def test_operations_allocate_and_update_numbered_records(self) -> None:

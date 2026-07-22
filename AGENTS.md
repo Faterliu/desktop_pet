@@ -106,7 +106,7 @@ Startup diagnostics:
 
 - Loads sprite config and atlas, crops frames, advances actions with `QTimer`, emits `frame_changed`. Action names must match `assets/sprite_config.json`.
 
-`desktop_pet/ai/deepseek_client.py`
+`desktop_pet/ai/llm_client.py`
 
 - Handles compatible chat and vision requests with `requests.post()`. Preserve missing-key, API-error, timeout and response-shape handling; vision sends Data URL images to `/responses` and must not log image data or keys.
 
@@ -141,10 +141,10 @@ Startup diagnostics:
 ## Common Edit Paths
 
 - Startup or silent launch failure: start with `main.py`, `setup_env.bat`, `start_main.vbs`, `utils/logger.py`, and startup logs.
-- Chat behavior: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `ChatWorker`, `deepseek_client.py`, `prompt_builder.py`, `context_manager.py`, and `summarizer.py`.
+- Chat behavior: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `ChatWorker`, `llm_client.py`, `prompt_builder.py`, `context_manager.py`, and `summarizer.py`.
 - Formal Q&A: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `formal_answer_panel.py`, dual chat stores, and prompt mode handling.
 - Proactive greetings and local line refresh: inspect `behavior_controller.py`, `proactive_context.py`, `DesktopPetWindow` worker callbacks, `local_lines_service.py`, `local_lines.json`, and `config/app_config.example.json`.
-- Screenshot and vision: inspect `screenshot_capture_service.py`, `screenshot_selection_overlay.py`, `ScreenshotAnalysisWorker`, `DeepSeekClient`, `DesktopPetWindow`, and `tests/test_screenshot_analysis.py`.
+- Screenshot and vision: inspect `screenshot_capture_service.py`, `screenshot_selection_overlay.py`, `ScreenshotAnalysisWorker`, `LlmClient`, `DesktopPetWindow`, and `tests/test_screenshot_analysis.py`.
 - Memory changes: inspect `memory_store.py`, `summarizer.py`, `prompt_builder.py`, `mem0_memory_service.py`, `memory_vector_store.py`, and related tests.
 - Bubbles and positioning: inspect `speech_bubble.py`, `bubble_position_service.py`, `chat_input.py`, and `_sync_floating_widgets()`.
 - Background work: use `background_task_registry.py`; verify duplicate task handling and shutdown behavior.
@@ -171,7 +171,7 @@ Startup diagnostics:
 - `closeEvent()` and worker cleanup: avoid unbounded waits and avoid callbacks mutating UI during shutdown.
 - `json_store.py`: affects all runtime persistence; preserve atomic write, corrupt-file recovery, and old data compatibility.
 - `app_config.example.json`: missing defaults can break first launch on new devices.
-- `PromptBuilder`, `Summarizer`, `DeepSeekClient`: affect safety, privacy, token budget, formal/informal routing, and model failures.
+- `PromptBuilder`, `Summarizer`, `LlmClient`: affect safety, privacy, token budget, formal/informal routing, and model failures.
 - `Mem0MemoryService` and memory-vector logic: optional external services must not become startup or chat blockers.
 - `SpritePlayer` and `sprite_config.json`: atlas layout, frame counts, action names, and UI call sites are coupled.
 - `.gitignore`: do not unignore user data, logs, caches, or real config.

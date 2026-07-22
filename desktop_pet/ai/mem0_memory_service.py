@@ -75,17 +75,17 @@ class Mem0MemoryService:
         """根据 app_config 读取配置片段，缺失时返回安全默认配置。"""
         api_config = app_config.get("api", {})
         memory_config = app_config.get("memory", {})
+        api_config = api_config if isinstance(api_config, dict) else {}
+        deepseek_config = api_config.get("deepseek", {})
+        deepseek_config = deepseek_config if isinstance(deepseek_config, dict) else {}
         use_app_deepseek = bool(memory_config.get("mem0_use_app_deepseek_config", True))
 
-        app_model = str(api_config.get("model", "")).strip()
-        app_base_url = str(api_config.get("base_url", "")).strip()
-        deepseek_api_key = str(api_config.get("api_key", "")).strip()
-
+        deepseek_api_key = str(deepseek_config.get("api_key", "")).strip()
         deepseek_model = str(memory_config.get("mem0_deepseek_model", "")).strip()
         deepseek_base_url = str(memory_config.get("mem0_deepseek_base_url", "")).strip()
         if use_app_deepseek:
-            deepseek_model = deepseek_model or app_model
-            deepseek_base_url = deepseek_base_url or app_base_url
+            deepseek_model = deepseek_model or str(deepseek_config.get("model", "")).strip()
+            deepseek_base_url = deepseek_base_url or str(deepseek_config.get("base_url", "")).strip()
 
         deepseek_model = deepseek_model or "deepseek-chat"
         deepseek_base_url = deepseek_base_url or "https://api.deepseek.com"

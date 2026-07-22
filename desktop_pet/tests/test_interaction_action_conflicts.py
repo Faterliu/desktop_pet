@@ -252,6 +252,50 @@ class InteractionActionConflictTests(unittest.TestCase):
         single_shot.assert_called_once_with(1000, fake._show_next_reminder_reply)
         self.assertEqual(fake._reminder_reply_queue, [{"id": "r-1"}])
 
+    # 验证到期提醒展示不会作为对话写入历史，重复提醒也不会累积记录。
+    def test_due_reminder_display_does_not_require_or_write_chat_history(self) -> None:
+        """验证到期提醒展示不会作为对话写入历史，重复提醒也不会累积记录。"""
+        displayed: list[tuple] = []
+        fake = types.SimpleNamespace(
+            _active_reminder_reply_id="",
+            _reminder_reply_queue=[{"id": "r-1"}],
+            screenshot_selection_overlay=None,
+            _pending_screenshot=None,
+            chat_input=types.SimpleNamespace(isVisible=lambda: False),
+            reminder_store=types.SimpleNamespace(
+                get_reminder=lambda reminder_id: {
+                    "id": reminder_id,
+                    "status": "awaiting_ack",
+                    "title": "休息一下",
+                }
+            ),
+            reply_bubble=types.SimpleNamespace(hide=lambda: None),
+            sprite_player=FakeSpritePlayer(),
+            move_animation=None,
+            config_service=types.SimpleNamespace(get_bool=lambda *_args: True),
+            reminder_ack_bubble=types.SimpleNamespace(
+                set_always_on_top=lambda *_args: None,
+                show_message=lambda *_args: None,
+            ),
+            reminder_snooze_bubble=types.SimpleNamespace(
+                set_always_on_top=lambda *_args: None,
+                show_message=lambda *_args: None,
+            ),
+            _reminder_reply_timer=types.SimpleNamespace(start=lambda *_args: None),
+            geometry=lambda: object(),
+            _display_message=lambda *args: displayed.append(args),
+            _sync_floating_widgets=lambda: None,
+            _assistant_reply_bubble_duration_ms=lambda: 5000,
+            _reminder_snooze_minutes=lambda: 10,
+        )
+        fake._closing_or_closed = lambda: False
+        fake._chat_in_progress = lambda: False
+
+        DesktopPetWindow._show_next_reminder_reply(fake)
+
+        self.assertEqual(fake._active_reminder_reply_id, "r-1")
+        self.assertEqual(displayed, [("提醒你一下：休息一下", 8000, "reminder")])
+
     def test_sprite_timer_cannot_apply_an_old_action_fallback_after_replacement(self) -> None:
         """精灵定时器只推进当前动作，旧挥手不会在之后把 review 切回 idle。"""
         app = QApplication.instance() or QApplication([])

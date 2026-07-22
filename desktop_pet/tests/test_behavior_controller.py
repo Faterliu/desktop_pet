@@ -269,7 +269,16 @@ class BehaviorControllerTests(unittest.TestCase):
                 "scenario_greeting_templates": ["{task}这块先抓最关键的一小步就行。"],
                 "first_start": {"enable": False, "data": []},
             }
-            memory = {"work_study": {"current_projects": ["桌宠记忆系统"]}}
+            memory = {
+                "work_study": {
+                    "current_projects": {
+                        "projects_1": {
+                            "description": ["桌宠记忆系统"],
+                            "timestamp": "2026-07-01T00:00:00+00:00",
+                        }
+                    }
+                }
+            }
             character = {
                 "behavior_policy": {
                     "proactive_style": "轻量出现，不要求回应。",
@@ -321,7 +330,16 @@ class BehaviorControllerTests(unittest.TestCase):
                 "scenario_greeting_templates": ["{task}这块先抓最关键的一小步就行。"],
                 "first_start": {"enable": False, "data": []},
             }
-            memory = {"work_study": {"current_projects": ["桌宠记忆系统"]}}
+            memory = {
+                "work_study": {
+                    "current_projects": {
+                        "projects_1": {
+                            "description": ["桌宠记忆系统"],
+                            "timestamp": "2026-07-01T00:00:00+00:00",
+                        }
+                    }
+                }
+            }
             controller = self._controller(Path(temp), config, local_lines=local_lines, memory=memory)
             controller.last_user_interaction = now_local().replace(year=2000)
             spoken: list[tuple[str, int, str]] = []

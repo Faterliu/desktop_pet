@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from ai.deepseek_client import DeepSeekClient
+from ai.llm_client import LlmClient
 from storage.memory_store import MEMORY_FIELDS, MemoryStore
 from utils.log_sanitizer import safe_exception
 from utils.logger import get_logger
@@ -19,12 +19,12 @@ class MemorySummarizer:
     def __init__(
         self,
         memory_store: MemoryStore,
-        deepseek_client: DeepSeekClient,
+        llm_client: LlmClient,
         config_provider: Callable[[], dict[str, Any]],
     ) -> None:
         """初始化记忆总结器。"""
         self.memory_store = memory_store
-        self.deepseek_client = deepseek_client
+        self.llm_client = llm_client
         self.config_provider = config_provider
 
     # 对指定模式的一个摘要批次生成并保存最新长期记忆。
@@ -32,13 +32,13 @@ class MemorySummarizer:
         """对指定模式的一个摘要批次生成并保存最新长期记忆。"""
         if len(entries) != 3 or sequence <= 0:
             return False
-        if not self.deepseek_client.is_configured():
+        if not self.llm_client.is_configured():
             logger.info("Skip memory summary because chat API is not configured: mode=%s", mode)
             return False
 
         current = self.memory_store.load()
         try:
-            content = self.deepseek_client.chat(self._messages(mode, entries, current))
+            content = self.llm_client.chat(self._messages(mode, entries, current))
             payload = json.loads(content)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Memory summary generation failed: %s", safe_exception(exc))

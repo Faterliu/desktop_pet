@@ -93,9 +93,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.memory_path = self.temp_dir / "memory.json"
         self.vector_path = self.temp_dir / "memory_vectors.json"
 
-    # 验证记忆 存储 merge generates vectors for written 记忆场景下的预期结果。
-    def test_memory_store_merge_generates_vectors_for_written_memory(self) -> None:
-        """验证记忆 存储 merge generates vectors for written 记忆场景下的预期结果。"""
+    # 验证结构化记忆操作会为写入内容生成向量。
+    def test_memory_store_operations_generate_vectors_for_written_memory(self) -> None:
+        """验证结构化记忆操作会为写入内容生成向量。"""
         app_config = {
             "memory": {
                 "enable_memory_vectors": True,
@@ -110,12 +110,16 @@ class MemoryVectorStoreTests(unittest.TestCase):
         memory_store = MemoryStore(self.memory_path, vector_store)
 
         with patch("storage.memory_vector_store.requests", FakeRequests):
-            memory_store.merge(
-                {
-                    "user_profile": {
-                        "preferences": ["喜欢简洁直接的回答"],
+            memory_store.apply_summary_operations(
+                "formal",
+                3,
+                [
+                    {
+                        "action": "add",
+                        "field": "user_profile.preferences",
+                        "description": ["喜欢简洁直接的回答"],
                     }
-                }
+                ],
             )
 
         index = load_json(self.vector_path, {})
@@ -140,7 +144,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         store = MemoryVectorStore(self.vector_path, app_config)
         memory = {
             "user_profile": {
-                "preferences": ["first long memory text", "second long memory text"],
+                "preferences": self._records(
+                    "preferences", "first long memory text", "second long memory text"
+                ),
             }
         }
 
@@ -170,7 +176,7 @@ class MemoryVectorStoreTests(unittest.TestCase):
         store = MemoryVectorStore(self.vector_path, app_config)
 
         with patch("storage.memory_vector_store.requests", PreciseFakeRequests):
-            store.sync_memory({"user_profile": {"preferences": ["abc"]}})
+            store.sync_memory({"user_profile": {"preferences": self._records("preferences", "abc")}})
 
         index = load_json(self.vector_path, {})
         self.assertEqual(len(index["items"]), 1)
@@ -193,7 +199,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         store = MemoryVectorStore(self.vector_path, app_config)
 
         with patch("storage.memory_vector_store.requests", FakeRequests):
-            store.sync_memory({"user_profile": {"preferences": ["short", "long enough memory"]}})
+            store.sync_memory(
+                {"user_profile": {"preferences": self._records("preferences", "short", "long enough memory")}}
+            )
 
         index = load_json(self.vector_path, {})
         self.assertEqual([item["text"] for item in index["items"]], ["long enough memory"])
@@ -232,7 +240,9 @@ class MemoryVectorStoreTests(unittest.TestCase):
         store = MemoryVectorStore(self.vector_path, app_config)
 
         with patch("storage.memory_vector_store.requests", PreciseFakeRequests):
-            store.sync_memory({"user_profile": {"preferences": ["fresh memory text"]}})
+            store.sync_memory(
+                {"user_profile": {"preferences": self._records("preferences", "fresh memory text")}}
+            )
 
         index = load_json(self.vector_path, {})
         self.assertEqual([item["text"] for item in index["items"]], ["fresh memory text"])
@@ -256,11 +266,11 @@ class MemoryVectorStoreTests(unittest.TestCase):
         store = MemoryVectorStore(self.vector_path, app_config)
         memory = {
             "user_profile": {
-                "preferences": ["older preference memory"],
+                "preferences": self._records("preferences", "older preference memory"),
             },
             "work_study": {
-                "current_projects": ["important project memory"],
-                "useful_context": ["ordinary context memory"],
+                "current_projects": self._records("projects", "important project memory"),
+                "useful_context": self._records("context", "ordinary context memory"),
             },
         }
 
@@ -276,18 +286,11 @@ class MemoryVectorStoreTests(unittest.TestCase):
     def test_semantic_merge_does_not_rewrite_structured_memory(self) -> None:
         """验证向量语义维护不再直接改写结构化记忆。"""
         memory = {
-            "schema_version": "1.0",
             "user_profile": {
-                "preferences": ["喜欢简短回答", "偏好简短直接的回答", "喜欢番茄"],
-                "communication_style": [],
-                "important_personal_notes": [],
+                "preferences": self._records(
+                    "preferences", "喜欢简短回答", "偏好简短直接的回答", "喜欢番茄"
+                ),
             },
-            "work_study": {
-                "current_learning_topics": [],
-                "current_projects": [],
-                "useful_context": [],
-            },
-            "last_updated": "",
         }
         save_json(self.memory_path, memory)
 
@@ -325,25 +328,19 @@ class MemoryVectorStoreTests(unittest.TestCase):
         self.assertEqual(result["merged_count"], 0)
         self.assertEqual(
             updated["user_profile"]["preferences"],
-            ["喜欢简短回答", "偏好简短直接的回答", "喜欢番茄"],
+            memory["user_profile"]["preferences"],
         )
 
     # 验证语义 merge does not merge across 记忆 fields场景下的预期结果。
     def test_semantic_merge_does_not_merge_across_memory_fields(self) -> None:
         """验证语义 merge does not merge across 记忆 fields场景下的预期结果。"""
         memory = {
-            "schema_version": "1.0",
             "user_profile": {
-                "preferences": ["喜欢简短回答"],
-                "communication_style": ["偏好简短直接的回答"],
-                "important_personal_notes": [],
+                "preferences": self._records("preferences", "喜欢简短回答"),
             },
             "work_study": {
-                "current_learning_topics": [],
-                "current_projects": [],
-                "useful_context": [],
+                "current_projects": self._records("projects", "偏好简短直接的回答"),
             },
-            "last_updated": "",
         }
         save_json(self.memory_path, memory)
 
@@ -359,7 +356,7 @@ class MemoryVectorStoreTests(unittest.TestCase):
                     self._vector_item(store, "user_profile.preferences", "喜欢简短回答", 0, [1.0, 0.0]),
                     self._vector_item(
                         store,
-                        "user_profile.communication_style",
+                        "work_study.current_projects",
                         "偏好简短直接的回答",
                         1,
                         [0.99, 0.01],
@@ -372,8 +369,20 @@ class MemoryVectorStoreTests(unittest.TestCase):
 
         updated = load_json(self.memory_path, {})
         self.assertEqual(result["merged_count"], 0)
-        self.assertEqual(updated["user_profile"]["preferences"], ["喜欢简短回答"])
-        self.assertEqual(updated["user_profile"]["communication_style"], ["偏好简短直接的回答"])
+        self.assertEqual(updated["user_profile"]["preferences"], memory["user_profile"]["preferences"])
+        self.assertEqual(updated["work_study"]["current_projects"], memory["work_study"]["current_projects"])
+
+    # 为测试构造当前 schema 的编号记忆记录集合。
+    @staticmethod
+    def _records(prefix: str, *texts: str) -> dict[str, dict[str, object]]:
+        """为测试构造当前 schema 的编号记忆记录集合。"""
+        return {
+            f"{prefix}_{index}": {
+                "description": [text],
+                "timestamp": "2026-07-01T00:00:00+00:00",
+            }
+            for index, text in enumerate(texts, start=1)
+        }
 
     # 为测试准备向量item数据或断言辅助结果。
     def _vector_item(

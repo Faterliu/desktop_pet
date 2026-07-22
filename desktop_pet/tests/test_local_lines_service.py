@@ -7,6 +7,7 @@ import types
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -55,10 +56,10 @@ except ModuleNotFoundError:
 from storage.json_store import load_json, save_json  # noqa: E402
 from storage.local_lines_service import LocalLinesService  # noqa: E402
 
-from app.desktop_pet_window import LocalLinesRefreshWorker  # noqa: E402
+from app.desktop_pet_window import DesktopPetWindow, LocalLinesRefreshWorker  # noqa: E402
 
 
-class FakeDeepSeekClient:
+class FakeLlmClient:
     # 初始化当前对象及其依赖。
     def __init__(self, configured: bool = True, reply: str = "新开场一\n新开场二") -> None:
         """初始化当前对象及其依赖。"""
@@ -66,14 +67,14 @@ class FakeDeepSeekClient:
         self.reply = reply
         self.calls = 0
 
-    # 为 FakeDeepSeekClient 测试替身提供isconfigured行为。
+    # 为 FakeLlmClient 测试替身提供isconfigured行为。
     def is_configured(self) -> bool:
-        """为 FakeDeepSeekClient 测试替身提供isconfigured行为。"""
+        """为 FakeLlmClient 测试替身提供isconfigured行为。"""
         return self.configured
 
-    # 为 FakeDeepSeekClient 测试替身提供聊天行为。
+    # 为 FakeLlmClient 测试替身提供聊天行为。
     def chat(self, messages):  # type: ignore[no-untyped-def]
-        """为 FakeDeepSeekClient 测试替身提供聊天行为。"""
+        """为 FakeLlmClient 测试替身提供聊天行为。"""
         self.calls += 1
         return self.reply
 
@@ -261,7 +262,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         """验证refresh 工作线程 updates due 知识问候 intro 台词场景下的预期结果。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
-        client = FakeDeepSeekClient(reply="1. 新开场一\n- 新开场二\n根据记忆我想到一句")
+        client = FakeLlmClient(reply="1. 新开场一\n- 新开场二\n根据记忆我想到一句")
         worker = LocalLinesRefreshWorker(
             client,  # type: ignore[arg-type]
             service,
@@ -290,7 +291,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         """验证refresh 工作线程 skips when no group is enabled场景下的预期结果。"""
         save_json(self.lines_path, {"idle": ["人工"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
-        client = FakeDeepSeekClient()
+        client = FakeLlmClient()
         worker = LocalLinesRefreshWorker(
             client,  # type: ignore[arg-type]
             service,
@@ -309,7 +310,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         """验证refresh 工作线程 updates multiple enabled groups场景下的预期结果。"""
         save_json(self.lines_path, {"idle": ["旧空闲"], "reply": ["旧回应"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
-        client = FakeDeepSeekClient(reply="新话术一\n新话术二")
+        client = FakeLlmClient(reply="新话术一\n新话术二")
         worker = LocalLinesRefreshWorker(
             client,  # type: ignore[arg-type]
             service,
@@ -347,7 +348,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         """验证refresh 工作线程 skips when API is not configured场景下的预期结果。"""
         save_json(self.lines_path, {"knowledge_speak_intro": ["人工"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
-        client = FakeDeepSeekClient(configured=False)
+        client = FakeLlmClient(configured=False)
         worker = LocalLinesRefreshWorker(
             client,  # type: ignore[arg-type]
             service,
@@ -369,6 +370,50 @@ class LocalLinesServiceTests(unittest.TestCase):
 
         self.assertEqual(client.calls, 0)
         self.assertEqual(results[0]["reason"], "api_not_configured")
+
+    # 验证首次启动问候不会进入按问候类型生成的自动更新目标。
+    def test_refresh_targets_exclude_first_start_from_arrival_type(self) -> None:
+        """验证首次启动问候不会进入按问候类型生成的自动更新目标。"""
+        window = SimpleNamespace(
+            app_config={
+                "local_lines_refresh": {
+                    "greeting_types": {
+                        "time": {"enabled": False},
+                        "arrival": {"enabled": True},
+                        "care": {"enabled": False},
+                        "scenario": {"enabled": False},
+                        "interaction": {"enabled": False},
+                    },
+                }
+            }
+        )
+
+        targets = DesktopPetWindow._local_lines_refresh_targets(window)
+
+        self.assertNotIn("first_start", [target["group"] for target in targets])
+        self.assertEqual(
+            [target["group"] for target in targets],
+            ["startup", "return_after_idle", "farewell"],
+        )
+
+    # 验证旧版按具体分组的更新配置同样不会改写首次启动问候。
+    def test_refresh_targets_exclude_first_start_from_legacy_groups(self) -> None:
+        """验证旧版按具体分组的更新配置同样不会改写首次启动问候。"""
+        window = SimpleNamespace(
+            app_config={
+                "local_lines_refresh": {
+                    "greeting_types": None,
+                    "groups": {
+                        "first_start": {"enabled": True},
+                        "startup": {"enabled": True},
+                    },
+                }
+            }
+        )
+
+        targets = DesktopPetWindow._local_lines_refresh_targets(window)
+
+        self.assertEqual([target["group"] for target in targets], ["startup"])
 
 
 if __name__ == "__main__":

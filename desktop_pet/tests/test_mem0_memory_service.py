@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import builtins
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -18,7 +19,7 @@ class Mem0MemoryServiceTests(unittest.TestCase):
     def test_enabled_mem0_without_dashscope_key_skips_import_and_init(self) -> None:
         """验证enabled mem 0 without DashScope 密钥 skips import and init场景下的预期结果。"""
         config = {
-            "api": {"api_key": "deepseek-key"},
+            "api": {"deepseek": {"api_key": "deepseek-key"}},
             "memory": {
                 "enable_mem0": True,
                 "dashscope_api_key": "",
@@ -43,6 +44,33 @@ class Mem0MemoryServiceTests(unittest.TestCase):
 
         self.assertFalse(service.is_available())
         self.assertFalse(mem0_import_attempted)
+
+    # 验证 Mem0 LLM 读取嵌套 DeepSeek 配置，不再读取旧扁平 API 字段。
+    def test_mem0_llm_uses_nested_deepseek_config(self) -> None:
+        """验证 Mem0 LLM 读取嵌套 DeepSeek 配置。"""
+        config = {
+            "api": {
+                "deepseek": {
+                    "api_key": "deepseek-key",
+                    "base_url": "https://deepseek.test",
+                    "model": "deepseek-test",
+                }
+            },
+            "memory": {
+                "dashscope_api_key": "dashscope-key",
+                "dashscope_embedding_dimensions": 8,
+            },
+        }
+        service = object.__new__(Mem0MemoryService)
+        with tempfile.TemporaryDirectory() as temp:
+            with patch("ai.mem0_memory_service.PROJECT_ROOT", Path(temp)):
+                mem0_config = service._build_mem0_config(config)
+
+        llm = mem0_config["llm"]
+        self.assertEqual(llm["provider"], "deepseek")
+        self.assertEqual(llm["config"]["model"], "deepseek-test")
+        self.assertEqual(llm["config"]["deepseek_base_url"], "https://deepseek.test")
+        self.assertNotIn("openai_base_url", llm["config"])
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
 sys.modules.setdefault("utils.logger", logger_module)
 
-from ai.deepseek_client import ReminderToolCall, ToolChatResponse  # noqa: E402
+from ai.llm_client import ReminderToolCall, ToolChatResponse  # noqa: E402
 from app.desktop_pet_window import ChatWorker, ChatWorkerResult  # noqa: E402
 from app.reminder_tool import ReminderTool  # noqa: E402
 from storage.reminder_store import ReminderStore  # noqa: E402

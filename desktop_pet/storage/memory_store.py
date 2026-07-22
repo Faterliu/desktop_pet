@@ -6,7 +6,7 @@ from typing import Any
 
 from storage.json_store import load_json, save_json
 from storage.memory_lock import MEMORY_IO_LOCK
-from utils.time_utils import now_iso, parse_iso_datetime, utc_iso
+from utils.time_utils import now_iso, utc_iso
 
 
 MEMORY_FIELDS: dict[str, str] = {
@@ -85,125 +85,29 @@ DEFAULT_MEMORY = {
 }
 
 
-# 把旧版记忆文件补齐为当前 schema，同时保留已有字段。
+# 补齐当前记忆 schema 的缺失分区，并过滤无效记录。
 def normalize_memory_schema(data: dict[str, Any] | None) -> dict[str, Any]:
-    """把旧版记忆文件补齐为当前 schema，同时保留已有字段。"""
+    """补齐当前记忆 schema 的缺失分区，并过滤无效记录。"""
     if not isinstance(data, dict):
         data = {}
     normalized = copy.deepcopy(data)
-    fallback_timestamp = _normalized_timestamp(normalized.get("last_updated"))
     for path, prefix in MEMORY_FIELDS.items():
         container = _get_path(normalized, path)
         _set_path(
             normalized,
             path,
-            _normalize_record_collection(container, prefix, fallback_timestamp),
+            _normalize_record_collection(container, prefix),
         )
-    _migrate_legacy_memory_fields(normalized, fallback_timestamp)
     _merge_defaults(normalized, DEFAULT_MEMORY)
     normalized.setdefault("memory_meta", {})
     if not isinstance(normalized["memory_meta"], dict):
         normalized["memory_meta"] = {}
     normalized["schema_version"] = "2.0"
     normalized["memory_meta"]["schema_version"] = 5
-    normalized["memory_meta"].pop("last_updated", None)
     if not isinstance(normalized["memory_meta"].get("summary_batches"), dict):
         normalized["memory_meta"]["summary_batches"] = {}
-    _merge_defaults(normalized["relationship_memory"], DEFAULT_RELATIONSHIP_MEMORY)
-    normalized["last_updated"] = _normalized_timestamp(normalized.get("last_updated"))
+    normalized["last_updated"] = str(normalized.get("last_updated", "")).strip()
     return normalized
-
-
-# 将旧版重复字段合并到当前唯一的规范字段，并在内容保留后删除来源字段。
-def _migrate_legacy_memory_fields(memory: dict[str, Any], fallback_timestamp: str) -> None:
-    """将旧版重复字段合并到当前唯一的规范字段。"""
-    root_preferences = memory.get("preferences")
-    if "preferences" in memory and _append_legacy_records(
-        memory,
-        "user_profile.preferences",
-        root_preferences,
-        "preferences",
-        fallback_timestamp,
-    ):
-        memory.pop("preferences", None)
-
-    user_profile = memory.get("user_profile")
-    legacy_communication = (
-        user_profile.get("communication_style") if isinstance(user_profile, dict) else None
-    )
-    if isinstance(user_profile, dict) and "communication_style" in user_profile and _append_legacy_records(
-        memory,
-        "relationship_memory.communication_style.preferred_response_style",
-        legacy_communication,
-        "preferred_response_style",
-        fallback_timestamp,
-    ):
-        user_profile.pop("communication_style", None)
-
-
-# 追加旧字段记录到目标集合，保留可用描述与原始时间戳，并按文本去重。
-def _append_legacy_records(
-    memory: dict[str, Any],
-    target_path: str,
-    source: Any,
-    prefix: str,
-    fallback_timestamp: str,
-) -> bool:
-    """追加旧字段记录到目标集合，成功保留内容后返回 True。"""
-    source_records = _legacy_record_collection(source, prefix, fallback_timestamp)
-    target = _get_path(memory, target_path)
-    if not isinstance(target, dict):
-        return False
-
-    known_texts = {
-        str(text).strip()
-        for record in target.values()
-        if _is_memory_record(record)
-        for text in record.get("description", [])
-        if str(text).strip()
-    }
-    for record in source_records.values():
-        descriptions = [
-            str(text).strip()
-            for text in record.get("description", [])
-            if str(text).strip() and str(text).strip() not in known_texts
-        ]
-        if not descriptions:
-            continue
-        record_id = _next_collection_record_id(target, prefix)
-        target[record_id] = {
-            "description": descriptions,
-            "timestamp": _normalized_timestamp(record.get("timestamp")),
-        }
-        known_texts.update(descriptions)
-    return True
-
-
-# 兼容旧版列表、文本及字典包装的字段，整理为编号记录集合。
-def _legacy_record_collection(value: Any, prefix: str, fallback_timestamp: str) -> dict[str, dict[str, Any]]:
-    """兼容旧版列表、文本及字典包装的字段。"""
-    if isinstance(value, dict) and not any(_is_memory_record(item) for item in value.values()):
-        records: dict[str, dict[str, Any]] = {}
-        for item in value.values():
-            for record in _legacy_record_collection(item, prefix, fallback_timestamp).values():
-                record_id = _next_collection_record_id(records, prefix)
-                records[record_id] = record
-        return records
-    return _normalize_record_collection(value, prefix, fallback_timestamp)
-
-
-# 读取集合中的最大编号并生成下一个记录键。
-def _next_collection_record_id(collection: dict[str, Any], prefix: str) -> str:
-    """读取集合中的最大编号并生成下一个记录键。"""
-    maximum = 0
-    for key in collection:
-        if not isinstance(key, str) or not key.startswith(f"{prefix}_"):
-            continue
-        try:
-            maximum = max(maximum, int(key.rsplit("_", 1)[1]))
-        except (IndexError, ValueError):
-            continue
-    return f"{prefix}_{maximum + 1}"
 
 
 # 返回字段内的编号记录，按最近更新时间优先排序。
@@ -260,11 +164,14 @@ def _set_path(data: dict[str, Any], path: str, value: Any) -> None:
     node[keys[-1]] = value
 
 
-# 判断对象是否为新结构的单条记忆记录。
+# 判断对象是否为当前结构的单条记忆记录。
 def _is_memory_record(value: Any) -> bool:
-    """判断对象是否为新结构的单条记忆记录。"""
-    return isinstance(value, dict) and "description" in value and (
-        "timestamp" in value or "data" in value
+    """判断对象是否为当前结构的单条记忆记录。"""
+    return (
+        isinstance(value, dict)
+        and isinstance(value.get("description"), list)
+        and isinstance(value.get("timestamp"), str)
+        and bool(value["timestamp"].strip())
     )
 
 
@@ -284,48 +191,29 @@ def _description_list(value: Any) -> list[str]:
     return texts
 
 
-# 把旧值或部分新值转换为按序号保存的记录集合。
-def _normalize_record_collection(value: Any, prefix: str, fallback_timestamp: str) -> dict[str, dict[str, Any]]:
-    """把旧值或部分新值转换为按序号保存的记录集合。"""
-    candidates: list[tuple[str | None, Any, Any]] = []
-    if isinstance(value, dict) and any(_is_memory_record(item) for item in value.values()):
-        for key, record in value.items():
-            if _is_memory_record(record):
-                candidates.append((str(key), record.get("description"), record.get("timestamp", record.get("data"))))
-    elif isinstance(value, list):
-        candidates = [(None, item, fallback_timestamp) for item in value]
-    elif value not in (None, "", {}):
-        candidates = [(None, value, fallback_timestamp)]
-
+# 过滤当前编号记录集合中的无效条目。
+def _normalize_record_collection(value: Any, prefix: str) -> dict[str, dict[str, Any]]:
+    """过滤当前编号记录集合中的无效条目。"""
     normalized: dict[str, dict[str, Any]] = {}
-    next_number = 1
-    for record_id, description, timestamp in candidates:
-        texts = _description_list(description)
+    if not isinstance(value, dict):
+        return normalized
+    for record_id, record in value.items():
+        if not isinstance(record_id, str) or not record_id.startswith(f"{prefix}_"):
+            continue
+        try:
+            int(record_id.rsplit("_", 1)[1])
+        except (IndexError, ValueError):
+            continue
+        if not _is_memory_record(record):
+            continue
+        texts = _description_list(record["description"])
         if not texts:
             continue
-        if record_id and record_id.startswith(f"{prefix}_") and record_id not in normalized:
-            target_id = record_id
-            try:
-                next_number = max(next_number, int(record_id.rsplit("_", 1)[1]) + 1)
-            except (IndexError, ValueError):
-                pass
-        else:
-            while f"{prefix}_{next_number}" in normalized:
-                next_number += 1
-            target_id = f"{prefix}_{next_number}"
-            next_number += 1
-        normalized[target_id] = {
+        normalized[record_id] = {
             "description": texts,
-            "timestamp": _normalized_timestamp(timestamp or fallback_timestamp),
+            "timestamp": record["timestamp"].strip(),
         }
     return normalized
-
-
-# 把旧版或新值时间统一为带时区的 UTC ISO 字符串。
-def _normalized_timestamp(value: Any) -> str:
-    """把旧版或新值时间统一为带时区的 UTC ISO 字符串。"""
-    parsed = parse_iso_datetime(value)
-    return utc_iso(parsed) if parsed is not None else utc_iso()
 
 
 # 根据 target、defaults 递归补齐缺失字段，保留已有记忆内容。
@@ -373,17 +261,6 @@ class MemoryStore:
             self._touch_memory(data)
             save_json(self.path, data)
         self._sync_vectors(data)
-
-    # 根据 updates 整理merge，并把结果交给调用方或写回状态。
-    def merge(self, updates: dict[str, Any]) -> dict[str, Any]:
-        """兼容旧调用方：把旧结构更新转换为新增编号记录。"""
-        operations: list[dict[str, Any]] = []
-        for path in MEMORY_FIELDS:
-            value = _get_path(updates, path)
-            for text in _description_list(value):
-                operations.append({"action": "add", "field": path, "description": [text]})
-        self.apply_summary_operations("legacy_merge", 0, operations)
-        return self.load()
 
     # 应用模型返回的编号记忆增量，并在同一次写入中标记摘要批次。
     def apply_summary_operations(
@@ -479,7 +356,6 @@ class MemoryStore:
         data["last_updated"] = timestamp
         data.setdefault("memory_meta", {})
         data["memory_meta"]["schema_version"] = 5
-        data["memory_meta"].pop("last_updated", None)
 
     # 根据 current、updates 合并关系记忆分区，并为新增条目补充时间戳。
     def _touch_relationship_sections(

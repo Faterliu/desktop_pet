@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ai.context_budget import clip_text, read_context_budget
-from ai.deepseek_client import DeepSeekClient, DeepSeekError
+from ai.llm_client import LlmClient, LlmError
 from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.path_lock import lock_for_path
@@ -38,14 +38,14 @@ class Summarizer:
         self,
         summary_path: str | Path,
         chat_store: ChatStore,
-        deepseek_client: DeepSeekClient,
+        llm_client: LlmClient,
         config_path: str | Path | None = None,
         fallback_config_path: str | Path | None = None,
     ) -> None:
         """初始化摘要器，关联摘要文件、聊天记录和模型客户端。"""
         self.summary_path = Path(summary_path)
         self.chat_store = chat_store
-        self.deepseek_client = deepseek_client
+        self.llm_client = llm_client
         self.config_path = Path(config_path) if config_path else None
         self.fallback_config_path = (
             Path(fallback_config_path) if fallback_config_path else self.config_path
@@ -209,7 +209,7 @@ class Summarizer:
     # 根据 history 压缩聊天历史，生成摘要内容。
     def _summarize_history(self, history: list[dict[str, Any]]) -> dict[str, Any]:
         """根据 history 压缩聊天历史，生成摘要内容。"""
-        if not self.deepseek_client.is_configured():
+        if not self.llm_client.is_configured():
             return self._local_summary(history)
 
         summary_payload = self._model_summary(history)
@@ -222,7 +222,7 @@ class Summarizer:
     def _model_summary(self, history: list[dict[str, Any]]) -> dict[str, Any] | None:
         """根据 history 请求模型生成摘要 JSON，失败时交给本地兜底。"""
         try:
-            content = self.deepseek_client.chat(self._summary_messages(history))
+            content = self.llm_client.chat(self._summary_messages(history))
             parsed = json.loads(content)
             if isinstance(parsed, dict):
                 budget = self._budget()
@@ -233,7 +233,7 @@ class Summarizer:
                         for item in self._string_list(parsed.get("highlights", []))[:3]
                     ],
                 }
-        except (DeepSeekError, json.JSONDecodeError) as exc:
+        except (LlmError, json.JSONDecodeError) as exc:
             logger.warning("Falling back to local summary after model failure: %s", safe_exception(exc))
         return None
 
