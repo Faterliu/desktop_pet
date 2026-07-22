@@ -39,7 +39,11 @@ from app.conversation_maintenance_worker import (
     ConversationMaintenanceWorker,
     should_run_daily_catchup,
 )
-from app.context_menu import PetContextMenu, build_pet_context_menu
+from app.context_menu import (
+    PetContextMenu,
+    build_context_menu_actions,
+    build_pet_context_menu,
+)
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
 from app.message_splitter import split_knowledge_bubble_text
@@ -1265,9 +1269,7 @@ class DesktopPetWindow(QWidget):
         self._record_user_interaction("context_menu_open")
         if self._context_menu is not None:
             self._context_menu.close()
-        menu = build_pet_context_menu(
-            self,
-            character_name=self.config_service.get_str("app.character_name", "小桃"),
+        actions = build_context_menu_actions(
             test_action_handler=self._handle_test_action,
             on_test_move_left=self._test_move_left,
             on_test_move_right=self._test_move_right,
@@ -1308,6 +1310,11 @@ class DesktopPetWindow(QWidget):
             on_clear_completed_reminders=self._clear_completed_reminders,
             on_clipboard_assistant=self._handle_clipboard_assistant,
             on_screenshot_analysis=self._handle_screenshot_analysis,
+        )
+        menu = build_pet_context_menu(
+            self,
+            character_name=self.config_service.get_str("app.character_name", "小桃"),
+            actions=actions,
         )
         self._context_menu = menu
         menu.interacted.connect(

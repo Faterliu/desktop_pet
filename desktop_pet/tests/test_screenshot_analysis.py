@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import inspect
 import sys
 import types
 import unittest
@@ -24,7 +23,7 @@ from PySide6.QtGui import QColor, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from app.chat_input import ChatInput  # noqa: E402
-from app.context_menu import build_context_menu  # noqa: E402
+from app.context_menu import build_context_menu_actions, build_pet_context_menu  # noqa: E402
 from app.desktop_pet_window import DesktopPetWindow  # noqa: E402
 from app.screenshot_analysis_worker import (  # noqa: E402
     SCREENSHOT_ANALYSIS_PROMPT,
@@ -295,45 +294,58 @@ class ChatInputScreenshotTests(unittest.TestCase):
         """验证两个截图动作向窗口回传正确模式。"""
         parent = QWidget()
         modes: list[str] = []
-        kwargs = {}
-        bool_names = {
-            "do_not_disturb",
-            "auto_move",
-            "api_chat_enabled",
-            "show_chat_api_menu",
-            "formal_qa_mode",
-            "always_on_top",
-            "show_test_menu",
-            "show_clear_menu",
-            "show_reload_config",
-        }
-        for name in inspect.signature(build_context_menu).parameters:
-            if name == "parent":
-                continue
-            if name == "current_scale":
-                kwargs[name] = 1.0
-            elif name in bool_names:
-                kwargs[name] = False
-            elif name == "api_provider":
-                kwargs[name] = "openai"
-            elif name == "formal_answer_display":
-                kwargs[name] = "new_panel"
-            elif name == "on_screenshot_analysis":
-                kwargs[name] = modes.append
-            else:
-                kwargs[name] = lambda *args, **values: None
-
-        menu = build_context_menu(parent, **kwargs)
-        self.assertNotIn("聊天接入 API", [action.text() for action in menu.actions()])
-        screenshot_action = next(action for action in menu.actions() if action.text() == "截图")
-        screenshot_menu = screenshot_action.menu()
+        actions = build_context_menu_actions(
+            test_action_handler=lambda action: None,
+            on_test_move_left=lambda: None,
+            on_test_move_right=lambda: None,
+            on_test_jump=lambda: None,
+            on_test_proactive_speak=lambda: None,
+            on_test_idle_prompt=lambda: None,
+            on_test_api_proactive_speak=lambda: None,
+            on_test_knowledge_speak=lambda: None,
+            on_test_poetry=lambda: None,
+            on_request_exit=lambda: None,
+            current_scale=1.0,
+            do_not_disturb=False,
+            auto_move=False,
+            api_chat_enabled=False,
+            show_chat_api_menu=False,
+            api_provider="openai",
+            formal_qa_mode=False,
+            formal_answer_display="new_panel",
+            always_on_top=False,
+            show_test_menu=False,
+            show_clear_menu=False,
+            show_reload_config=False,
+            on_set_scale=lambda scale: None,
+            on_custom_scale=lambda: None,
+            on_toggle_dnd=lambda enabled: None,
+            on_toggle_auto_move=lambda enabled: None,
+            on_toggle_api_chat=lambda enabled: None,
+            on_set_api_provider=lambda provider: None,
+            on_toggle_formal_qa_mode=lambda enabled: None,
+            on_set_formal_answer_display=lambda mode: None,
+            on_toggle_always_on_top=lambda enabled: None,
+            on_reload_config=lambda: None,
+            on_clear_informal_chat=lambda: None,
+            on_clear_formal_chat=lambda: None,
+            on_add_ten_minute_reminder=lambda: None,
+            on_add_custom_minute_reminder=lambda: None,
+            on_view_current_reminders=lambda: None,
+            on_clear_completed_reminders=lambda: None,
+            on_clipboard_assistant=lambda mode: None,
+            on_screenshot_analysis=modes.append,
+        )
+        self.assertNotIn("聊天接入 API", [action.title for action in actions])
+        card = build_pet_context_menu(parent, character_name="小桃", actions=actions)
+        screenshot_menu = card.submenu_for("截图")
         self.assertIsNotNone(screenshot_menu)
         actions = {action.text(): action for action in screenshot_menu.actions()}
         actions["全屏快速解析"].trigger()
         actions["框选截图并提问"].trigger()
 
         self.assertEqual(modes, ["full", "region_question"])
-        menu.close()
+        card.close()
         parent.close()
 
 

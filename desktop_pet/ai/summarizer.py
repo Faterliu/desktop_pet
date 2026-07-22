@@ -18,9 +18,6 @@ from utils.time_utils import utc_iso
 logger = get_logger(__name__)
 
 DEFAULT_SUMMARY = {
-    "summary": "",
-    "highlights": [],
-    "last_updated": "",
     "summaries": [],
 }
 
@@ -103,9 +100,6 @@ class Summarizer:
                 "trigger_source": str(trigger_source or "round_threshold"),
             }
             current_summary["summaries"].append(entry)
-            current_summary["summary"] = entry["summary"]
-            current_summary["highlights"] = entry["highlights"]
-            current_summary["last_updated"] = created_at
             save_json(self.summary_path, current_summary)
             return SummaryResult(
                 mode=str(getattr(self.chat_store, "mode", "unknown")),
@@ -170,13 +164,7 @@ class Summarizer:
                     }
                 )
                 changed = True
-        latest = entries[-1] if entries else {}
-        normalized = {
-            "summary": str(latest.get("summary", "")),
-            "highlights": list(latest.get("highlights", [])),
-            "last_updated": str(source.get("last_updated", latest.get("created_at", ""))),
-            "summaries": entries,
-        }
+        normalized = {"summaries": entries}
         return normalized, changed or source != normalized
 
     # 读取配置片段，缺失时返回安全默认配置。

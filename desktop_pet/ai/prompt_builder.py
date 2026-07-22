@@ -251,7 +251,7 @@ class PromptBuilder:
             return ""
         entries = summary.get("summaries", [])
         if not isinstance(entries, list):
-            return str(summary.get("summary", "")).strip()
+            return ""
         lines: list[str] = []
         for item in reversed(entries):
             if not isinstance(item, dict):

@@ -58,11 +58,7 @@ class ContextBudgetControlsTests(unittest.TestCase):
         self.summary_path = self.temp_dir / "conversation_summary_informal.json"
         save_json(
             self.summary_path,
-            {
-                "summary": "",
-                "highlights": [],
-                "last_updated": "",
-            },
+            {"summaries": []},
         )
 
     # 验证上下文 manager limits 消息 count and 消息 chars场景下的预期结果。
@@ -124,7 +120,7 @@ class ContextBudgetControlsTests(unittest.TestCase):
         formal_summary_path = self.temp_dir / "conversation_summary_formal.json"
         informal_summary_path = self.temp_dir / "conversation_summary_informal.json"
         for summary_path in (formal_summary_path, informal_summary_path):
-            save_json(summary_path, {"summary": "", "highlights": [], "last_updated": ""})
+            save_json(summary_path, {"summaries": []})
 
         path = self.temp_dir / "chat_history_summary_modes.jsonl"
         formal_store = ChatStore(path, "formal")
@@ -155,8 +151,8 @@ class ContextBudgetControlsTests(unittest.TestCase):
         self.assertNotIn("今天有点累。", formal_prompt)
         self.assertIn("今天有点累。", informal_prompt)
         self.assertNotIn("如何部署这个项目？", informal_prompt)
-        self.assertEqual(load_json(formal_summary_path, {})["summary"], "summary")
-        self.assertEqual(load_json(informal_summary_path, {})["summary"], "summary")
+        self.assertNotIn("summary", load_json(formal_summary_path, {}))
+        self.assertNotIn("summary", load_json(informal_summary_path, {}))
         self.assertEqual(len(load_json(informal_summary_path, {})["summaries"]), 1)
 
     # 验证摘要 输入 respects 预算场景下的预期结果。
@@ -212,8 +208,45 @@ class ContextBudgetControlsTests(unittest.TestCase):
 
         self.assertIsNotNone(result)
         self.assertNotIn("covered_message_count", payload)
+        self.assertNotIn("summary", payload)
+        self.assertNotIn("highlights", payload)
+        self.assertNotIn("last_updated", payload)
         self.assertEqual([item["summary"] for item in payload["summaries"]], ["旧摘要", "summary"])
         self.assertEqual(payload["summaries"][-1]["trigger_source"], "daily")
+
+    # 验证带有旧顶层镜像字段的归档会在读取时收敛为唯一摘要结构。
+    def test_summary_archive_removes_redundant_legacy_top_level_fields(self) -> None:
+        """验证带有旧顶层镜像字段的归档会在读取时收敛为唯一摘要结构。"""
+        save_json(
+            self.summary_path,
+            {
+                "summary": "过期镜像摘要",
+                "highlights": ["过期高光"],
+                "covered_message_count": 3,
+                "last_updated": "2026-01-01T00:00:00+00:00",
+                "summaries": [
+                    {
+                        "sequence": 1,
+                        "summary": "归档摘要",
+                        "highlights": ["归档高光"],
+                        "created_at": "2026-01-02T00:00:00+00:00",
+                        "trigger_source": "round_threshold",
+                    }
+                ],
+            },
+        )
+        summarizer = Summarizer(
+            self.summary_path,
+            ChatStore(self.temp_dir / "archive_history.jsonl"),
+            BudgetRecordingClient(),  # type: ignore[arg-type]
+            config_path=self.config_path,
+        )
+
+        archive = summarizer.load_summary()
+
+        self.assertEqual(set(archive), {"summaries"})
+        self.assertEqual(archive["summaries"][0]["summary"], "归档摘要")
+        self.assertEqual(load_json(self.summary_path, {}), archive)
 
     # 验证提示词只组合当前模式摘要归档中的内容。
     def test_prompt_summary_archive_uses_latest_entries(self) -> None:
@@ -228,6 +261,10 @@ class ContextBudgetControlsTests(unittest.TestCase):
         )
 
         self.assertEqual(text, "最新摘要\n较早摘要")
+        self.assertEqual(
+            PromptBuilder._format_summary_archive({"summary": "不应再读取的旧摘要"}),
+            "",
+        )
 
 
 if __name__ == "__main__":
