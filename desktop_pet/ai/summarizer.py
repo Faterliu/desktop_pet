@@ -73,7 +73,7 @@ class Summarizer:
         with self._summary_lock:
             history = self.chat_store.all_messages()
             if not self._has_summarizable_history(history):
-                logger.info("Skip summary because chat history has no user content")
+                logger.debug("Skip summary because chat history has no user content")
                 return None
 
             current_summary, migrated = self._normalize_archive(

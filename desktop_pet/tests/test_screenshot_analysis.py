@@ -361,6 +361,35 @@ class ResultDisplayRoutingTests(unittest.TestCase):
         self.assertEqual(settled, [True])
 
 
+class IdlePromptMenuTests(unittest.TestCase):
+    """验证右键菜单内的空闲问候测试不会被菜单招呼阻断。"""
+
+    # 菜单招呼气泡应在测试前关闭，使测试能进入真实的空闲问候选择逻辑。
+    def test_idle_prompt_test_hides_context_menu_bubble(self) -> None:
+        """验证仅菜单招呼气泡会为测试动作让路。"""
+        hidden: list[bool] = []
+        triggered: list[bool] = []
+        displayed: list[tuple] = []
+        fake = types.SimpleNamespace(
+            bubble=types.SimpleNamespace(
+                isVisible=lambda: True,
+                source="context_menu",
+                hide=lambda: hidden.append(True),
+            ),
+            _chat_in_progress=lambda: False,
+            behavior_controller=types.SimpleNamespace(
+                trigger_test_idle_prompt=lambda: triggered.append(True) or "普通问候"
+            ),
+            _display_message=lambda *args: displayed.append(args),
+        )
+
+        DesktopPetWindow._test_idle_prompt_once(fake)
+
+        self.assertEqual(hidden, [True])
+        self.assertEqual(triggered, [True])
+        self.assertEqual(displayed, [])
+
+
 class ChatInputScreenshotTests(unittest.TestCase):
     """验证截图问题复用输入框时不改变普通聊天提交语义。"""
 

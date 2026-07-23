@@ -1333,7 +1333,7 @@ class DesktopPetWindow(QWidget):
         )
         line = self.behavior_controller.pick_context_menu_line()
         if line:
-            self._display_message(line, 4500, "system")
+            self._display_message(line, 4500, "context_menu")
 
     # 响应菜单中的测试动作切换请求。
     def _handle_test_action(self, action_name: str) -> None:
@@ -1388,6 +1388,9 @@ class DesktopPetWindow(QWidget):
         if self._chat_in_progress():
             self._display_message("麻烦等我一下下。", 3200, "system")
             return
+        # 菜单打开时产生的招呼气泡不应阻断其内部的测试动作。
+        if self.bubble.isVisible() and self.bubble.source == "context_menu":
+            self.bubble.hide()
         result = self.behavior_controller.trigger_test_idle_prompt()
         if result.startswith("未触发"):
             self._display_message(result, 3500, "system")
@@ -1621,12 +1624,6 @@ class DesktopPetWindow(QWidget):
         truncated = len(clipboard_text) > max_chars
         if truncated:
             clipboard_text = clipboard_text[:max_chars]
-        logger.info(
-            "Clipboard assistant requested: mode=%s chars=%s truncated=%s",
-            mode,
-            len(clipboard_text),
-            truncated,
-        )
 
         if not self._api_chat_enabled():
             self._display_message("聊天 API 当前已关闭，暂时不能处理剪贴板内容。", 3600, "system")

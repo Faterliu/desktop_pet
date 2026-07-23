@@ -88,6 +88,38 @@ class LoggingPrivacyTests(unittest.TestCase):
         self.assertTrue((log_dir / "app.log").exists())
         self.assertTrue((log_dir / "app.log.1").exists())
 
+    # 验证可选依赖提示与成功 Embedding 请求不会污染运行日志。
+    def test_runtime_noise_is_not_written_but_test_logs_are_preserved(self) -> None:
+        """验证精确过滤不影响其他模块的普通日志。"""
+        logger_module = self.logger_module
+        logger_module._CONFIGURED = False
+        logger_module.PROJECT_ROOT = self.temp_dir
+        logger_module.configure_logging()
+
+        logging.getLogger("posthog").warning(
+            "[PostHog] Multiple active PostHog clients detected for the same project API key and host."
+        )
+        logging.getLogger("mem0.utils.spacy_models").warning(
+            "Failed to load spaCy lemma model: spaCy is not installed."
+        )
+        logging.getLogger("mem0.vector_stores.qdrant").warning(
+            "fastembed not installed — BM25 keyword search disabled."
+        )
+        logging.getLogger("httpx").info(
+            'HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "HTTP/1.1 200 OK"'
+        )
+        logging.getLogger("test.logging").info("test log is retained")
+
+        for handler in self.root_logger.handlers:
+            handler.flush()
+        content = (self.temp_dir / "data" / "app.log").read_text(encoding="utf-8")
+
+        self.assertNotIn("Multiple active PostHog clients", content)
+        self.assertNotIn("Failed to load spaCy", content)
+        self.assertNotIn("fastembed not installed", content)
+        self.assertNotIn("dashscope.aliyuncs.com", content)
+        self.assertIn("test log is retained", content)
+
     # 验证API 密钥 is masked场景下的预期结果。
     def test_api_key_is_masked(self) -> None:
         """验证API 密钥 is masked场景下的预期结果。"""
