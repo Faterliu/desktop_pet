@@ -166,7 +166,7 @@ class BehaviorControllerTests(unittest.TestCase):
             spoken: list[tuple[str, int, str]] = []
             controller.speak_requested.connect(lambda *args: spoken.append(args))
 
-            with patch("character.behavior_controller.random.choice", side_effect=lambda items: items[0]):
+            with patch("character.behavior_controller.choose_random_item", side_effect=lambda items: items[0]):
                 controller._maybe_idle_prompt()
 
             self.assertTrue(spoken)
@@ -388,6 +388,22 @@ class BehaviorControllerTests(unittest.TestCase):
 
             self.assertEqual(controller.pick_context_menu_line(), "有什么可以帮你的吗？")
 
+    # 验证到期提醒前缀只从专用本地台词组读取。
+    def test_reminder_prefix_uses_dedicated_local_group(self) -> None:
+        """验证提醒前缀不会误用主动问候或菜单台词。"""
+        with tempfile.TemporaryDirectory() as temp:
+            controller = self._controller(
+                Path(temp),
+                {},
+                local_lines={
+                    "idle": ["空闲问候"],
+                    "reminder_prefix": ["小桃来提醒你啦"],
+                    "first_start": {"enable": False, "data": []},
+                },
+            )
+
+            self.assertEqual(controller.pick_reminder_prefix_line(), "小桃来提醒你啦")
+
     # 验证主动问候未被窗口实际展示时不会更新展示时间。
     def test_blocked_proactive_request_does_not_record_shown_time(self) -> None:
         """验证主动问候未被窗口实际展示时不会更新展示时间。"""
@@ -465,7 +481,7 @@ class BehaviorControllerTests(unittest.TestCase):
 
             with (
                 patch("character.behavior_controller.now_local", return_value=fixed_now),
-                patch("character.behavior_controller.random.choice", side_effect=choose_night_line),
+                patch("character.behavior_controller.choose_random_item", side_effect=choose_night_line),
                 patch.object(controller, "_try_scenario_greeting") as scenario_greeting,
                 patch.object(controller, "_has_memory_content") as memory_content,
             ):
@@ -531,7 +547,7 @@ class BehaviorControllerTests(unittest.TestCase):
 
             with (
                 patch("character.behavior_controller.now_local", return_value=morning),
-                patch("character.behavior_controller.random.choice", side_effect=choose_morning_line),
+                patch("character.behavior_controller.choose_random_item", side_effect=choose_morning_line),
                 patch.object(controller, "_try_scenario_greeting", return_value=False),
             ):
                 controller._maybe_idle_prompt()

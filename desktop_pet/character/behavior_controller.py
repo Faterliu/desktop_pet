@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from random import choice as choose_random_item
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -393,7 +394,7 @@ class BehaviorController(QObject):
             time_key = self._time_greeting_key()
             if time_key:
                 line_types.append(time_key)
-        line_type = random.choice(line_types)
+        line_type = choose_random_item(line_types)
         line = self._random_line(line_type)
         if not line:
             return
@@ -576,7 +577,7 @@ class BehaviorController(QObject):
         time_key = self._time_greeting_key()
         if time_key:
             line_types.append(time_key)
-        line_type = random.choice(line_types)
+        line_type = choose_random_item(line_types)
         line = self._random_line(line_type)
         if not line:
             return False
@@ -629,7 +630,7 @@ class BehaviorController(QObject):
     # 从回复台词组中随机选择一条可展示文本。
     def pick_reply_line(self) -> str:
         """从回复台词组中随机选择一条可展示文本。"""
-        group = random.choice(["break_reminder", "comfort", "encourage", "happy"])
+        group = choose_random_item(["break_reminder", "comfort", "encourage", "happy"])
         return self._random_line(group)
 
     # 从主动反馈台词组中随机选择一条可展示文本。
@@ -666,6 +667,11 @@ class BehaviorController(QObject):
     def pick_context_menu_line(self) -> str:
         """从右键菜单打开台词组中随机选择一条可展示文本。"""
         return self._random_line("context_menu")
+
+    # 从提醒到期前缀台词组中随机选择一条可展示文本。
+    def pick_reminder_prefix_line(self) -> str:
+        """从提醒到期前缀台词组中随机选择一条可展示文本。"""
+        return self._random_line("reminder_prefix")
 
     # 从知识问候确认台词组中随机选择一条可展示文本。
     def pick_reply_ack_line(self) -> str:

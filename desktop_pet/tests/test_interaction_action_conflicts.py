@@ -269,6 +269,9 @@ class InteractionActionConflictTests(unittest.TestCase):
                     "title": "休息一下",
                 }
             ),
+            behavior_controller=types.SimpleNamespace(
+                pick_reminder_prefix_line=lambda: "小桃来提醒你啦"
+            ),
             reply_bubble=types.SimpleNamespace(hide=lambda: None),
             sprite_player=FakeSpritePlayer(),
             move_animation=None,
@@ -294,7 +297,7 @@ class InteractionActionConflictTests(unittest.TestCase):
         DesktopPetWindow._show_next_reminder_reply(fake)
 
         self.assertEqual(fake._active_reminder_reply_id, "r-1")
-        self.assertEqual(displayed, [("提醒你一下：休息一下", 8000, "reminder")])
+        self.assertEqual(displayed, [("小桃来提醒你啦：休息一下", 8000, "reminder")])
 
     def test_sprite_timer_cannot_apply_an_old_action_fallback_after_replacement(self) -> None:
         """精灵定时器只推进当前动作，旧挥手不会在之后把 review 切回 idle。"""

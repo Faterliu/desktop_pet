@@ -103,6 +103,7 @@ LOCAL_LINE_REFRESH_LABELS = {
     "sad": "低落反馈",
     "waiting": "输入等待提醒",
     "context_menu": "右键菜单招呼",
+    "reminder_prefix": "提醒前缀",
     "feedback": "主动问候反馈",
     "scenario_greeting_templates": "场景问候模板",
     "low_interrupt": "低打扰问候",
@@ -147,6 +148,7 @@ LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE = {
         "ignored",
         "waiting",
         "context_menu",
+        "reminder_prefix",
         "feedback",
         "reply",
     ),
@@ -1900,7 +1902,8 @@ class DesktopPetWindow(QWidget):
                 force_single_cycle=True,
                 owner="reminder",
             )
-            reminder_text = f"提醒你一下：{title}"
+            reminder_prefix = self.behavior_controller.pick_reminder_prefix_line() or "提醒你一下"
+            reminder_text = f"{reminder_prefix}：{title}"
             self._display_message(reminder_text, 8000, "reminder")
             always_on_top = self.config_service.get_bool("ui.always_on_top", True)
             self.reminder_ack_bubble.set_always_on_top(always_on_top)
