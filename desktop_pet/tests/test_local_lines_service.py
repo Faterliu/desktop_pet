@@ -308,7 +308,7 @@ class LocalLinesServiceTests(unittest.TestCase):
     # 验证refresh 工作线程 updates multiple enabled groups场景下的预期结果。
     def test_refresh_worker_updates_multiple_enabled_groups(self) -> None:
         """验证refresh 工作线程 updates multiple enabled groups场景下的预期结果。"""
-        save_json(self.lines_path, {"idle": ["旧空闲"], "reply": ["旧回应"]})
+        save_json(self.lines_path, {"idle": ["旧空闲"], "feedback": ["旧反馈"]})
         service = LocalLinesService(self.lines_path, self.meta_path)
         client = FakeLlmClient(reply="新话术一\n新话术二")
         worker = LocalLinesRefreshWorker(
@@ -324,8 +324,8 @@ class LocalLinesServiceTests(unittest.TestCase):
                     "max_items": 5,
                 },
                 {
-                    "group": "reply",
-                    "label": "知识问候回应气泡",
+                    "group": "feedback",
+                    "label": "主动问候反馈",
                     "interval_days": 14,
                     "monthly_refresh": False,
                     "max_chars": 20,
@@ -341,7 +341,7 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertEqual(client.calls, 2)
         payload = load_json(self.lines_path, {})
         self.assertEqual(payload["idle"], ["旧空闲", "新话术一", "新话术二"])
-        self.assertEqual(payload["reply"], ["旧回应", "新话术一", "新话术二"])
+        self.assertEqual(payload["feedback"], ["旧反馈", "新话术一", "新话术二"])
 
     # 验证refresh 工作线程 skips when API is not configured场景下的预期结果。
     def test_refresh_worker_skips_when_api_is_not_configured(self) -> None:
@@ -396,15 +396,39 @@ class LocalLinesServiceTests(unittest.TestCase):
             ["startup", "return_after_idle", "farewell"],
         )
 
-    # 验证旧版按具体分组的更新配置同样不会改写首次启动问候。
-    def test_refresh_targets_exclude_first_start_from_legacy_groups(self) -> None:
-        """验证旧版按具体分组的更新配置同样不会改写首次启动问候。"""
+    # 验证用户确认选项不会进入按问候类型生成的自动更新目标。
+    def test_refresh_targets_exclude_reply_from_interaction_type(self) -> None:
+        """验证 reply 只保留本地确认选项用途，不交给模型更新。"""
+        window = SimpleNamespace(
+            app_config={
+                "local_lines_refresh": {
+                    "greeting_types": {
+                        "time": {"enabled": False},
+                        "arrival": {"enabled": False},
+                        "care": {"enabled": False},
+                        "scenario": {"enabled": False},
+                        "interaction": {"enabled": True},
+                    },
+                }
+            }
+        )
+
+        targets = DesktopPetWindow._local_lines_refresh_targets(window)
+
+        groups = [target["group"] for target in targets]
+        self.assertNotIn("reply", groups)
+        self.assertIn("feedback", groups)
+
+    # 验证旧版按具体分组的更新配置同样不会改写固定或用户确认话术。
+    def test_refresh_targets_exclude_fixed_groups_from_legacy_groups(self) -> None:
+        """验证旧版配置不能重新启用首次启动问候或 reply 自动更新。"""
         window = SimpleNamespace(
             app_config={
                 "local_lines_refresh": {
                     "greeting_types": None,
                     "groups": {
                         "first_start": {"enabled": True},
+                        "reply": {"enabled": True},
                         "startup": {"enabled": True},
                     },
                 }

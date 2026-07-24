@@ -101,7 +101,7 @@
     "max_chars": 80,
     "greeting_types": {
       "time": {
-        "enabled": true
+        "enabled": false
       },
       "arrival": {
         "enabled": true

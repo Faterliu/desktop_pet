@@ -154,8 +154,8 @@ LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE = {
     ),
 }
 
-# 这些本地台词仅供固定功能使用，禁止被自动刷新任务改写。
-LOCAL_LINE_REFRESH_EXCLUDED_GROUPS = {"first_start", "poetry"}
+# 这些本地台词仅供固定功能或用户确认使用，禁止被自动刷新任务改写。
+LOCAL_LINE_REFRESH_EXCLUDED_GROUPS = {"first_start", "poetry", "reply"}
 
 CLIPBOARD_ASSISTANT_INSTRUCTIONS = {
     "summarize": "总结下面文本的重点，使用清晰的要点，不补充原文没有的信息。",
@@ -826,6 +826,7 @@ class LocalLinesRefreshWorker(QObject):
                     f"为本地话术分组“{label}”（配置键：{group}）生成 {max_items} 条中文短句。"
                     f"每条不超过 {max_chars} 个汉字或字符。"
                     "语气轻松温柔，不要说“根据记忆”“你之前说过”“数据库”“Mem0”“memory.json”。"
+                    "不要宠物自称，指代桌宠时，用‘我’，不要用‘它’。"
                     "贴合该分组用途，每行一条。"
                 ),
             },

@@ -16,8 +16,11 @@ desktop_pet\start_main.vbs
 ```
 `start_main.vbs` 会读取 `runtime_python.txt`、尽力执行一次 `git pull --ff-only` 更新当前分支，然后在后台启动 `main.py`。启动失败时会把原因写入 `desktop_pet/data/start_main_error.log`，并弹出错误查看窗口。
 
-程序配置以 `desktop_pet/config/app_config.example.json` 为示例模板；如需保存本机配置，将其复制为同目录的 `app_config.json` 后修改。未创建 `app_config.json` 时，程序会直接使用示例配置。常用配置分组如下：
-
+程序配置以 `desktop_pet/config/app_config.example.json` 为示例模板；
+项目功能基本依赖于语言模型，
+api.deepseek.api_key与api.openai.api_key下需填入对应的api key才可使用功能。
+api.openai.base_url可填入中转站网址。
+如需保存本机配置，将其复制为同目录的 `app_config.json` 后修改。未创建 `app_config.json` 时，程序会直接使用示例配置。常用配置分组如下：
 - `api`：聊天服务提供商、模型、API Key、超时和上下文长度限制；密钥仅填写在本机 `app_config.json`，不要提交。
 - `ui`：人物缩放、置顶、右键菜单项和气泡展示时长。
 - `behavior`：启动/主动问候、主动问候间隔、场景问候和每日限额。
@@ -235,3 +238,6 @@ desktop_pet\start_main.vbs
 1. 修复空闲问候测试bug。
 2. 降级部分日志等级。
 3. 增加提醒的本地话术。
+
+[v2.1.0] - 20260724
+1. 调整本地话术更新。
