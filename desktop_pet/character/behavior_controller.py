@@ -31,7 +31,6 @@ class BehaviorController(QObject):
         app_config_path: str | Path,
         local_lines_path: str | Path,
         config_loader: Callable[[], dict[str, Any]],
-        memory_checker: Callable[[], bool | None] | None = None,
         config_saver: Callable[[], None] | None = None,
         character_path: str | Path | None = None,
         runtime_state_path: str | Path | None = None,
@@ -43,7 +42,6 @@ class BehaviorController(QObject):
         self.local_lines_path = Path(local_lines_path)
         self.local_lines_service = LocalLinesService(self.local_lines_path)
         self.config_loader = config_loader
-        self.memory_checker = memory_checker
         self.config_saver = config_saver
         self.memory_path = self.app_config_path.parent.parent / "data" / "memory.json"
         self.character_path = (
@@ -329,17 +327,6 @@ class BehaviorController(QObject):
     # 判断记忆content是否满足条件并返回布尔结果。
     def _has_memory_content(self) -> bool | None:
         """判断记忆content是否满足条件并返回布尔结果。"""
-        memory_config = self.config_loader().get("memory", {})
-        if memory_config.get("use_mem0_for_knowledge_speak", False) and self.memory_checker:
-            try:
-                memory_check_result = self.memory_checker()
-                if memory_check_result is None:
-                    return None
-                if memory_check_result:
-                    return True
-            except Exception:
-                pass
-
         memory = load_json(self.memory_path, {})
         user_profile = memory.get("user_profile", {})
         work_study = memory.get("work_study", {})

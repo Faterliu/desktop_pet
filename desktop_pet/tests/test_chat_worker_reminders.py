@@ -19,6 +19,8 @@ sys.modules.setdefault("utils.logger", logger_module)
 from ai.llm_client import ReminderToolCall, ToolChatResponse  # noqa: E402
 from app.desktop_pet_window import ChatWorker, ChatWorkerResult  # noqa: E402
 from app.reminder_tool import ReminderTool  # noqa: E402
+from character.emotion_state import EmotionState  # noqa: E402
+from character.persona_state import PersonaState  # noqa: E402
 from storage.reminder_store import ReminderStore  # noqa: E402
 
 
@@ -35,12 +37,14 @@ class FakePromptBuilder:
     def __init__(self) -> None:
         """记录提醒提示，并返回可供客户端检查的最小消息列表。"""
         self.reminder_guidance = None
+        self.runtime_persona_state = None
 
     # 构建最小消息列表。
     def build_messages(self, user_message: str, recent_messages: list[dict], **kwargs) -> list[dict]:
         """构建最小消息列表。"""
         _ = recent_messages
         self.reminder_guidance = kwargs.get("reminder_tool_guidance")
+        self.runtime_persona_state = kwargs.get("runtime_persona_state")
         return [{"role": "user", "content": user_message}]
 
 
@@ -127,12 +131,15 @@ class ChatWorkerReminderTests(unittest.TestCase):
     def test_worker_does_not_create_reminder_for_plain_reply(self) -> None:
         """验证未返回提醒调用时不会写入提醒存储。"""
         client = FakeClient(ToolChatResponse("普通回答", [], "native"))
+        prompt_builder = FakePromptBuilder()
+        persona_state = PersonaState(EmotionState.THINKING, "normal", 0.54, "task")
         worker = ChatWorker(
             "今天天气怎么样",
             client,  # type: ignore[arg-type]
-            FakePromptBuilder(),  # type: ignore[arg-type]
+            prompt_builder,  # type: ignore[arg-type]
             FakeContextManager(),  # type: ignore[arg-type]
             formal_qa_mode=False,
+            runtime_persona_state=persona_state,
             reminder_tool=self.tool,
         )
         replies: list[ChatWorkerResult] = []
@@ -142,6 +149,7 @@ class ChatWorkerReminderTests(unittest.TestCase):
 
         self.assertEqual(self.store.list_reminders("active"), [])
         self.assertEqual(replies, [ChatWorkerResult("普通回答")])
+        self.assertIs(prompt_builder.runtime_persona_state, persona_state)
 
     # 验证工具校验失败时不会展示模型的错误成功确认。
     def test_worker_uses_local_failure_reply_when_tool_rejects_call(self) -> None:

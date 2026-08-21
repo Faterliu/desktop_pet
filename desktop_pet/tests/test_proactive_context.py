@@ -35,7 +35,7 @@ class ProactiveContextTests(unittest.TestCase):
         """验证build 上下文 uses 任务 and relationship 记忆 without full dump场景下的预期结果。"""
         memory = {
             "work_study": {
-                "current_projects": _records("projects", "桌宠记忆系统", "Mem0 接入", "很久以前的旧任务"),
+                "current_projects": _records("projects", "桌宠记忆系统", "桌面提醒接入", "很久以前的旧任务"),
                 "current_learning_topics": _records("topics", "Prompt 分区"),
             },
             "relationship_memory": {
@@ -76,7 +76,7 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertEqual(context["time_period"], "afternoon")
         self.assertCountEqual(
             context["recent_task_focus"],
-            ["桌宠记忆系统", "Mem0 接入", "很久以前的旧任务", "Prompt 分区"],
+            ["桌宠记忆系统", "桌面提醒接入", "很久以前的旧任务", "Prompt 分区"],
         )
         self.assertEqual(
             context["communication_style"]["preferred_response_style"],
@@ -229,7 +229,7 @@ class ProactiveContextTests(unittest.TestCase):
         self.assertIn("只输出一句中文", prompt)
         self.assertIn("不要超过 60 个中文字符", prompt)
         self.assertIn("不要说“根据记忆”", prompt)
-        self.assertIn("不要暴露 memory.json、Mem0、数据库、配置等技术细节", prompt)
+        self.assertIn("不要暴露 memory.json、数据库、配置等技术细节", prompt)
         self.assertIn("不要频繁引用长期记忆", prompt)
         self.assertIn("不制造依赖", prompt)
         self.assertIn("桌宠记忆系统", prompt)

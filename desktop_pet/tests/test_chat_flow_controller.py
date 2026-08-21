@@ -9,6 +9,8 @@ DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
 
 from app.chat_flow_controller import ChatFlowController  # noqa: E402
+from character.emotion_state import EmotionState  # noqa: E402
+from character.persona_state import PersonaState  # noqa: E402
 
 
 class FakeStore:
@@ -47,7 +49,7 @@ class ChatFlowControllerTests(unittest.TestCase):
             formal_qa_enabled=lambda: formal,
             api_chat_enabled=lambda: api_enabled,
             api_configured=lambda: api_configured,
-            local_reply_provider=lambda message, formal_mode: (
+            local_reply_provider=lambda message, formal_mode, _state: (
                 f"formal:{message}" if formal_mode else f"local:{message}"
             ),
         )
@@ -121,21 +123,41 @@ class ChatFlowControllerTests(unittest.TestCase):
     def test_worker_kwargs_use_pending_formal_snapshot(self) -> None:
         """验证工作线程 kwargs use pending 正式问答 snapshot场景下的预期结果。"""
         controller, _formal_store, _informal_store = self.make_controller(formal=True)
-        controller.begin_user_message("正式问题")
+        persona_state = PersonaState(EmotionState.THINKING, "high", 0.56, "formal")
+        context = controller.begin_user_message("正式问题", persona_state)
 
         kwargs = controller.chat_worker_kwargs(
             "正式问题",
             client="client",
             prompt_builder="prompt",
             context_manager="context",
-            mem0_memory_service="mem0",
-            user_id="user",
-            app_config={"api": {}},
         )
 
         self.assertTrue(kwargs["formal_qa_mode"])
         self.assertEqual(kwargs["user_message"], "正式问题")
-        self.assertEqual(kwargs["user_id"], "user")
+        self.assertIs(context.runtime_persona_state, persona_state)
+        self.assertIs(kwargs["runtime_persona_state"], persona_state)
+
+    # 验证本地回复提供器接收当前消息对应的状态快照。
+    def test_local_reply_provider_receives_persona_state_snapshot(self) -> None:
+        """本地分支必须使用与 API 分支相同的动态状态快照。"""
+        received: list[PersonaState] = []
+        formal_store = FakeStore()
+        informal_store = FakeStore()
+        controller = ChatFlowController(
+            formal_store,
+            informal_store,
+            formal_qa_enabled=lambda: False,
+            api_chat_enabled=lambda: False,
+            api_configured=lambda: True,
+            local_reply_provider=lambda _message, _formal, state: received.append(state) or "回复",
+        )
+        persona_state = PersonaState(EmotionState.SAD, "low", 0.48, "emotional_support")
+
+        context = controller.begin_user_message("我很焦虑", persona_state)
+        controller.decide_after_thinking(context)
+
+        self.assertEqual(received, [persona_state])
 
     # 验证can start 聊天 rejects registered 聊天 任务场景下的预期结果。
     def test_can_start_chat_rejects_registered_chat_task(self) -> None:

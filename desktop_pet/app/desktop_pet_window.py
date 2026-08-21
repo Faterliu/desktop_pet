@@ -25,7 +25,6 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QWidget
 from ai.context_manager import ContextManager
 from ai.llm_client import LlmClient, LlmError
 from ai.memory_summarizer import MemorySummarizer
-from ai.mem0_memory_service import Mem0MemoryService
 from ai.prompt_builder import PromptBuilder
 from ai.summarizer import Summarizer
 from animation.sprite_player import SpritePlayer
@@ -59,6 +58,9 @@ from app.screenshot_selection_overlay import ScreenshotSelectionOverlay
 from app.speech_bubble import ReplyBubble, SpeechBubble
 from app.window_position_service import WindowPositionService
 from character.behavior_controller import BehaviorController
+from character.conversation_state import ConversationActionPlan, ConversationStateController
+from character.emotion_state import EmotionState
+from character.persona_state import PersonaState
 from character.proactive_context import (
     build_scenario_greeting_messages,
     is_scenario_greeting_acceptable,
@@ -68,7 +70,6 @@ from storage.chat_store import ChatStore
 from storage.json_store import load_json, load_json_prefer_primary, save_json
 from storage.local_lines_service import LocalLinesService
 from storage.memory_store import MemoryStore, memory_descriptions, normalize_memory_schema
-from storage.memory_vector_store import MemoryVectorStore
 from storage.reminder_store import ReminderStore
 from utils.dwm_border import apply_transparent_window_fixes, force_window_topmost, suppress_dwm_border
 from utils.logger import get_logger
@@ -252,9 +253,7 @@ class ChatWorker(QObject):
         prompt_builder: PromptBuilder,
         context_manager: ContextManager,
         formal_qa_mode: bool,
-        mem0_memory_service: Mem0MemoryService | None = None,
-        user_id: str = "default_user",
-        app_config: dict[str, Any] | None = None,
+        runtime_persona_state: PersonaState | None = None,
         reminder_tool: ReminderTool | None = None,
     ) -> None:
         """初始化后台聊天任务，持有本次请求所需依赖。"""
@@ -264,9 +263,7 @@ class ChatWorker(QObject):
         self.prompt_builder = prompt_builder
         self.context_manager = context_manager
         self.formal_qa_mode = formal_qa_mode
-        self.mem0_memory_service = mem0_memory_service
-        self.user_id = user_id
-        self.app_config = app_config or {}
+        self.runtime_persona_state = runtime_persona_state or PersonaState()
         self.reminder_tool = reminder_tool
 
     # 在工作线程中构建消息并请求模型回复。
@@ -280,12 +277,11 @@ class ChatWorker(QObject):
                 and recent_messages[-1].get("content") == self.user_message
             ):
                 recent_messages = recent_messages[:-1]
-            relevant_memories = self._relevant_memories()
             messages = self.prompt_builder.build_messages(
                 self.user_message,
                 recent_messages,
                 formal_qa_mode=self.formal_qa_mode,
-                relevant_memories=relevant_memories,
+                runtime_persona_state=self.runtime_persona_state,
                 reminder_tool_guidance=self._reminder_tool_guidance(),
             )
             result = self._request_chat_reply(messages)
@@ -373,26 +369,6 @@ class ChatWorker(QObject):
             return f"好，我会在 {reminder['due_at'].replace('T', ' ')} 提醒你：{reminder['title']}"
         return f"好，已为你设置 {len(reminders)} 条提醒。"
 
-    # 检索与当前消息相关的长期记忆文本并返回。
-    def _relevant_memories(self) -> str:
-        """检索与当前消息相关的长期记忆文本并返回。"""
-        memory_config = self.app_config.get("memory", {})
-        if (
-            not memory_config.get("enable_mem0", False)
-            or not memory_config.get("inject_mem0_to_prompt", False)
-            or self.mem0_memory_service is None
-        ):
-            return ""
-
-        try:
-            top_k = int(memory_config.get("mem0_search_top_k", 5))
-        except (TypeError, ValueError):
-            top_k = 5
-        return self.mem0_memory_service.format_for_prompt(
-            user_id=self.user_id,
-            query=self.user_message,
-            top_k=top_k,
-        )
 
 
 class UtilityPromptWorker(QObject):
@@ -519,10 +495,6 @@ class KnowledgeSpeakWorker(QObject):
         prompt_builder: PromptBuilder,
         memory: dict[str, Any],
         formal_qa_mode: bool = False,
-        mem0_memory_service: Mem0MemoryService | None = None,
-        user_id: str = "default_user",
-        use_mem0: bool = False,
-        mem0_memory_context: str = "",
     ) -> None:
         """初始化记忆增强的知识问候 API 任务。"""
         super().__init__()
@@ -530,26 +502,20 @@ class KnowledgeSpeakWorker(QObject):
         self.prompt_builder = prompt_builder
         self.memory = memory
         self.formal_qa_mode = formal_qa_mode
-        self.mem0_memory_service = mem0_memory_service
-        self.user_id = user_id
-        self.use_mem0 = use_mem0
-        self.mem0_memory_context = mem0_memory_context
 
     # 根据当前问答模式生成正式知识内容或轻柔陪伴问候。
     def run(self) -> None:
         """根据当前问答模式生成正式知识内容或轻柔陪伴问候。"""
         try:
             memory = normalize_memory_schema(self.memory)
-            mem0_memory_context = self._mem0_memory_context()
             if self.formal_qa_mode:
-                prompt = self._formal_knowledge_prompt(memory, mem0_memory_context)
+                prompt = self._formal_knowledge_prompt(memory)
             else:
-                prompt = self._informal_companion_prompt(memory, mem0_memory_context)
+                prompt = self._informal_companion_prompt(memory)
             messages = self.prompt_builder.build_messages(
                 prompt,
                 [],
                 formal_qa_mode=self.formal_qa_mode,
-                relevant_memories=mem0_memory_context,
             )
             reply = self.client.chat(messages)
             self.finished.emit(reply)
@@ -560,13 +526,13 @@ class KnowledgeSpeakWorker(QObject):
             self.failed.emit(f"知识问候走神了：{exc}")
 
     # 构造正式问答模式下的短知识问候提示词。
-    def _formal_knowledge_prompt(self, memory: dict[str, Any], mem0_context: str) -> str:
+    def _formal_knowledge_prompt(self, memory: dict[str, Any]) -> str:
         """构造正式问答模式下的短知识问候提示词。"""
         prefs = memory_descriptions(memory, "user_profile.preferences")
         topics = memory_descriptions(memory, "work_study.current_learning_topics")
         projects = memory_descriptions(memory, "work_study.current_projects")
         focus = random.choice(prefs) if prefs else "通用学习方法"
-        background = mem0_context or "、".join(topics + projects) or "暂无"
+        background = "、".join(topics + projects) or "暂无"
         return (
             f"当前处于正式问答模式。主题：{focus}。背景：{background}。"
             "请主动提供一段简短、准确、可执行的硬性知识或方法建议。"
@@ -574,7 +540,7 @@ class KnowledgeSpeakWorker(QObject):
         )
 
     # 构造非正式问答模式下的轻柔陪伴提示词。
-    def _informal_companion_prompt(self, memory: dict[str, Any], mem0_context: str) -> str:
+    def _informal_companion_prompt(self, memory: dict[str, Any]) -> str:
         """构造非正式问答模式下的轻柔陪伴提示词。"""
         interests = memory_descriptions(memory, "user_profile.light_interests")
         positive_events = memory_descriptions(
@@ -590,9 +556,8 @@ class KnowledgeSpeakWorker(QObject):
             context = f"备用个人备注：{note}。"
 
         style_hints = self._informal_style_hints(memory)
-        background = f"补充背景：{mem0_context}。" if mem0_context else ""
         return (
-            f"当前处于非正式问答模式。{context}{style_hints}{background}"
+            f"当前处于非正式问答模式。{context}{style_hints}"
             "请只输出一句自然、轻柔、低压力的陪伴话或小建议。"
             "可以轻轻安慰或给出很小的可行步骤，但不要诊断、催促、说教，"
             "不要提及记忆、历史对话、数据库或“你之前说过”，也不要直接复述备注。"
@@ -619,112 +584,6 @@ class KnowledgeSpeakWorker(QObject):
         ]
         return f"表达方式参考：{'；'.join(hints)}。" if hints else ""
 
-    # 处理记忆数据，保持本地记忆和外部索引一致。
-    def _mem0_memory_context(self) -> str:
-        """处理记忆数据，保持本地记忆和外部索引一致。"""
-        if self.mem0_memory_context:
-            return self.mem0_memory_context
-        if not self.use_mem0 or self.mem0_memory_service is None:
-            return ""
-
-        queries = [
-            "用户最近正在做的项目",
-            "用户的学习目标和工作任务",
-            "用户喜欢的陪伴方式",
-            "用户希望被提醒或鼓励的事情",
-            "用户的长期偏好",
-        ]
-        return self.mem0_memory_service.format_for_prompt(
-            user_id=self.user_id,
-            query=random.choice(queries),
-            top_k=3,
-        )
-
-
-class Mem0InitializationWorker(QObject):
-    finished = Signal(object)
-    failed = Signal(str)
-
-    # 初始化当前对象及其依赖。
-    def __init__(
-        self,
-        app_config: dict[str, Any],
-        existing_service: Mem0MemoryService | None = None,
-    ) -> None:
-        """初始化当前对象及其依赖。"""
-        super().__init__()
-        self.app_config = app_config
-        self.existing_service = existing_service
-
-    # 在线程中执行 Mem0InitializationWorker 的后台任务，并通过信号返回结果。
-    def run(self) -> None:
-        """在线程中执行 Mem0InitializationWorker 的后台任务，并通过信号返回结果。"""
-        try:
-            if self.existing_service is not None:
-                self.existing_service.close()
-            self.finished.emit(Mem0MemoryService(self.app_config))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Mem0 initialization worker failed")
-            self.failed.emit(str(exc))
-
-
-class Mem0SearchWorker(QObject):
-    finished = Signal(str)
-    failed = Signal(str)
-
-    # 初始化当前对象及其依赖。
-    def __init__(
-        self,
-        mem0_memory_service: Mem0MemoryService,
-        user_id: str,
-        query: str,
-        top_k: int,
-    ) -> None:
-        """初始化当前对象及其依赖。"""
-        super().__init__()
-        self.mem0_memory_service = mem0_memory_service
-        self.user_id = user_id
-        self.query = query
-        self.top_k = top_k
-
-    # 在线程中执行 Mem0SearchWorker 的后台任务，并通过信号返回结果。
-    def run(self) -> None:
-        """在线程中执行 Mem0SearchWorker 的后台任务，并通过信号返回结果。"""
-        try:
-            context = self.mem0_memory_service.format_for_prompt(
-                user_id=self.user_id,
-                query=self.query,
-                top_k=self.top_k,
-            )
-            self.finished.emit(context)
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Mem0 search worker failed")
-            self.failed.emit(str(exc))
-
-
-class MemorySemanticMergeWorker(QObject):
-    finished = Signal(object)
-    failed = Signal(str)
-
-    # 初始化当前对象及其依赖。
-    def __init__(
-        self,
-        vector_store: MemoryVectorStore,
-        memory_path: Path,
-    ) -> None:
-        """初始化当前对象及其依赖。"""
-        super().__init__()
-        self.vector_store = vector_store
-        self.memory_path = memory_path
-
-    # 在线程中执行 MemorySemanticMergeWorker 的后台任务，并通过信号返回结果。
-    def run(self) -> None:
-        """在线程中执行 MemorySemanticMergeWorker 的后台任务，并通过信号返回结果。"""
-        try:
-            self.finished.emit(self.vector_store.run_due_semantic_merge(self.memory_path))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Semantic memory merge worker failed")
-            self.failed.emit(str(exc))
 
 
 class LocalLinesRefreshWorker(QObject):
@@ -825,7 +684,7 @@ class LocalLinesRefreshWorker(QObject):
                 "content": (
                     f"为本地话术分组“{label}”（配置键：{group}）生成 {max_items} 条中文短句。"
                     f"每条不超过 {max_chars} 个汉字或字符。"
-                    "语气轻松温柔，不要说“根据记忆”“你之前说过”“数据库”“Mem0”“memory.json”。"
+                    "语气轻松温柔，不要说“根据记忆”“你之前说过”“数据库”“memory.json”。"
                     "不要宠物自称，指代桌宠时，用‘我’，不要用‘它’。"
                     "贴合该分组用途，每行一条。"
                 ),
@@ -887,7 +746,6 @@ class DesktopPetWindow(QWidget):
         )
         self.bubble_position_service = BubblePositionService(QApplication)
         self.screenshot_capture_service = ScreenshotCaptureService()
-        self.mem0_memory_service: Mem0MemoryService | None = None
         self.drag_start_offset = QPoint()
         self.dragging = False
         self.mouse_press_position = QPoint()
@@ -906,19 +764,12 @@ class DesktopPetWindow(QWidget):
         self.clear_history_worker: QObject | None = None
         self.conversation_maintenance_thread: QThread | None = None
         self.conversation_maintenance_worker: QObject | None = None
-        self.mem0_init_thread: QThread | None = None
-        self.mem0_init_worker: QObject | None = None
-        self.mem0_search_thread: QThread | None = None
-        self.mem0_search_worker: QObject | None = None
-        self.memory_maintenance_thread: QThread | None = None
-        self.memory_maintenance_worker: QObject | None = None
         self.local_lines_refresh_thread: QThread | None = None
         self.local_lines_refresh_worker: QObject | None = None
         self.background_tasks = BackgroundTaskRegistry(default_wait_timeout_ms=1000)
         self.move_animation: QPropertyAnimation | None = None
         self.behavior_started = False
         self.reminders_started = False
-        self.memory_maintenance_started = False
         self.conversation_maintenance_started = False
         self.local_lines_refresh_started = False
         self.exit_animation_in_progress = False
@@ -943,7 +794,6 @@ class DesktopPetWindow(QWidget):
         self.active_formal_answer_panel: FormalAnswerPanel | None = None
         self.pending_formal_question = ""
         self._pending_was_formal = False
-        self._pending_knowledge_mem0_context = ""
         self._reminder_reply_queue: list[dict[str, str]] = []
         self._active_reminder_reply_id = ""
         self._reminder_reply_timer = QTimer(self)
@@ -979,11 +829,7 @@ class DesktopPetWindow(QWidget):
             can_deliver=self._can_deliver_reminders,
             parent=self,
         )
-        self.memory_vector_store = MemoryVectorStore(
-            self.data_dir / "memory_vectors.json",
-            self.app_config,
-        )
-        self.memory_store = MemoryStore(self.memory_path, self.memory_vector_store)
+        self.memory_store = MemoryStore(self.memory_path)
         self.llm_client = LlmClient(self.config_path, self.example_config_path)
         self.chat_flow_controller = ChatFlowController(
             self.chat_store_formal,
@@ -993,6 +839,7 @@ class DesktopPetWindow(QWidget):
             self.llm_client.is_configured,
             self._generate_local_reply,
         )
+        self.conversation_state_controller = ConversationStateController()
         self.prompt_builder = PromptBuilder(
             self.character_path,
             self.safety_rules_path,
@@ -1046,7 +893,6 @@ class DesktopPetWindow(QWidget):
             self.config_path,
             self.local_lines_path,
             self._config_snapshot,
-            self._has_knowledge_memory,
             config_saver=self._save_app_config,
             character_path=self.character_path,
             runtime_state_path=self.runtime_state_path,
@@ -1065,7 +911,6 @@ class DesktopPetWindow(QWidget):
         self._refresh_auto_move_timer()
         self._update_sprite(self.sprite_player.current_pixmap())
         _set_pet_action(self, "idle", owner="idle")
-        self._start_mem0_initialization(close_existing=False)
 
     # 设置主窗口的透明、无边框和置顶属性。
     def _setup_window(self) -> None:
@@ -1123,9 +968,6 @@ class DesktopPetWindow(QWidget):
         if not self.reminders_started:
             self.reminders_started = True
             self.reminder_controller.start()
-        if not self.memory_maintenance_started:
-            self.memory_maintenance_started = True
-            QTimer.singleShot(0, self._start_memory_maintenance_worker)
         if not self.conversation_maintenance_started:
             self.conversation_maintenance_started = True
             QTimer.singleShot(0, self._initialize_conversation_maintenance)
@@ -1256,8 +1098,6 @@ class DesktopPetWindow(QWidget):
         self.reminder_ack_bubble.hide()
         self.reminder_snooze_bubble.hide()
         self.chat_input.hide()
-        if self.mem0_memory_service is not None:
-            self.mem0_memory_service.close()
         super().closeEvent(event)
         app = QApplication.instance()
         if app is not None:
@@ -2175,8 +2015,6 @@ class DesktopPetWindow(QWidget):
             self._reminder_completed_retention_days(),
             self._reminder_ack_repeat_minutes(),
         )
-        self.memory_vector_store.update_config(self.app_config)
-        self._start_mem0_initialization(close_existing=True)
         self.sprite_player.set_scale(self._ui_scale())
         self.sprite_player.load()
         self._setup_window()
@@ -2260,8 +2098,9 @@ class DesktopPetWindow(QWidget):
     # 处理用户提交的消息，并决定走占位回复还是 API 回复。
     def _handle_user_message(self, message: str) -> None:
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
+        proactive_response = False
         if self.behavior_controller.is_within_proactive_reply_window():
-            self.behavior_controller.notify_proactive_response()
+            proactive_response = bool(self.behavior_controller.notify_proactive_response())
         self.behavior_controller.notify_user_message()
         self._settle_after_user_interaction()
         if re.match(r"^\s*/remind(?:\s|$)", message, re.IGNORECASE):
@@ -2272,7 +2111,15 @@ class DesktopPetWindow(QWidget):
         if self._clear_history_in_progress():
             self._display_message("先等一下，我正在整理笔记。", 3200, "system")
             return
-        chat_context = self.chat_flow_controller.begin_user_message(message)
+        runtime_persona_state = self.conversation_state_controller.update(
+            message,
+            self._formal_qa_enabled(),
+            proactive_response=proactive_response,
+        )
+        chat_context = self.chat_flow_controller.begin_user_message(
+            message,
+            runtime_persona_state,
+        )
         self._sync_chat_flow_state()
 
         if (
@@ -2285,16 +2132,23 @@ class DesktopPetWindow(QWidget):
             poetry_line = self.behavior_controller.pick_poetry_line()
             if poetry_line:
                 self.chat_flow_controller.append_assistant_reply(chat_context, poetry_line)
-                _set_pet_action(self, "running", force_single_cycle=True, owner="chat")
+                self._apply_conversation_action(
+                    self.conversation_state_controller.action_plan(
+                        runtime_persona_state,
+                        waiting_for_api=False,
+                    )
+                )
                 self._show_answer_output(poetry_line, source="assistant", question=message)
                 return
 
-        self._display_message("我收到啦，让我想一想。", 3200, "system")
-        _set_pet_action(self, "review" if len(message) > 24 else "running", owner="chat")
-
         decision = self.chat_flow_controller.decide_after_thinking(chat_context)
         if decision.kind == "local_reply":
-            _set_pet_action(self, "idle", owner="idle")
+            self._apply_conversation_action(
+                self.conversation_state_controller.action_plan(
+                    runtime_persona_state,
+                    waiting_for_api=False,
+                )
+            )
             self._show_answer_output(decision.reply, source="assistant", question=decision.question)
             return
 
@@ -2303,6 +2157,13 @@ class DesktopPetWindow(QWidget):
             self._show_answer_output(decision.reply, source="assistant", question=decision.question)
             return
 
+        self._display_message("我收到啦，让我想一想。", 3200, "system")
+        self._apply_conversation_action(
+            self.conversation_state_controller.action_plan(
+                runtime_persona_state,
+                waiting_for_api=True,
+            )
+        )
         self._start_chat_worker(message)
 
     # 解析并执行轻量的 /remind 分钟数 提醒内容 本地命令。
@@ -2329,9 +2190,15 @@ class DesktopPetWindow(QWidget):
         return any(kw in message for kw in self._poetry_keywords)
 
     # 在本地模式下按当前问答风格生成回复。
-    def _generate_local_reply(self, message: str, formal_qa_mode: bool = False) -> str:
+    def _generate_local_reply(
+        self,
+        message: str,
+        formal_qa_mode: bool = False,
+        runtime_persona_state: PersonaState | None = None,
+    ) -> str:
         """在本地模式下按当前问答风格生成回复。"""
         stripped_message = message.strip()
+        state = runtime_persona_state or PersonaState()
         if not stripped_message:
             return "我在这里哦。"
         if formal_qa_mode:
@@ -2345,13 +2212,39 @@ class DesktopPetWindow(QWidget):
                 "当前是正式问答模式，但我现在走的是本地回复，所以没法给出特别深入的答案。"
                 "如果你打开 API，我就可以尽量给你更完整、更有条理的回答。"
             )
+        if state.mode == "emotional_support":
+            if state.mood == EmotionState.SLEEPY:
+                return (
+                    "听起来你现在有些累。我们可以先把事情缩小一点，"
+                    "你告诉我最想先处理的那一步就好。"
+                )
+            return (
+                "听起来这件事让你有些不好受。如果我理解得没错，"
+                "我们可以先从最卡住你的那一点慢慢处理。"
+            )
+        if state.mode == "task":
+            return (
+                "我先陪你把这个问题拆开。现在没有接入 API，暂时不能给出完整推理结果；"
+                "你可以继续提供目标、现象或报错，我会按步骤帮你整理。"
+            )
+        if state.mood == EmotionState.HAPPY and state.energy == "high":
+            return "太好了，听到这个进展真让人开心。你愿意的话，也可以告诉我这次是怎么解决的。"
+        if state.mood == EmotionState.HAPPY:
+            return "我在这里哦，很高兴你来找我。"
         if "?" in stripped_message or "？" in stripped_message:
             return "这个问题我先记住啦。现在我没有连上 API，所以只能先陪你整理思路；如果你愿意，我也可以继续听你说。"
-        if any(keyword in stripped_message for keyword in ["你好", "在吗", "嗨", "hi", "hello"]):
-            return "我在这里哦，很高兴你来找我。"
-        if any(keyword in stripped_message for keyword in ["累", "烦", "难", "焦虑", "紧张"]):
-            return "抱抱你呀，先别急，我们可以一点点来。虽然我现在没接 API，但我会认真陪着你。"
         return f"我收到啦：{stripped_message[:30]}。现在我先用本地模式陪你，如果你想要更完整的回答，可以再打开 API。"
+
+    # 通过统一动作入口应用动态对话状态生成的动作计划。
+    def _apply_conversation_action(self, plan: ConversationActionPlan) -> None:
+        """通过统一动作入口应用动态对话状态生成的动作计划。"""
+        _set_pet_action(
+            self,
+            plan.action_name,
+            fallback_action=plan.fallback_action,
+            force_single_cycle=plan.force_single_cycle,
+            owner="chat",
+        )
 
     # 创建后台线程执行模型请求，避免阻塞界面。
     def _start_chat_worker(self, message: str) -> None:
@@ -2368,9 +2261,6 @@ class DesktopPetWindow(QWidget):
                 client=self.llm_client,
                 prompt_builder=self.prompt_builder,
                 context_manager=self.context_manager,
-                mem0_memory_service=self.mem0_memory_service,
-                user_id=self._memory_user_id(),
-                app_config=self.app_config,
                 reminder_tool=self.reminder_tool,
             )
         )
@@ -2580,24 +2470,6 @@ class DesktopPetWindow(QWidget):
         self.conversation_maintenance_worker = None
         self.conversation_maintenance_thread = None
 
-    # 清空 Mem0 初始化线程和 worker 引用。
-    def _clear_mem0_init_task_refs(self) -> None:
-        """清空 Mem0 初始化线程和 worker 引用。"""
-        self.mem0_init_worker = None
-        self.mem0_init_thread = None
-
-    # 清空 Mem0 搜索线程和 worker 引用。
-    def _clear_mem0_search_task_refs(self) -> None:
-        """清空 Mem0 搜索线程和 worker 引用。"""
-        self.mem0_search_worker = None
-        self.mem0_search_thread = None
-
-    # 清空记忆维护线程和 worker 引用。
-    def _clear_memory_maintenance_task_refs(self) -> None:
-        """清空记忆维护线程和 worker 引用。"""
-        self.memory_maintenance_worker = None
-        self.memory_maintenance_thread = None
-
     # 清空本地台词刷新线程和 worker 引用。
     def _clear_local_lines_refresh_task_refs(self) -> None:
         """清空本地台词刷新线程和 worker 引用。"""
@@ -2632,205 +2504,10 @@ class DesktopPetWindow(QWidget):
             pass
         cleanup()
 
-    # 整理mem 0 init wait timeout ms，并把结果交给调用方或写回状态。
-    def _mem0_init_wait_timeout_ms(self) -> int:
-        """整理mem 0 init wait timeout ms，并把结果交给调用方或写回状态。"""
-        try:
-            timeout_seconds = float(
-                self.config_service.get("memory.mem0_init_timeout_seconds", 10)
-            )
-        except (TypeError, ValueError):
-            timeout_seconds = 10.0
-        return max(0, int(timeout_seconds * 1000))
-
     # 判断主窗口是否正在关闭或已经关闭。
     def _closing_or_closed(self) -> bool:
         """判断主窗口是否正在关闭或已经关闭。"""
         return self._is_closing or self._close_after_workers_finished
-
-    # 根据 service 更新mem0记忆服务状态，并同步相关缓存或界面。
-    def _set_mem0_memory_service(self, service: Mem0MemoryService | None) -> None:
-        """根据 service 更新mem0记忆服务状态，并同步相关缓存或界面。"""
-        self.mem0_memory_service = service
-
-    # 启动 Mem0 初始化后台任务，避免阻塞主界面。
-    def _start_mem0_initialization(self, close_existing: bool) -> None:
-        """启动 Mem0 初始化后台任务，避免阻塞主界面。"""
-        if self.background_tasks.is_registered("mem0_init"):
-            return
-
-        existing_service = self.mem0_memory_service if close_existing else None
-        if close_existing:
-            self._set_mem0_memory_service(None)
-            self._pending_knowledge_mem0_context = ""
-
-        self.mem0_init_thread = QThread(self)
-        self.mem0_init_worker = Mem0InitializationWorker(
-            self.app_config,
-            existing_service=existing_service,
-        )
-        self.mem0_init_worker.moveToThread(self.mem0_init_thread)
-        self.mem0_init_thread.started.connect(self.mem0_init_worker.run)
-        self.mem0_init_worker.finished.connect(self._on_mem0_initialization_success)
-        self.mem0_init_worker.failed.connect(self._on_mem0_initialization_failure)
-        self.mem0_init_worker.finished.connect(self.mem0_init_thread.quit)
-        self.mem0_init_worker.failed.connect(self.mem0_init_thread.quit)
-        self.mem0_init_thread.finished.connect(self._cleanup_mem0_init_thread)
-        if not self._register_background_task(
-            "mem0_init",
-            self.mem0_init_thread,
-            self.mem0_init_worker,
-            self._clear_mem0_init_task_refs,
-            wait_timeout_ms=self._mem0_init_wait_timeout_ms(),
-        ):
-            self._discard_unregistered_task(
-                self.mem0_init_thread,
-                self.mem0_init_worker,
-                self._clear_mem0_init_task_refs,
-            )
-            return
-        self.mem0_init_thread.start()
-
-    # 保存初始化完成的 Mem0 服务并释放任务引用。
-    def _on_mem0_initialization_success(self, service: object) -> None:
-        """保存初始化完成的 Mem0 服务并释放任务引用。"""
-        if self._closing_or_closed():
-            if isinstance(service, Mem0MemoryService):
-                service.close()
-            return
-        if isinstance(service, Mem0MemoryService):
-            self._set_mem0_memory_service(service)
-
-    # 记录 Mem0 初始化失败并释放初始化任务引用。
-    def _on_mem0_initialization_failure(self, error_message: str) -> None:
-        """记录 Mem0 初始化失败并释放初始化任务引用。"""
-        logger.warning("Mem0 initialization failed: %s", error_message)
-        if self._closing_or_closed():
-            return
-        self._set_mem0_memory_service(None)
-
-    # 清理mem0init线程线程注册和关联引用。
-    def _cleanup_mem0_init_thread(self) -> None:
-        """清理mem0init线程线程注册和关联引用。"""
-        self.background_tasks.unregister("mem0_init", delete_later=True)
-        self._maybe_close_after_workers_finished()
-
-    # 启动 Mem0 检索后台任务，为知识问候准备语义上下文。
-    def _start_mem0_search_worker(self) -> None:
-        """启动 Mem0 检索后台任务，为知识问候准备语义上下文。"""
-        if self.background_tasks.is_registered("mem0_search"):
-            return
-        if self.mem0_memory_service is None or not self.mem0_memory_service.is_available():
-            return
-
-        self.mem0_search_thread = QThread(self)
-        self.mem0_search_worker = Mem0SearchWorker(
-            self.mem0_memory_service,
-            user_id=self._memory_user_id(),
-            query="用户最近正在做的项目、学习目标、长期偏好和希望被提醒的事情",
-            top_k=3,
-        )
-        self.mem0_search_worker.moveToThread(self.mem0_search_thread)
-        self.mem0_search_thread.started.connect(self.mem0_search_worker.run)
-        self.mem0_search_worker.finished.connect(self._on_mem0_search_success)
-        self.mem0_search_worker.failed.connect(self._on_mem0_search_failure)
-        self.mem0_search_worker.finished.connect(self.mem0_search_thread.quit)
-        self.mem0_search_worker.failed.connect(self.mem0_search_thread.quit)
-        self.mem0_search_thread.finished.connect(self._cleanup_mem0_search_thread)
-        if not self._register_background_task(
-            "mem0_search",
-            self.mem0_search_thread,
-            self.mem0_search_worker,
-            self._clear_mem0_search_task_refs,
-        ):
-            self._discard_unregistered_task(
-                self.mem0_search_thread,
-                self.mem0_search_worker,
-                self._clear_mem0_search_task_refs,
-            )
-            return
-        self.mem0_search_thread.start()
-
-    # 保存 Mem0 检索文本，并继续知识问候生成流程。
-    def _on_mem0_search_success(self, context: str) -> None:
-        """保存 Mem0 检索文本，并继续知识问候生成流程。"""
-        if self._closing_or_closed():
-            return
-        self._pending_knowledge_mem0_context = context
-        if not context or self._chat_in_progress() or self.chat_input.isVisible():
-            return
-        self.behavior_controller.notify_proactive_shown("extra_knowledge")
-        self._handle_knowledge_speak()
-
-    # 记录 Mem0 检索失败，并继续使用空记忆上下文。
-    def _on_mem0_search_failure(self, error_message: str) -> None:
-        """记录 Mem0 检索失败，并继续使用空记忆上下文。"""
-        logger.warning("Mem0 knowledge search failed: %s", error_message)
-        if self._closing_or_closed():
-            return
-        self._pending_knowledge_mem0_context = ""
-
-    # 清理mem0search线程线程注册和关联引用。
-    def _cleanup_mem0_search_thread(self) -> None:
-        """清理mem0search线程线程注册和关联引用。"""
-        self.background_tasks.unregister("mem0_search", delete_later=True)
-        self._maybe_close_after_workers_finished()
-
-    # 启动记忆维护后台任务，同步向量索引和语义去重。
-    def _start_memory_maintenance_worker(self) -> None:
-        """启动记忆维护后台任务，同步向量索引和语义去重。"""
-        if self.background_tasks.is_registered("memory_maintenance"):
-            return
-        self.memory_vector_store.update_config(self.app_config)
-        if not self.config_service.get_bool("memory.enable_semantic_memory_merge", True):
-            return
-
-        self.memory_maintenance_thread = QThread(self)
-        self.memory_maintenance_worker = MemorySemanticMergeWorker(
-            self.memory_vector_store,
-            self.memory_path,
-        )
-        self.memory_maintenance_worker.moveToThread(self.memory_maintenance_thread)
-        self.memory_maintenance_thread.started.connect(self.memory_maintenance_worker.run)
-        self.memory_maintenance_worker.finished.connect(self._on_memory_maintenance_success)
-        self.memory_maintenance_worker.failed.connect(self._on_memory_maintenance_failure)
-        self.memory_maintenance_worker.finished.connect(self.memory_maintenance_thread.quit)
-        self.memory_maintenance_worker.failed.connect(self.memory_maintenance_thread.quit)
-        self.memory_maintenance_thread.finished.connect(self._cleanup_memory_maintenance_thread)
-        if not self._register_background_task(
-            "memory_maintenance",
-            self.memory_maintenance_thread,
-            self.memory_maintenance_worker,
-            self._clear_memory_maintenance_task_refs,
-        ):
-            self._discard_unregistered_task(
-                self.memory_maintenance_thread,
-                self.memory_maintenance_worker,
-                self._clear_memory_maintenance_task_refs,
-            )
-            return
-        self.memory_maintenance_thread.start()
-
-    # 记录记忆维护完成，并释放维护任务引用。
-    def _on_memory_maintenance_success(self, result: object) -> None:
-        """记录记忆维护完成，并释放维护任务引用。"""
-        if self._closing_or_closed():
-            return
-        if isinstance(result, dict) and int(result.get("merged_count", 0) or 0) > 0:
-            logger.info("Semantic memory merge completed: %s", result)
-
-    # 记录记忆维护失败，并释放维护任务引用。
-    def _on_memory_maintenance_failure(self, error_message: str) -> None:
-        """记录记忆维护失败，并释放维护任务引用。"""
-        if self._closing_or_closed():
-            return
-        logger.warning("Semantic memory maintenance failed: %s", error_message)
-
-    # 清理记忆maintenance线程线程注册和关联引用。
-    def _cleanup_memory_maintenance_thread(self) -> None:
-        """清理记忆maintenance线程线程注册和关联引用。"""
-        self.background_tasks.unregister("memory_maintenance", delete_later=True)
-        self._maybe_close_after_workers_finished()
 
     # 为待刷新台词组创建 API 刷新后台任务。
     def _start_local_lines_refresh_worker(self) -> None:
@@ -3326,12 +3003,7 @@ class DesktopPetWindow(QWidget):
             self.prompt_builder,
             memory,
             formal_qa_mode=self._formal_qa_enabled(),
-            mem0_memory_service=self.mem0_memory_service,
-            user_id=self._memory_user_id(),
-            use_mem0=self.config_service.get_bool("memory.use_mem0_for_knowledge_speak", False),
-            mem0_memory_context=self._pending_knowledge_mem0_context,
         )
-        self._pending_knowledge_mem0_context = ""
         self.chat_worker.moveToThread(self.chat_thread)
         self.chat_thread.started.connect(self.chat_worker.run)
         self.chat_worker.finished.connect(self._on_knowledge_speak_success)
@@ -3980,32 +3652,6 @@ class DesktopPetWindow(QWidget):
     def _chat_config(self) -> dict[str, Any]:
         """返回聊天配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("chat", {})
-
-    # 读取配置片段，缺失时返回安全默认配置。
-    def _memory_config(self) -> dict[str, Any]:
-        """读取配置片段，缺失时返回安全默认配置。"""
-        return self.app_config.setdefault("memory", {})
-
-    # 处理记忆数据，保持本地记忆和外部索引一致。
-    def _memory_user_id(self) -> str:
-        """处理记忆数据，保持本地记忆和外部索引一致。"""
-        return self.config_service.get_str("memory.mem0_user_id", "default_user")
-
-    # 判断本地记忆中是否存在可用于知识问候的主题或偏好。
-    def _has_knowledge_memory(self) -> bool | None:
-        """判断本地记忆中是否存在可用于知识问候的主题或偏好。"""
-        if not self.config_service.get_bool("memory.use_mem0_for_knowledge_speak", False):
-            return False
-        if self._pending_knowledge_mem0_context:
-            return True
-        if self.background_tasks.is_registered("mem0_init"):
-            return None
-        if self.background_tasks.is_registered("mem0_search"):
-            return None
-        if self.mem0_memory_service is None or not self.mem0_memory_service.is_available():
-            return False
-        self._start_mem0_search_worker()
-        return None
 
     # 读取助手回复气泡展示时长，配置无效时使用默认毫秒数。
     def _assistant_reply_bubble_duration_ms(self) -> int:

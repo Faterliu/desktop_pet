@@ -65,7 +65,6 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
                     "max_history_message_chars": 600,
                     "max_summary_chars": 1200,
                     "max_memory_chars": 1200,
-                    "max_mem0_chars": 1000,
                     "summary_max_input_chars": 5000,
                 }
             },
@@ -98,13 +97,10 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
             self.config_path,
         )
 
-    # 验证提示词会分离事实、关系和语义记忆段落。
-    def test_build_messages_splits_fact_relationship_and_semantic_memory_sections(self) -> None:
-        """验证提示词会分离事实、关系和语义记忆段落。"""
-        messages = self._builder().build_messages(
-            "这个功能怎么做？",
-            relevant_memories="- 用户在开发桌宠。",
-        )
+    # 验证提示词会分离事实和关系记忆段落。
+    def test_build_messages_splits_fact_and_relationship_memory_sections(self) -> None:
+        """验证提示词会分离事实和关系记忆段落。"""
+        messages = self._builder().build_messages("这个功能怎么做？")
         prompt = "\n".join(item["content"] for item in messages if item["role"] == "system")
 
         self.assertIn("【用户事实记忆】", prompt)
@@ -113,8 +109,6 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertIn("direct_actionable", prompt)
         self.assertIn("不要直接复述给用户", prompt)
         self.assertIn("不要频繁使用“你之前说过”", prompt)
-        self.assertIn("【当前问题相关的长期语义记忆】", prompt)
-        self.assertIn("只在与当前问题直接相关时参考", prompt)
 
     # 验证正式问答 模式 keeps style 记忆 focused on answer preferences场景下的预期结果。
     def test_formal_mode_keeps_style_memory_focused_on_answer_preferences(self) -> None:
@@ -181,8 +175,31 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         self.assertIn("- 情绪安抚：先承接情绪", prompt)
         self.assertIn("不过度撒娇、不假装真人", prompt)
         self.assertIn("代码任务时优先定位问题", prompt)
-        self.assertIn("mood=thinking, energy=high, mode=task", prompt)
+        self.assertIn("【当前对话状态】", prompt)
+        self.assertIn("表达模式：任务协助", prompt)
+        self.assertIn("当前线索：认真思考", prompt)
+        self.assertIn("表达能量：可以稍微更有活力", prompt)
+        self.assertIn("互动温度：稍熟悉", prompt)
+        self.assertNotIn("mood=thinking", prompt)
         self.assertNotIn('"core_identity"', prompt)
+
+    # 验证情绪支持状态使用保守措辞且不放弃用户同时提出的任务。
+    def test_emotional_support_state_adds_conservative_guidance(self) -> None:
+        """情绪支持状态应避免武断共情，并继续处理明确任务。"""
+        messages = self._builder().build_messages(
+            "我很焦虑，帮我看看这个问题。",
+            runtime_persona_state={
+                "mood": "sad",
+                "energy": "low",
+                "closeness": 0.5,
+                "mode": "emotional_support",
+            },
+        )
+        prompt = "\n".join(item["content"] for item in messages if item["role"] == "system")
+
+        self.assertIn("表达模式：情绪支持", prompt)
+        self.assertIn("使用“听起来”“如果我理解得没错”等保守措辞", prompt)
+        self.assertIn("先用一句话承接，再继续完成任务", prompt)
 
     # 验证legacy character fields still build a complete 提示词场景下的预期结果。
     def test_legacy_character_fields_still_build_a_complete_prompt(self) -> None:
@@ -255,7 +272,6 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
                     "max_history_message_chars": 200,
                     "max_summary_chars": 300,
                     "max_memory_chars": 220,
-                    "max_mem0_chars": 150,
                 }
             },
         )
@@ -300,7 +316,6 @@ class PromptBuilderMemorySectionsTests(unittest.TestCase):
         messages = self._builder().build_messages(
             "当前问题：" + ("X" * 200),
             recent_messages,
-            relevant_memories="\n".join([f"- mem0-{idx}-" + ("M" * 200) for idx in range(8)]),
         )
 
         total_chars = sum(len(item["content"]) for item in messages)

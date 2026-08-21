@@ -234,10 +234,9 @@ def _merge_defaults(target: dict[str, Any], defaults: dict[str, Any]) -> None:
 
 class MemoryStore:
     # 初始化当前对象及其依赖。
-    def __init__(self, path: str | Path, vector_store: Any | None = None) -> None:
+    def __init__(self, path: str | Path) -> None:
         """初始化当前对象及其依赖。"""
         self.path = Path(path)
-        self.vector_store = vector_store
 
     # 读取load并返回 dict[str, Any]。
     def load(self) -> dict[str, Any]:
@@ -249,8 +248,6 @@ class MemoryStore:
             changed = raw != normalized
             if changed:
                 save_json(self.path, normalized)
-        if changed:
-            self._sync_vectors(normalized)
         return normalized
 
     # 根据 data 把save写入持久化存储并保持数据可恢复。
@@ -260,7 +257,6 @@ class MemoryStore:
             data = normalize_memory_schema(data)
             self._touch_memory(data)
             save_json(self.path, data)
-        self._sync_vectors(data)
 
     # 应用模型返回的编号记忆增量，并在同一次写入中标记摘要批次。
     def apply_summary_operations(
@@ -295,7 +291,6 @@ class MemoryStore:
             }
             self._touch_memory(current)
             save_json(self.path, current)
-        self._sync_vectors(current)
         return stats
 
     # 校验并应用模型的一条结构化记忆操作。
@@ -390,16 +385,6 @@ class MemoryStore:
         if isinstance(value, list):
             return any(self._has_update_content(item) for item in value)
         return value not in (None, "")
-
-    # 根据 data 把记忆变更同步到向量索引，失败时仅记录日志。
-    def _sync_vectors(self, data: dict[str, Any]) -> None:
-        """根据 data 把记忆变更同步到向量索引，失败时仅记录日志。"""
-        if self.vector_store is None:
-            return
-        try:
-            self.vector_store.sync_memory(data)
-        except Exception:
-            return
 
     # 根据 current、updates 合并列表并按文本去重，保留原有顺序。
     def _merge_lists(self, current: dict[str, Any], updates: dict[str, Any]) -> None:

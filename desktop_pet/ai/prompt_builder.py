@@ -82,7 +82,6 @@ class PromptBuilder:
         user_message: str,
         recent_messages: list[dict[str, Any]] | None = None,
         formal_qa_mode: bool = False,
-        relevant_memories: str | None = None,
         runtime_persona_state: dict[str, Any] | PersonaState | None = None,
         reminder_tool_guidance: str | None = None,
         max_user_message_chars: int | None = None,
@@ -103,10 +102,6 @@ class PromptBuilder:
         relationship_memory_text = self._fit_section(
             self._format_relationship_memory(memory, formal_qa_mode),
             budget["max_memory_chars"],
-        )
-        semantic_memory_text = self._fit_section(
-            self._format_relevant_semantic_memories(relevant_memories),
-            budget["max_mem0_chars"],
         )
         summary_text = self._fit_section(
             self._format_summary_archive(summary),
@@ -183,19 +178,7 @@ class PromptBuilder:
                     ),
                 }
             )
-        if semantic_memory_text:
-            optional_system_messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "【当前问题相关的长期语义记忆】\n"
-                        "以下内容由长期语义记忆检索得到，只在与当前问题直接相关时参考。"
-                        "不要机械复述，也不要强行使用。\n"
-                        f"{semantic_memory_text}"
-                    ),
-                }
-            )
-        if fact_memory_text or relationship_memory_text or semantic_memory_text:
+        if fact_memory_text or relationship_memory_text:
             optional_system_messages.append(
                 {
                     "role": "system",
@@ -447,12 +430,53 @@ class PromptBuilder:
             lines.append(f"口头禅只能偶尔自然使用：{' / '.join(catchphrases[:3])}")
         if runtime_state is not None:
             state = read_persona_state(runtime_state)
-            lines.append(
-                "当前运行状态仅用于轻微调节表达："
-                f"mood={state.mood.value}, energy={state.energy}, mode={state.mode}；"
-                "closeness 不得突破上述关系边界。"
-            )
+            lines.extend(self._format_runtime_state_guidance(state))
         return "\n".join(lines)
+
+    # 把动态人格状态转换为自然、可执行且不暴露内部字段的表达指导。
+    def _format_runtime_state_guidance(self, state: PersonaState) -> list[str]:
+        """把动态人格状态转换为自然、可执行且不暴露内部字段的表达指导。"""
+        mode_labels = {
+            "companion": "普通陪伴",
+            "task": "任务协助",
+            "emotional_support": "情绪支持",
+            "formal": "正式问答",
+        }
+        mood_labels = {
+            "calm": "平静",
+            "happy": "轻快",
+            "thinking": "认真思考",
+            "sleepy": "疲惫或困倦",
+            "sad": "低落或有压力",
+        }
+        energy_labels = {
+            "low": "降低信息密度",
+            "normal": "保持自然节奏",
+            "high": "可以稍微更有活力",
+        }
+        if state.closeness <= 0.44:
+            closeness_label = "克制，避免主动拉近距离"
+        elif state.closeness <= 0.56:
+            closeness_label = "自然亲切，不过度熟络"
+        else:
+            closeness_label = "稍熟悉，但仍不得擅自使用亲昵称呼"
+
+        lines = [
+            "【当前对话状态】仅用于轻微调节本轮表达，不要向用户说明状态判断过程。",
+            (
+                f"表达模式：{mode_labels.get(state.mode, '普通陪伴')}；"
+                f"当前线索：{mood_labels.get(state.mood.value, '平静')}；"
+                f"表达能量：{energy_labels.get(state.energy, '保持自然节奏')}；"
+                f"互动温度：{closeness_label}。"
+            ),
+        ]
+        if state.mode == "emotional_support":
+            lines.append(
+                "只根据用户明确表达承接情绪，使用“听起来”“如果我理解得没错”等保守措辞，"
+                "不要宣称完全理解用户；如果消息中同时有明确任务，先用一句话承接，再继续完成任务。"
+            )
+        lines.append("动态状态不能突破角色边界，不能制造依赖，也不能覆盖用户当前明确要求。")
+        return lines
 
     # 把场景反应配置格式化为模型可执行的提示词规则。
     def _format_scenario_rules(self, scenarios: dict[str, Any]) -> str:
@@ -621,18 +645,6 @@ class PromptBuilder:
 
         return "\n".join(f"- {item}" for item in fragments[:8])
 
-    # 把语义检索结果整理为可注入 prompt 的短段落。
-    def _format_relevant_semantic_memories(self, relevant_memories: str | None) -> str:
-        """把语义检索结果整理为可注入 prompt 的短段落。"""
-        if not relevant_memories:
-            return ""
-        lines = [
-            clip_text(line.strip(), 120)
-            for line in str(relevant_memories).splitlines()
-            if line.strip()
-        ]
-        return "\n".join(lines[:8])
-
     # 根据正式或闲聊模式生成记忆使用边界说明。
     def _format_memory_guidelines(self, formal_qa_mode: bool) -> str:
         """根据正式或闲聊模式生成记忆使用边界说明。"""
@@ -645,7 +657,7 @@ class PromptBuilder:
             "【表达约束】\n"
             "- 记忆主要用于理解用户，不要把用户偏好列表复述出来。\n"
             "- 不要频繁使用“你之前说过”。\n"
-            "- 不要暴露记忆系统、memory.json、Mem0、数据库等技术细节，"
+            "- 不要暴露记忆系统、memory.json、数据库等技术细节，"
             "除非用户正在讨论项目实现。\n"
             "- 如果记忆与当前问题无关，不要强行使用。\n"
             "- 如果用户当前表达与旧记忆冲突，以当前表达为准。\n"

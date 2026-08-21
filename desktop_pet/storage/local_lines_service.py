@@ -11,7 +11,6 @@ from storage.json_store import load_json, save_json
 
 BLOCKED_SUBSTRINGS = (
     "memory.json",
-    "mem0",
     "数据库",
     "数据存储器",
     "根据记忆",

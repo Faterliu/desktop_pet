@@ -28,6 +28,9 @@ from app.desktop_pet_window import (  # noqa: E402
     _finish_pet_action_if_owned,
     _set_pet_action,
 )
+from character.conversation_state import ConversationActionPlan  # noqa: E402
+from character.emotion_state import EmotionState  # noqa: E402
+from character.persona_state import PersonaState  # noqa: E402
 
 
 class FakeSpritePlayer:
@@ -211,6 +214,53 @@ class InteractionActionConflictTests(unittest.TestCase):
         fake._sprite_action_owner = "clipboard"
         self.assertTrue(_finish_pet_action_if_owned(fake, "clipboard"))
         self.assertEqual(fake.sprite_player.actions[0][0], ("idle",))
+
+    def test_conversation_action_plan_uses_owned_action_entrypoint(self) -> None:
+        """动态对话动作必须记录 chat 所有权并完整传递回退参数。"""
+        fake = types.SimpleNamespace(
+            move_animation=None,
+            sprite_player=FakeSpritePlayer(),
+        )
+
+        DesktopPetWindow._apply_conversation_action(
+            fake,
+            ConversationActionPlan("waving", "waiting", True),
+        )
+
+        self.assertEqual(fake._sprite_action_owner, "chat")
+        self.assertEqual(
+            fake.sprite_player.actions,
+            [
+                (
+                    ("waving",),
+                    {"fallback_action": "waiting", "force_single_cycle": True},
+                )
+            ],
+        )
+
+    def test_local_reply_uses_emotional_support_state(self) -> None:
+        """本地模式也应使用动态状态生成保守的情绪承接。"""
+        reply = DesktopPetWindow._generate_local_reply(
+            types.SimpleNamespace(),
+            "我很焦虑",
+            False,
+            PersonaState(EmotionState.SAD, "low", 0.5, "emotional_support"),
+        )
+
+        self.assertIn("听起来", reply)
+        self.assertIn("如果我理解得没错", reply)
+
+    def test_local_reply_uses_task_state(self) -> None:
+        """本地任务状态应优先提供拆解问题的下一步。"""
+        reply = DesktopPetWindow._generate_local_reply(
+            types.SimpleNamespace(),
+            "这个 bug 报错了",
+            False,
+            PersonaState(EmotionState.THINKING, "normal", 0.5, "task"),
+        )
+
+        self.assertIn("把这个问题拆开", reply)
+        self.assertIn("目标、现象或报错", reply)
 
     def test_menu_follow_up_interaction_does_not_settle_new_action(self) -> None:
         """二级菜单完成信号只记录互动，不能覆盖刚启动的动作。"""

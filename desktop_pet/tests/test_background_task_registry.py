@@ -92,8 +92,8 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         """验证duplicate registered 任务 is blocked before 线程 starts场景下的预期结果。"""
         registry = BackgroundTaskRegistry()
 
-        self.assertTrue(registry.register("mem0_search", FakeThread(), FakeQtObject()))
-        self.assertFalse(registry.register("mem0_search", FakeThread(), FakeQtObject()))
+        self.assertTrue(registry.register("search_task", FakeThread(), FakeQtObject()))
+        self.assertFalse(registry.register("search_task", FakeThread(), FakeQtObject()))
 
     # 验证stop all quits waits and removes active threads场景下的预期结果。
     def test_stop_all_quits_waits_and_removes_active_threads(self) -> None:
@@ -102,7 +102,7 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         thread = FakeThread(running=True)
         worker = FakeQtObject()
 
-        registry.register("memory_maintenance", thread, worker)
+        registry.register("maintenance_task", thread, worker)
         stuck = registry.stop_all()
 
         self.assertEqual(stuck, [])
@@ -110,7 +110,7 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         self.assertEqual(thread.wait_calls, [500])
         self.assertTrue(thread.deleted)
         self.assertTrue(worker.deleted)
-        self.assertFalse(registry.is_registered("memory_maintenance"))
+        self.assertFalse(registry.is_registered("maintenance_task"))
 
     # 卡住的线程只报告并保留，普通退出路径不强制终止。
     def test_stop_all_keeps_stuck_threads_registered_without_terminating(self) -> None:
@@ -119,17 +119,17 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         thread = FakeThread(running=True, wait_result=False)
         worker = FakeQtObject()
 
-        registry.register("mem0_init", thread, worker, wait_timeout_ms=200)
+        registry.register("init_task", thread, worker, wait_timeout_ms=200)
         stuck = registry.stop_all()
 
-        self.assertEqual(stuck, ["mem0_init"])
+        self.assertEqual(stuck, ["init_task"])
         self.assertEqual(thread.quit_calls, 1)
         self.assertEqual(thread.wait_calls, [200])
         self.assertEqual(thread.terminate_calls, 0)
         self.assertTrue(thread.running)
         self.assertFalse(thread.deleted)
         self.assertFalse(worker.deleted)
-        self.assertTrue(registry.is_registered("mem0_init"))
+        self.assertTrue(registry.is_registered("init_task"))
 
     # 直接移除运行中的任务失败时，不删除仍在线程中的对象。
     def test_remove_keeps_running_task_when_wait_times_out(self) -> None:
@@ -163,14 +163,14 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         registry = BackgroundTaskRegistry(default_wait_timeout_ms=500)
         thread = FakeThread(running=True, wait_result=False)
 
-        registry.register("mem0_search", thread, FakeQtObject())
+        registry.register("search_task", thread, FakeQtObject())
         still_running = registry.request_quit_all(timeout_ms=50)
 
-        self.assertEqual(still_running, ["mem0_search"])
+        self.assertEqual(still_running, ["search_task"])
         self.assertEqual(thread.quit_calls, 1)
         self.assertEqual(thread.wait_calls, [50])
         self.assertEqual(thread.terminate_calls, 0)
-        self.assertTrue(registry.is_registered("mem0_search"))
+        self.assertTrue(registry.is_registered("search_task"))
 
     # 验证clear finished removes only stopped threads场景下的预期结果。
     def test_clear_finished_removes_only_stopped_threads(self) -> None:
@@ -180,12 +180,12 @@ class BackgroundTaskRegistryTests(unittest.TestCase):
         running = FakeThread(running=True)
 
         registry.register("clear_history", stopped, FakeQtObject())
-        registry.register("memory_maintenance", running, FakeQtObject())
+        registry.register("maintenance_task", running, FakeQtObject())
 
         registry.clear_finished()
 
         self.assertFalse(registry.is_registered("clear_history"))
-        self.assertTrue(registry.is_registered("memory_maintenance"))
+        self.assertTrue(registry.is_registered("maintenance_task"))
 
 
 if __name__ == "__main__":

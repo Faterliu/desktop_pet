@@ -14,7 +14,6 @@ FORBIDDEN_GREETING_PHRASES = (
     "你之前说过",
     "我读取到",
     "memory.json",
-    "Mem0",
     "数据库",
     "配置项",
 )
@@ -224,7 +223,7 @@ def build_scenario_greeting_messages(
                 "- 只输出一句中文。\n"
                 f"- 不要超过 {max_chars} 个中文字符。\n"
                 "- 不要说“根据记忆”“你之前说过”“我读取到”。\n"
-                "- 不要暴露 memory.json、Mem0、数据库、配置等技术细节。\n"
+                "- 不要暴露 memory.json、数据库、配置等技术细节。\n"
                 "- 不要像任务管理器一样催促用户。\n"
                 "- 语气自然、克制、有陪伴感。\n"
                 "- 遵守角色行为策略，但不要逐字复述策略。\n"

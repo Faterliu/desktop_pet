@@ -54,7 +54,6 @@ Startup diagnostics:
 - Screenshot supports full-screen quick analysis and frozen single-screen region selection with a follow-up question. Images exist only in memory; only the returned text enters the isolated `screenshot` history.
 - Chat can use local scripted replies or compatible APIs. Chat prefers the configured KLD Responses endpoint and falls back to DeepSeek when its SSL connection is interrupted; vision always uses the configured OpenAI Responses API.
 - Local JSON/JSONL stores keep chat history, append-only mode summaries, memory, usage counters, generated local lines, and window position. Chat history is shared `data/chat_history.jsonl`; `formal`, `informal`, and `clipboard` feed their own summaries through one background maintenance task, while `remind` and reserved `screenshot` remain outside summaries and memory. `memory.json` stores each semantic field as numbered description/timestamp records; only the three-summary memory pipeline may add or update them.
-- Optional Mem0 / DashScope-backed long-term semantic memory is off by default and must degrade gracefully.
 - Proactive behavior includes startup greetings, idle greetings, scenario-based greetings, knowledge greetings, time-period greetings, and low-interruption fallback. Knowledge greetings no longer show a local intro line before the generated content.
 
 ## Key Files
@@ -112,15 +111,11 @@ Startup diagnostics:
 
 `desktop_pet/ai/prompt_builder.py`
 
-- Builds system prompt, safety rules, character settings, formal/informal instructions, summaries, local memory, optional Mem0 retrieval, and recent context. Safety and expression constraints should remain high priority.
+- Builds system prompt, safety rules, character settings, formal/informal instructions, summaries, local memory, and recent context. Safety and expression constraints should remain high priority.
 
 `desktop_pet/ai/context_manager.py`, `summarizer.py`
 
 - Context selection and summarization/memory extraction. Summarization must tolerate API failure and should not block normal chat.
-
-`desktop_pet/ai/mem0_memory_service.py`
-
-- Optional semantic memory wrapper. Missing DashScope key, missing dependency, or service failure should log and degrade without blocking startup, chat, summarization, or exit.
 
 `desktop_pet/character/behavior_controller.py`
 
@@ -132,7 +127,7 @@ Startup diagnostics:
 
 `desktop_pet/storage/*.py`
 
-- JSON persistence, chat stores, memory stores, local line service, usage counters, and memory-vector index. Preserve compatibility with existing user data. Local line API refresh is configured per `local_lines.json` group under `local_lines_refresh.groups`; all groups default to disabled and use a 14-day interval unless overridden.
+- JSON persistence, chat stores, memory stores, local line service, and usage counters. Preserve compatibility with existing user data. Local line API refresh is configured per `local_lines.json` group under `local_lines_refresh.groups`; all groups default to disabled and use a 14-day interval unless overridden.
 
 `desktop_pet/utils/logger.py`, `utils/log_sanitizer.py`
 
@@ -145,7 +140,7 @@ Startup diagnostics:
 - Formal Q&A: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `formal_answer_panel.py`, dual chat stores, and prompt mode handling.
 - Proactive greetings and local line refresh: inspect `behavior_controller.py`, `proactive_context.py`, `DesktopPetWindow` worker callbacks, `local_lines_service.py`, `local_lines.json`, and `config/app_config.example.json`.
 - Screenshot and vision: inspect `screenshot_capture_service.py`, `screenshot_selection_overlay.py`, `ScreenshotAnalysisWorker`, `LlmClient`, `DesktopPetWindow`, and `tests/test_screenshot_analysis.py`.
-- Memory changes: inspect `memory_store.py`, `summarizer.py`, `prompt_builder.py`, `mem0_memory_service.py`, `memory_vector_store.py`, and related tests.
+- Memory changes: inspect `memory_store.py`, `summarizer.py`, `prompt_builder.py`, and related tests.
 - Bubbles and positioning: inspect `speech_bubble.py`, `bubble_position_service.py`, `chat_input.py`, and `_sync_floating_widgets()`.
 - Background work: use `background_task_registry.py`; verify duplicate task handling and shutdown behavior.
 - Config changes: update both code and `config/app_config.example.json`; never commit real keys or local `app_config.json`.
@@ -162,7 +157,7 @@ Startup diagnostics:
 - Configuration reads may use `ConfigService`; writes should preserve the existing JSON structure and save paths.
 - JSON stores should remain crash-tolerant and backward compatible.
 - Example configs and docs must not contain real API keys.
-- Runtime data, logs, caches, virtual environments, Qdrant data, and generated local user state are ignored and should stay ignored.
+- Runtime data, logs, caches, virtual environments, and generated local user state are ignored and should stay ignored.
 - When editing this file, update the relevant section directly. Do not add a sync log or changelog section.
 
 ## High-Risk Areas
@@ -172,7 +167,6 @@ Startup diagnostics:
 - `json_store.py`: affects all runtime persistence; preserve atomic write, corrupt-file recovery, and old data compatibility.
 - `app_config.example.json`: missing defaults can break first launch on new devices.
 - `PromptBuilder`, `Summarizer`, `LlmClient`: affect safety, privacy, token budget, formal/informal routing, and model failures.
-- `Mem0MemoryService` and memory-vector logic: optional external services must not become startup or chat blockers.
 - `SpritePlayer` and `sprite_config.json`: atlas layout, frame counts, action names, and UI call sites are coupled.
 - `.gitignore`: do not unignore user data, logs, caches, or real config.
 
@@ -234,13 +228,11 @@ git diff -- AGENTS.md
 Dependencies are in `desktop_pet/requirements.txt`.
 
 - `PySide6-Essentials`: QtCore, QtGui, QtWidgets for the desktop UI. Avoid switching to full PySide6 unless a required module proves necessary.
-- `requests`: DeepSeek and embedding HTTP calls.
-- `mem0ai==2.0.2`: optional semantic memory SDK. Keep imports and initialization failure-tolerant.
+- `requests`: DeepSeek HTTP calls.
 
 External services:
 
 - DeepSeek API: default base URL `https://api.deepseek.com`, path `/chat/completions`.
-- DashScope / Alibaba Cloud Bailian embeddings: default base URL `https://dashscope.aliyuncs.com/compatible-mode/v1`, model `text-embedding-v4`, dimension 1024.
 - Keys come from config or environment variables. Never commit real keys.
 
 ## Open Questions

@@ -20,30 +20,6 @@ class _RuntimeNoiseFilter(logging.Filter):
         message = record.getMessage()
         if record.name == "posthog":
             return not message.startswith("[PostHog] Multiple active PostHog clients detected")
-        if record.name == "mem0.utils.spacy_models":
-            return not message.startswith("Failed to load spaCy ")
-        if record.name == "mem0.vector_stores.qdrant":
-            return not message.startswith("fastembed not installed")
-        return True
-
-
-class _DashScopeEmbeddingSuccessFilter(logging.Filter):
-    """将 DashScope Embedding 成功请求降为 DEBUG。"""
-
-    # 仅降低成功响应的级别，不影响 httpx 的异常和其他请求。
-    def filter(self, record: logging.LogRecord) -> bool:
-        """按需修改成功请求的日志级别。"""
-        message = record.getMessage()
-        if (
-            record.name == "httpx"
-            and record.levelno == logging.INFO
-            and message.startswith(
-                "HTTP Request: POST https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings "
-            )
-            and '"HTTP/1.1 200' in message
-        ):
-            record.levelno = logging.DEBUG
-            record.levelname = "DEBUG"
         return True
 
 
@@ -81,13 +57,6 @@ def configure_logging() -> None:
     file_handler.setFormatter(formatter)
     file_handler.addFilter(_RuntimeNoiseFilter())
     root_logger.addHandler(file_handler)
-
-    httpx_logger = logging.getLogger("httpx")
-    if not any(
-        isinstance(log_filter, _DashScopeEmbeddingSuccessFilter)
-        for log_filter in httpx_logger.filters
-    ):
-        httpx_logger.addFilter(_DashScopeEmbeddingSuccessFilter())
 
     _CONFIGURED = True
 

@@ -39,7 +39,7 @@ def redact_secrets(value: Any) -> str:
 
     text = re.sub(r"(Bearer\s+)([A-Za-z0-9._\-]{8,})", mask_bearer, text)
     text = re.sub(
-        r"((?:api[_-]?key|dashscope_api_key|authorization)\s*[=:]\s*)([^\s,;'\"]{8,})",
+        r"((?:api[_-]?key|authorization)\s*[=:]\s*)([^\s,;'\"]{8,})",
         mask_named_key,
         text,
         flags=re.IGNORECASE,

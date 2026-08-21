@@ -14,17 +14,6 @@ from storage.json_store import load_json  # noqa: E402
 from storage.memory_store import MemoryStore  # noqa: E402
 
 
-class RecordingVectorStore:
-    # 记录迁移后收到的规范记忆快照。
-    def __init__(self) -> None:
-        """初始化同步快照列表。"""
-        self.snapshots: list[dict] = []
-
-    def sync_memory(self, memory: dict) -> None:
-        """保存一次同步调用的记忆快照。"""
-        self.snapshots.append(memory)
-
-
 class MemorySchemaTests(unittest.TestCase):
     # 准备当前测试所需的环境和数据。
     def setUp(self) -> None:
@@ -74,35 +63,6 @@ class MemorySchemaTests(unittest.TestCase):
             memory["relationship_memory"]["interaction_patterns"],
         )
         self.assertEqual(store.load(), memory)
-
-    # 验证补齐 schema 写回后会立即同步规范记忆到向量索引。
-    def test_load_schema_completion_syncs_canonical_memory_to_vector_store(self) -> None:
-        """验证补齐 schema 写回后会立即同步规范记忆到向量索引。"""
-        self.memory_path.write_text(
-            json.dumps(
-                {
-                    "user_profile": {
-                        "preferences": {
-                            "preferences_1": {
-                                "description": ["当前偏好"],
-                                "timestamp": "2026-01-02T03:04:05+00:00",
-                            }
-                        }
-                    }
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-        vector_store = RecordingVectorStore()
-
-        memory = MemoryStore(self.memory_path, vector_store).load()
-
-        self.assertEqual(len(vector_store.snapshots), 1)
-        self.assertEqual(
-            memory["user_profile"]["preferences"]["preferences_1"]["description"],
-            ["当前偏好"],
-        )
 
     # 验证结构化操作写入关系记忆，并保存当前 schema。
     def test_structured_operations_save_relationship_schema(self) -> None:
