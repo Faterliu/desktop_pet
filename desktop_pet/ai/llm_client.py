@@ -305,7 +305,7 @@ class LlmClient:
             )
         return ToolChatResponse(reply, calls, "native")
 
-    # 按 KLD 主地址、KLD 备用地址、DeepSeek 的顺序发送一次文本请求。
+    # KLD 主备线路交替重试三轮，均不可用后才降级到 DeepSeek。
     def _request_text_message(
         self,
         messages: list[dict[str, str]],
@@ -316,7 +316,8 @@ class LlmClient:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """按文本线路优先级请求消息，并返回消息和实际使用的连接配置。"""
         api = dict(initial_api) if isinstance(initial_api, dict) else self._api_config()
-        try:
+        route = self._kldai_text_route(api)
+        if not route:
             return (
                 self._request_message(
                     messages,
@@ -326,41 +327,43 @@ class LlmClient:
                 ),
                 api,
             )
-        except KldaiTextServiceUnavailableError:
-            route = self._kldai_text_route(api)
-            if route == "primary":
-                secondary_api = self._kldai_secondary_api(api)
-                logger.warning("KLD AI primary text route unavailable; retrying secondary route")
+
+        primary_api = dict(api)
+        primary_api["base_url"] = "https://www.kldai.cc"
+        secondary_api = self._kldai_secondary_api(primary_api)
+        for round_index in range(3):
+            for route_name, route_api in (("primary", primary_api), ("secondary", secondary_api)):
                 try:
                     return (
                         self._request_message(
                             messages,
                             tools=tools,
                             tool_choice=tool_choice,
-                            api_override=secondary_api,
+                            api_override=route_api,
                         ),
-                        secondary_api,
+                        route_api,
                     )
                 except KldaiTextServiceUnavailableError:
-                    api = secondary_api
-                    route = "secondary"
+                    logger.warning(
+                        "KLD AI %s text route unavailable; retry round=%s/3",
+                        route_name,
+                        round_index + 1,
+                    )
 
-            if route == "secondary":
-                fallback_api = self._deepseek_api_config()
-                if not str(fallback_api.get("api_key", "")).strip():
-                    logger.warning("KLD AI text routes unavailable; DeepSeek fallback is not configured")
-                    raise LlmError("KLD AI 文本服务暂时不可用，DeepSeek 降级服务未配置。") from None
-                logger.warning("KLD AI text routes unavailable; retrying through DeepSeek fallback")
-                return (
-                    self._request_message(
-                        messages,
-                        tools=tools,
-                        tool_choice=tool_choice,
-                        api_override=fallback_api,
-                    ),
-                    fallback_api,
-                )
-            raise
+        fallback_api = self._deepseek_api_config()
+        if not str(fallback_api.get("api_key", "")).strip():
+            logger.warning("KLD AI text routes unavailable after three rounds; DeepSeek fallback is not configured")
+            raise LlmError("KLD AI 文本服务暂时不可用，DeepSeek 降级服务未配置。")
+        logger.warning("KLD AI text routes unavailable after three rounds; retrying through DeepSeek fallback")
+        return (
+            self._request_message(
+                messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                api_override=fallback_api,
+            ),
+            fallback_api,
+        )
 
     # 基于 KLD 主线路配置构建同参数的备用地址连接配置。
     def _kldai_secondary_api(self, primary_api: dict[str, Any]) -> dict[str, Any]:

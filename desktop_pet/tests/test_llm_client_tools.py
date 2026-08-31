@@ -261,53 +261,59 @@ class LlmClientToolTests(unittest.TestCase):
                 self.assertEqual(post.call_args_list[0].kwargs["headers"], post.call_args_list[1].kwargs["headers"])
                 self.assertEqual(post.call_args_list[0].kwargs["json"], post.call_args_list[1].kwargs["json"])
 
-    # 验证两条 KLD 文本线路均不可用时才使用独立 DeepSeek 配置。
+    # 验证 KLD 主备线路连续三轮失败后才使用独立 DeepSeek 配置。
     def test_kldai_routes_fall_back_to_deepseek(self) -> None:
-        """验证线路顺序为 KLD 主地址、KLD 备用地址、DeepSeek，且不循环重试。"""
+        """验证线路按主备交替三轮，随后才降级到 DeepSeek。"""
         fallback = FakeResponse({"choices": [{"message": {"content": "DeepSeek 降级回复"}}]})
         client = LlmClient("unused-kldai.json")
         with patch("ai.llm_client.load_json_prefer_primary", return_value=self._kldai_config()):
             with patch(
                 "ai.llm_client.requests.post",
-                side_effect=[requests.Timeout("late"), FakeResponse({}, status_code=503), fallback],
+                side_effect=[requests.Timeout("late")] * 6 + [fallback],
             ) as post:
                 self.assertEqual(client.chat(self.messages), "DeepSeek 降级回复")
 
-        self.assertEqual(post.call_args_list[0].args[0], "https://www.kldai.cc/responses")
-        self.assertEqual(post.call_args_list[1].args[0], "https://www.kldai.vip/responses")
-        self.assertEqual(post.call_args_list[2].args[0], "https://api.deepseek.com/chat/completions")
-        fallback_payload = post.call_args_list[2].kwargs["json"]
+        kld_urls = [call.args[0] for call in post.call_args_list[:6]]
+        self.assertEqual(
+            kld_urls,
+            [
+                "https://www.kldai.cc/responses",
+                "https://www.kldai.vip/responses",
+            ] * 3,
+        )
+        self.assertEqual(post.call_args_list[6].args[0], "https://api.deepseek.com/chat/completions")
+        fallback_payload = post.call_args_list[6].kwargs["json"]
         self.assertEqual(fallback_payload["model"], "deepseek-v4-flash")
         self.assertEqual(fallback_payload["messages"], self.messages)
         self.assertEqual(fallback_payload["temperature"], 0.7)
 
     # 验证两条 KLD 均失败但未配置 DeepSeek 时不会请求不存在的备用服务。
     def test_kldai_routes_report_missing_deepseek_fallback(self) -> None:
-        """验证 DeepSeek 缺失时明确失败，且两条 KLD 地址只各请求一次。"""
+        """验证 DeepSeek 缺失时明确失败，且 KLD 主备各请求三次。"""
         client = LlmClient("unused-kldai.json")
         with patch("ai.llm_client.load_json_prefer_primary", return_value=self._kldai_config(with_deepseek=False)):
             with patch(
                 "ai.llm_client.requests.post",
-                side_effect=[requests.Timeout("late"), requests.Timeout("late")],
+                side_effect=[requests.Timeout("late")] * 6,
             ) as post:
                 with self.assertRaisesRegex(LlmError, "DeepSeek 降级服务未配置"):
                     client.chat(self.messages)
 
-        self.assertEqual(post.call_count, 2)
+        self.assertEqual(post.call_count, 6)
 
     # 验证 DeepSeek 的最终失败会直接返回，不再重新请求任一 KLD 地址。
     def test_deepseek_failure_does_not_restart_kldai_routes(self) -> None:
-        """验证三段式线路至多请求一次，避免故障时形成循环重试。"""
+        """验证 KLD 主备三轮后，DeepSeek 只请求一次且不重启循环。"""
         client = LlmClient("unused-kldai.json")
         with patch("ai.llm_client.load_json_prefer_primary", return_value=self._kldai_config()):
             with patch(
                 "ai.llm_client.requests.post",
-                side_effect=[requests.Timeout("late"), requests.Timeout("late"), requests.Timeout("late")],
+                side_effect=[requests.Timeout("late")] * 7,
             ) as post:
                 with self.assertRaisesRegex(LlmError, "没来得及想好"):
                     client.chat(self.messages)
 
-        self.assertEqual(post.call_count, 3)
+        self.assertEqual(post.call_count, 7)
 
     # 验证 KLD 故障后的提醒 tools 请求会在 DeepSeek 继续执行原生协议。
     def test_reminder_tools_fall_back_through_both_kldai_routes_to_deepseek(self) -> None:
@@ -335,14 +341,14 @@ class LlmClientToolTests(unittest.TestCase):
         with patch("ai.llm_client.load_json_prefer_primary", return_value=self._kldai_config()):
             with patch(
                 "ai.llm_client.requests.post",
-                side_effect=[requests.Timeout("late"), requests.Timeout("late"), tool_response],
+                side_effect=[requests.Timeout("late")] * 6 + [tool_response],
             ) as post:
                 result = client.chat_with_reminder_tools(self.messages, self.messages)
 
         self.assertEqual(result.protocol, "native")
         self.assertEqual(result.reminder_calls[0].title, "开会")
-        self.assertEqual(post.call_args_list[2].args[0], "https://api.deepseek.com/chat/completions")
-        self.assertIn("tools", post.call_args_list[2].kwargs["json"])
+        self.assertEqual(post.call_args_list[6].args[0], "https://api.deepseek.com/chat/completions")
+        self.assertIn("tools", post.call_args_list[6].kwargs["json"])
 
     # 验证 DeepSeek 不支持 tools 时，严格 JSON 协议仍在 DeepSeek 执行。
     def test_deepseek_tools_json_fallback_stays_on_deepseek(self) -> None:
@@ -363,17 +369,17 @@ class LlmClientToolTests(unittest.TestCase):
         with patch("ai.llm_client.load_json_prefer_primary", return_value=self._kldai_config()):
             with patch(
                 "ai.llm_client.requests.post",
-                side_effect=[requests.Timeout("late"), requests.Timeout("late"), unsupported, json_response],
+                side_effect=[requests.Timeout("late")] * 6 + [unsupported, json_response],
             ) as post:
                 result = client.chat_with_reminder_tools(self.messages, self.messages)
 
         self.assertEqual(result.protocol, "json")
         self.assertEqual(result.reminder_calls[0].title, "休息")
-        self.assertEqual(post.call_count, 4)
-        self.assertEqual(post.call_args_list[2].args[0], "https://api.deepseek.com/chat/completions")
-        self.assertEqual(post.call_args_list[3].args[0], "https://api.deepseek.com/chat/completions")
-        self.assertIn("tools", post.call_args_list[2].kwargs["json"])
-        self.assertNotIn("tools", post.call_args_list[3].kwargs["json"])
+        self.assertEqual(post.call_count, 8)
+        self.assertEqual(post.call_args_list[6].args[0], "https://api.deepseek.com/chat/completions")
+        self.assertEqual(post.call_args_list[7].args[0], "https://api.deepseek.com/chat/completions")
+        self.assertIn("tools", post.call_args_list[6].kwargs["json"])
+        self.assertNotIn("tools", post.call_args_list[7].kwargs["json"])
 
     # 验证普通客户端错误不会把非服务故障请求切换到备用线路。
     def test_kldai_non_retryable_client_error_does_not_fallback(self) -> None:
