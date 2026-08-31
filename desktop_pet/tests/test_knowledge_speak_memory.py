@@ -277,6 +277,16 @@ class KnowledgeSpeakMemoryTests(unittest.TestCase):
         self.assertEqual(window.notified, ["extra_knowledge"])
         self.assertTrue(window.ack_shown)
 
+    # 验证自动知识问候失败时不播放动作，也不显示任何提示。
+    def test_failure_callback_does_not_show_or_play_failure(self) -> None:
+        """验证自动知识问候 API 失败不会改变界面状态。"""
+        window = FakeKnowledgeSuccessWindow()
+
+        DesktopPetWindow._on_knowledge_speak_failure(window, "知识问候暂时不可用。")
+
+        self.assertEqual(window.actions, [])
+        self.assertEqual(window.displayed, [])
+
 
 if __name__ == "__main__":
     unittest.main()

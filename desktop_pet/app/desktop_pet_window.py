@@ -3081,14 +3081,10 @@ class DesktopPetWindow(QWidget):
             self.reply_bubble.show_message(ack, self.geometry(), 8000)
             self._sync_floating_widgets()
 
-    # 知识问候 API 失败后展示错误提示。
+    # 自动知识问候请求失败时保持当前界面，不显示失败动作或错误气泡。
     def _on_knowledge_speak_failure(self, error_message: str) -> None:
-        """知识问候 API 失败后展示错误提示。"""
-        if self._closing_or_closed():
-            return
-        if getattr(self, "_sprite_action_owner", None) == "knowledge_pending":
-            _set_pet_action(self, "failed", owner="knowledge_failure")
-        self._display_message(error_message, 8000, "assistant")
+        """忽略自动知识问候失败，保持当前界面状态。"""
+        return
 
     # 用户点击右侧应答气泡，视为回应主动问候并更新间隔。
     def _handle_reply_bubble_clicked(self) -> None:
