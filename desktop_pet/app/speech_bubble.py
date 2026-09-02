@@ -168,16 +168,19 @@ class SpeechBubble(QWidget):
         painter.setPen(QColor("#d8b27a"))
         painter.drawPath(path)
 
-    # 返回气泡主体和尾巴的轮廓，供绘制和窗口裁剪共用。
+    # 返回气泡主体和尾巴的单一外轮廓，供绘制和窗口裁剪共用。
     def _bubble_path(self) -> QPainterPath:
-        """返回气泡主体和尾巴的轮廓，供绘制和窗口裁剪共用。"""
-        path = QPainterPath()
-        path.addRoundedRect(0, 0, self.width(), self.height() - 8, 18, 18)
-        path.moveTo(self.width() - 44, self.height() - 8)
-        path.lineTo(self.width() - 32, self.height())
-        path.lineTo(self.width() - 20, self.height() - 8)
-        path.closeSubpath()
-        return path
+        """合并气泡主体与尾巴，避免描边落在二者的连接处。"""
+        body = QPainterPath()
+        body_bottom = self.height() - 8
+        body.addRoundedRect(0, 0, self.width(), body_bottom, 18, 18)
+
+        tail = QPainterPath()
+        tail.moveTo(self.width() - 44, body_bottom - 1)
+        tail.lineTo(self.width() - 32, self.height())
+        tail.lineTo(self.width() - 20, body_bottom - 1)
+        tail.closeSubpath()
+        return body.united(tail)
 
     # 按气泡轮廓裁剪窗口，避免系统沿矩形外接框补边。
     def _apply_bubble_mask(self) -> None:

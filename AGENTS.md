@@ -37,7 +37,7 @@ py -m pip install -r requirements.txt
 py main.py
 ```
 
-Use `py` / `py -m pip` on Windows. Do not assume `python` or `pip` points to the intended interpreter; they may be Microsoft Store aliases or old launchers.
+Use `py` / `py -m pip` on Windows for first-time environment setup. Run project tests with `.\desktop_pet_venv\Scripts\python.exe`, not the global `py`, because the virtual environment is the application runtime and contains project dependencies such as `requests`. Do not assume `python` or `pip` points to the intended interpreter; they may be Microsoft Store aliases or old launchers.
 
 Startup diagnostics:
 
@@ -182,7 +182,7 @@ py -m pip install -r requirements.txt
 Run tests:
 
 ```powershell
-py -m unittest discover -s desktop_pet/tests
+.\desktop_pet_venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
 Check Python syntax without writing `__pycache__`:

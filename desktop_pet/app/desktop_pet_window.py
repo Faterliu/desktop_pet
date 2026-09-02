@@ -45,7 +45,7 @@ from app.context_menu import (
 )
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
-from app.message_splitter import split_knowledge_bubble_text
+from app.message_splitter import split_informal_answer_text, split_knowledge_bubble_text
 from app.reminder_controller import ReminderController
 from app.reminder_tool import ReminderTool, ReminderToolRequest
 from app.screenshot_analysis_worker import ScreenshotAnalysisWorker
@@ -781,6 +781,7 @@ class DesktopPetWindow(QWidget):
         self._queued_maintenance_force = False
         self._queued_maintenance_source = "round_threshold"
         self._suppress_click = False
+        self._answer_bubble_generation = 0
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
         self._click_timer.timeout.connect(self._open_chat_input)
@@ -2098,6 +2099,7 @@ class DesktopPetWindow(QWidget):
     # 处理用户提交的消息，并决定走占位回复还是 API 回复。
     def _handle_user_message(self, message: str) -> None:
         """处理用户提交的消息，并决定走占位回复还是 API 回复。"""
+        self._answer_bubble_generation += 1
         proactive_response = False
         if self.behavior_controller.is_within_proactive_reply_window():
             proactive_response = bool(self.behavior_controller.notify_proactive_response())
@@ -3122,7 +3124,49 @@ class DesktopPetWindow(QWidget):
             self._show_formal_answer_panel(question, text)
             return
         duration_ms = self._assistant_reply_bubble_duration_ms() if source == "assistant" else 9000
-        self._display_message(text, duration_ms, source)
+        if source != "assistant":
+            self._display_message(text, duration_ms, source)
+            return
+
+        parts = split_informal_answer_text(text)
+        if len(parts) <= 1:
+            self._display_message(text, duration_ms, source)
+            return
+
+        self._answer_bubble_generation += 1
+        generation = self._answer_bubble_generation
+        self._display_message(parts[0], duration_ms, source)
+        self._schedule_next_answer_bubble(parts, 1, duration_ms, generation)
+
+    # 按顺序安排非正式回答的后续气泡。
+    def _schedule_next_answer_bubble(
+        self,
+        parts: list[str],
+        index: int,
+        duration_ms: int,
+        generation: int,
+    ) -> None:
+        """在当前气泡结束后展示下一段回答。"""
+        if index >= len(parts):
+            return
+        QTimer.singleShot(
+            duration_ms + 50,
+            lambda: self._show_next_answer_bubble(parts, index, duration_ms, generation),
+        )
+
+    # 展示仍属于当前回答的下一段气泡。
+    def _show_next_answer_bubble(
+        self,
+        parts: list[str],
+        index: int,
+        duration_ms: int,
+        generation: int,
+    ) -> None:
+        """校验回答序号后展示下一段气泡。"""
+        if generation != self._answer_bubble_generation or self._is_closing:
+            return
+        self._display_message(parts[index], duration_ms, "assistant")
+        self._schedule_next_answer_bubble(parts, index + 1, duration_ms, generation)
 
     # 按正式问答显示方式展示回答，支持新建面板或追加内容。
     def _show_formal_answer_panel(self, question: str, answer: str) -> None:
