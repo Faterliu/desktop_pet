@@ -273,7 +273,9 @@ class BehaviorController(QObject):
             return 30
         if self._consecutive_unanswered == 3:
             return random.randint(30, 60)
-        return 60
+        if self._consecutive_unanswered == 4:
+            return random.randint(60, 120)
+        return 120
 
     # 读取主动问候最小间隔，配置无效时回退默认分钟数。
     def _minimum_proactive_interval_minutes(self, behavior: dict[str, Any]) -> int:

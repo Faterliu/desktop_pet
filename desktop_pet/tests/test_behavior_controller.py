@@ -443,6 +443,13 @@ class BehaviorControllerTests(unittest.TestCase):
                 controller._dynamic_proactive_interval_minutes(),
                 30,
             )
+            controller._consecutive_unanswered = 4
+            with patch("character.behavior_controller.random.randint", return_value=60):
+                self.assertEqual(controller._dynamic_proactive_interval_minutes(), 60)
+            with patch("character.behavior_controller.random.randint", return_value=120):
+                self.assertEqual(controller._dynamic_proactive_interval_minutes(), 120)
+            controller._consecutive_unanswered = 5
+            self.assertEqual(controller._dynamic_proactive_interval_minutes(), 120)
 
     # 验证深夜专属问候只从休息提醒和困倦提示中等概率选择，且跳过场景和知识分支。
     def test_night_greeting_uses_only_local_rest_and_sleepy_lines(self) -> None:

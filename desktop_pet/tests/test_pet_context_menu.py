@@ -141,6 +141,9 @@ class PetContextMenuTests(unittest.TestCase):
         settings_menu = card.submenu_for("设置")
         self.assertIsNotNone(settings_menu)
         setting_titles = {action.text() for action in settings_menu.actions()}
+        clipboard_menu = card.submenu_for("剪贴板助手")
+        self.assertIsNotNone(clipboard_menu)
+        self.assertIn("提问剪贴板...", {action.text() for action in clipboard_menu.actions()})
         self.assertTrue(
             {
                 "测试",

@@ -47,6 +47,7 @@ from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
 from app.message_splitter import split_informal_answer_text, split_knowledge_bubble_text
 from app.reminder_controller import ReminderController
+from app.reminder_input_dialog import ReminderInputDialog
 from app.reminder_tool import ReminderTool, ReminderToolRequest
 from app.screenshot_analysis_worker import ScreenshotAnalysisWorker
 from app.screenshot_capture_service import (
@@ -172,6 +173,7 @@ CLIPBOARD_ASSISTANT_LABELS = {
     "polish": "润色",
     "explain": "解释",
     "answer": "正式回答",
+    "custom_question": "自定义提问",
 }
 
 MOVEMENT_ACTIONS = frozenset({"running_right", "running_left", "jumping"})
@@ -384,6 +386,7 @@ class UtilityPromptWorker(QObject):
         clipboard_text: str,
         client: LlmClient,
         prompt_builder: PromptBuilder,
+        custom_instruction: str | None = None,
     ) -> None:
         """初始化剪贴板辅助任务所需的模式、文本和模型依赖。"""
         super().__init__()
@@ -391,12 +394,13 @@ class UtilityPromptWorker(QObject):
         self.clipboard_text = clipboard_text
         self.client = client
         self.prompt_builder = prompt_builder
+        self.custom_instruction = custom_instruction
 
     # 构建独立提示并请求模型，不读取聊天历史、不触发记忆工具。
     def run(self) -> None:
         """构建独立提示并请求模型，不读取聊天历史、不触发记忆工具。"""
         try:
-            instruction = CLIPBOARD_ASSISTANT_INSTRUCTIONS.get(self.mode)
+            instruction = self.custom_instruction or CLIPBOARD_ASSISTANT_INSTRUCTIONS.get(self.mode)
             if not instruction:
                 raise ValueError("不支持的剪贴板处理模式。")
             user_message = (
@@ -1350,24 +1354,29 @@ class DesktopPetWindow(QWidget):
     # 通过菜单添加固定 10 分钟后的提醒。
     def _add_ten_minute_reminder(self) -> None:
         """通过菜单添加固定 10 分钟后的提醒。"""
-        title, accepted = QInputDialog.getText(self, "10 分钟后提醒", "提醒内容：")
+        title, accepted = ReminderInputDialog.get_text(
+            "10 分钟后提醒", "提醒内容：", self.geometry(), self.bubble_position_service
+        )
         if accepted:
             self._create_reminder_after_minutes(title, 10, "menu_10_minutes")
 
     # 通过菜单添加用户指定分钟数后的提醒。
     def _add_custom_minute_reminder(self) -> None:
         """通过菜单添加用户指定分钟数后的提醒。"""
-        minutes, accepted = QInputDialog.getInt(
-            self,
+        minutes, accepted = ReminderInputDialog.get_int(
             "添加自定义分钟提醒",
             "多少分钟后提醒：",
+            self.geometry(),
+            self.bubble_position_service,
             value=30,
-            minValue=1,
-            maxValue=7 * 24 * 60,
+            minimum=1,
+            maximum=7 * 24 * 60,
         )
         if not accepted:
             return
-        title, accepted = QInputDialog.getText(self, "添加自定义分钟提醒", "提醒内容：")
+        title, accepted = ReminderInputDialog.get_text(
+            "添加自定义分钟提醒", "提醒内容：", self.geometry(), self.bubble_position_service
+        )
         if accepted:
             self._create_reminder_after_minutes(title, minutes, "menu_custom_minutes")
 
@@ -1452,7 +1461,18 @@ class DesktopPetWindow(QWidget):
     # 按菜单选择主动读取剪贴板，并启动独立的后台辅助请求。
     def _handle_clipboard_assistant(self, mode: str) -> None:
         """按菜单选择主动读取剪贴板，并启动独立的后台辅助请求。"""
-        if mode not in CLIPBOARD_ASSISTANT_INSTRUCTIONS:
+        custom_instruction = None
+        if mode == "custom_question":
+            custom_instruction, accepted = ReminderInputDialog.get_text(
+                "提问剪贴板",
+                "请输入你想了解的问题或处理要求：",
+                self.geometry(),
+                self.bubble_position_service,
+            )
+            custom_instruction = custom_instruction.strip()
+            if not accepted or not custom_instruction:
+                return
+        elif mode not in CLIPBOARD_ASSISTANT_INSTRUCTIONS:
             self._display_message("不支持这个剪贴板处理方式。", 3200, "system")
             return
         if not self._clipboard_assistant_enabled():
@@ -1486,12 +1506,13 @@ class DesktopPetWindow(QWidget):
                 "operation": "clipboard_assistant",
                 "assistant_mode": mode,
                 "chars": len(clipboard_text),
+                **({"custom_instruction": custom_instruction} if custom_instruction else {}),
                 "truncated": truncated,
             },
         )
         _set_pet_action(self, "review", owner="clipboard")
         self._display_message("我来看看剪贴板里的内容。", 2800, "system")
-        self._start_clipboard_assistant_worker(mode, clipboard_text)
+        self._start_clipboard_assistant_worker(mode, clipboard_text, custom_instruction)
         self._start_conversation_maintenance(["clipboard"], "round_threshold")
 
     # 根据菜单模式启动全屏快速解析或框选截图提问。
@@ -2320,7 +2341,7 @@ class DesktopPetWindow(QWidget):
         self.chat_thread.start()
 
     # 创建独立后台线程处理剪贴板内容，不接入聊天记录与摘要流程。
-    def _start_clipboard_assistant_worker(self, mode: str, clipboard_text: str) -> None:
+    def _start_clipboard_assistant_worker(self, mode: str, clipboard_text: str, custom_instruction: str | None = None) -> None:
         """创建独立后台线程处理剪贴板内容，不接入聊天记录与摘要流程。"""
         if self.background_tasks.is_registered("clipboard_assistant"):
             return
@@ -2331,6 +2352,7 @@ class DesktopPetWindow(QWidget):
             clipboard_text,
             self.llm_client,
             self.prompt_builder,
+            custom_instruction,
         )
         self.clipboard_worker.moveToThread(self.clipboard_thread)
         self.clipboard_thread.started.connect(self.clipboard_worker.run)

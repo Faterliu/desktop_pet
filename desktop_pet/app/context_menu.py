@@ -624,6 +624,7 @@ def build_context_menu_actions(
                     ("polish", "润色剪贴板"),
                     ("explain", "解释剪贴板"),
                     ("answer", "作为正式问题回答"),
+                    ("custom_question", "提问剪贴板..."),
                 ]
             ),
             placement="primary",
