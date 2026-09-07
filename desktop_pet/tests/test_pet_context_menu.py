@@ -185,6 +185,33 @@ class PetContextMenuTests(unittest.TestCase):
         self.assertNotIn("清除非正式聊天记录", titles)
         self.assertNotIn("重新加载配置", titles)
 
+    # 验证测试菜单会展示新增精灵动作，并将点击动作原样交给窗口处理。
+    def test_test_menu_exposes_new_sprite_actions(self) -> None:
+        """验证测试菜单可触发新增精灵动作。"""
+        selected_actions: list[str] = []
+        parent = QWidget()
+        card = build_pet_context_menu(
+            parent,
+            character_name="小桃",
+            actions=self._menu_actions(
+                test_action_handler=selected_actions.append,
+                show_test_menu=True,
+            ),
+        )
+        settings_menu = card.submenu_for("设置")
+        self.assertIsNotNone(settings_menu)
+        settings_actions = {action.text(): action for action in settings_menu.actions()}
+        test_menu = settings_actions["测试"].menu()
+        self.assertIsNotNone(test_menu)
+        test_actions = {action.text(): action for action in test_menu.actions()}
+
+        for action_name in ("happy", "sleepy", "leaf-hug"):
+            test_actions[f"测试动作：{action_name}"].trigger()
+
+        self.assertEqual(selected_actions, ["happy", "sleepy", "leaf-hug"])
+        card.close()
+        parent.close()
+
     # 验证设置菜单中的开关与互斥选项保留现有勾选语义。
     def test_settings_menu_preserves_toggle_and_exclusive_choice_state(self) -> None:
         """验证模型生成的 QAction 勾选状态和单选回调保持一致。"""

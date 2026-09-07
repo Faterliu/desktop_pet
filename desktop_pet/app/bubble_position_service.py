@@ -22,9 +22,12 @@ class BubblePositionService:
     ) -> QPoint:
         """根据 bubble_size、anchor_rect、exclusion_rects 计算窗口或气泡位置，保证结果落在可见屏幕内。"""
         bubble_width, bubble_height = bubble_size
+        center_x = anchor_rect.x() + anchor_rect.width() // 2
         candidates = [
+            QPoint(center_x - bubble_width // 2, anchor_rect.y() - bubble_height - 10),
             QPoint(anchor_rect.x() + anchor_rect.width() - bubble_width + 20, anchor_rect.y() - bubble_height - 10),
             QPoint(anchor_rect.x() - 20, anchor_rect.y() - bubble_height - 10),
+            QPoint(center_x - bubble_width // 2, anchor_rect.y() + anchor_rect.height() + 10),
             QPoint(anchor_rect.x() + anchor_rect.width() - bubble_width + 20, anchor_rect.y() + anchor_rect.height() + 10),
             QPoint(anchor_rect.x() - 20, anchor_rect.y() + anchor_rect.height() + 10),
             QPoint(anchor_rect.x() + anchor_rect.width() + 10, anchor_rect.y() + anchor_rect.height() // 2 - bubble_height // 2),

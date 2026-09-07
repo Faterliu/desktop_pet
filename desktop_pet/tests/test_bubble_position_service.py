@@ -71,6 +71,17 @@ class BubblePositionServiceTests(unittest.TestCase):
                 position = self.service.speech_bubble_position(bubble_size, anchor)
                 self.assert_inside_screen(position, bubble_size)
 
+    # 验证普通气泡优先水平居中于角色，避免尾巴偏离新精灵主体。
+    def test_speech_bubble_prefers_centered_position_above_pet(self) -> None:
+        """验证普通气泡优先水平居中于角色，避免尾巴偏离新精灵主体。"""
+        anchor = QRect(300, 260, 192, 208)
+        bubble_size = (180, 64)
+
+        position = self.service.speech_bubble_position(bubble_size, anchor)
+
+        self.assertEqual(position.x(), 306)
+        self.assertEqual(position.y(), 186)
+
     # 验证回复 气泡 stays on 屏幕 around edges场景下的预期结果。
     def test_reply_bubble_stays_on_screen_around_edges(self) -> None:
         """验证回复 气泡 stays on 屏幕 around edges场景下的预期结果。"""

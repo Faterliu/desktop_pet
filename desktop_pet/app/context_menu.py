@@ -683,6 +683,9 @@ def build_context_menu_actions(
                     ("failed", "测试动作：failed"),
                     ("review", "测试动作：review"),
                     ("running", "测试动作：running"),
+                    ("happy", "测试动作：happy"),
+                    ("sleepy", "测试动作：sleepy"),
+                    ("leaf-hug", "测试动作：leaf-hug"),
                 ]
             ),
             MenuAction("test_movement_separator", kind="separator"),

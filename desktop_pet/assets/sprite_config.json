@@ -1,63 +1,97 @@
 {
-  "sprite_file": "assets/raw_spritesheet_short_arm.webp",
+  "sprite_file": "assets/spritesheet.webp",
+  "id": "maple-enhanced",
+  "displayName": "Maple · 枫叶同学",
+  "description": "长发、学院风与橙色枫叶；12 类动作，每类 16 帧。",
+  "format": "maple-extended-v1",
+  "spritesheetPath": "spritesheet.webp",
   "frame_width": 192,
   "frame_height": 208,
-  "rows": 9,
-  "columns": 8,
+
+  "rows": 12,
+  "columns": 16,
   "default_fps": 8,
   "actions": {
     "idle": {
+      "label": "呼吸眨眼",
       "row": 0,
-      "frames": 6,
+      "frames": 16,
       "fps": 6,
       "loop": true
     },
     "running_right": {
       "row": 1,
-      "frames": 8,
-      "fps": 10,
+      "frames": 16,
+      "fps": 12,
       "loop": true
     },
     "running_left": {
       "row": 2,
-      "frames": 8,
-      "fps": 10,
+      "frames": 16,
+      "fps": 12,
       "loop": true
     },
     "waving": {
+      "label": "招手问好",
       "row": 3,
-      "frames": 4,
-      "fps": 8,
+      "frames": 12,
+      "fps": 10,
       "loop": false
     },
     "jumping": {
+      "label": "轻盈跳跃",
       "row": 4,
-      "frames": 5,
-      "fps": 8,
+      "frames": 16,
+      "fps": 12,
       "loop": false
     },
     "failed": {
+      "label": "失落鼓腮",
       "row": 5,
-      "frames": 8,
-      "fps": 1.7,
+      "frames": 16,
+      "fps": 10,
       "loop": false
     },
     "waiting": {
+      "label": "期待回应",
       "row": 6,
-      "frames": 6,
-      "fps": 1.5,
+      "frames": 12,
+      "fps": 5,
       "loop": true
     },
     "running": {
+      "label": "认真思考",
       "row": 7,
-      "frames": 6,
-      "fps": 1.9,
+      "frames": 16,
+      "fps": 8,
       "loop": true
     },
     "review": {
+      "label": "仔细端详",
       "row": 8,
-      "frames": 6,
-      "fps": 1.6,
+      "frames": 16,
+      "fps": 8,
+      "loop": true
+    },
+    "happy": {
+      "label": "开心摇摆",
+      "row": 9,
+      "frames": 16,
+      "fps": 5,
+      "loop": true
+    },
+    "sleepy": {
+      "label": "困倦点头",
+      "row": 10,
+      "frames": 16,
+      "fps": 10,
+      "loop": true
+    },
+    "leaf-hug": {
+      "label": "抱紧枫叶",
+      "row": 8,
+      "frames": 16,
+      "fps": 8,
       "loop": true
     }
   }

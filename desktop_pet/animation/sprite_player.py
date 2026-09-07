@@ -16,11 +16,22 @@ DEFAULT_SPRITE_CONFIG = {
     "sprite_file": "assets/spritesheet.webp",
     "frame_width": 192,
     "frame_height": 208,
-    "rows": 9,
-    "columns": 8,
+    "rows": 12,
+    "columns": 16,
     "default_fps": 8,
     "actions": {
-        "idle": {"row": 0, "frames": 1, "fps": 6, "loop": True},
+        "idle": {"row": 0, "frames": 16, "fps": 8, "loop": True},
+        "running_right": {"row": 1, "frames": 16, "fps": 15, "loop": True},
+        "running_left": {"row": 2, "frames": 16, "fps": 15, "loop": True},
+        "waving": {"row": 3, "frames": 16, "fps": 12, "loop": True},
+        "jumping": {"row": 4, "frames": 16, "fps": 14, "loop": True},
+        "failed": {"row": 5, "frames": 16, "fps": 7, "loop": True},
+        "waiting": {"row": 6, "frames": 16, "fps": 7, "loop": True},
+        "running": {"row": 7, "frames": 16, "fps": 10, "loop": True},
+        "review": {"row": 8, "frames": 16, "fps": 8, "loop": True},
+        "happy": {"row": 9, "frames": 16, "fps": 11, "loop": True},
+        "sleepy": {"row": 10, "frames": 16, "fps": 6, "loop": True},
+        "leaf-hug": {"row": 11, "frames": 16, "fps": 9, "loop": True},
     },
 }
 
@@ -111,7 +122,7 @@ class SpritePlayer(QObject):
         action_config = self.config.get("actions", {}).get(action_name, {})
         frame_count = len(self.frames_by_action.get(action_name, [])) or int(action_config.get("frames", 1))
         fps = int(action_config.get("fps", self.config.get("default_fps", 8)))
-        interval_ms = max(400, int(1000 / max(fps, 1)))
+        interval_ms = max(1, int(1000 / max(fps, 1)))
         if not force_single_cycle and bool(action_config.get("loop", True)):
             return interval_ms
         return max(interval_ms, frame_count * interval_ms)
@@ -140,7 +151,7 @@ class SpritePlayer(QObject):
         """根据动作帧率重新启动播放计时器。"""
         action_config = self.config.get("actions", {}).get(action_name, {})
         fps = int(action_config.get("fps", self.config.get("default_fps", 8)))
-        interval_ms = max(400, int(1000 / max(fps, 1)))
+        interval_ms = max(1, int(1000 / max(fps, 1)))
         self.timer.start(interval_ms)
 
     # 从图集裁切出每个动作对应的帧列表。

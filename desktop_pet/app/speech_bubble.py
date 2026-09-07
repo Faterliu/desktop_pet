@@ -147,9 +147,12 @@ class SpeechBubble(QWidget):
         a = self._last_anchor_rect
         bw = self.width()
         bh = self.height()
+        center_x = a.x() + a.width() // 2
         candidates = [
+            QPoint(center_x - bw // 2, a.y() - bh - 10),
             QPoint(a.x() + a.width() - bw + 20, a.y() - bh - 10),
             QPoint(a.x() - 20, a.y() - bh - 10),
+            QPoint(center_x - bw // 2, a.y() + a.height() + 10),
             QPoint(a.x() + a.width() - bw + 20, a.y() + a.height() + 10),
             QPoint(a.x() - 20, a.y() + a.height() + 10),
             QPoint(a.x() + a.width() + 10, a.y() + a.height() // 2 - bh // 2),
@@ -176,9 +179,10 @@ class SpeechBubble(QWidget):
         body.addRoundedRect(0, 0, self.width(), body_bottom, 18, 18)
 
         tail = QPainterPath()
-        tail.moveTo(self.width() - 44, body_bottom - 1)
-        tail.lineTo(self.width() - 32, self.height())
-        tail.lineTo(self.width() - 20, body_bottom - 1)
+        tail_center = self.width() // 2
+        tail.moveTo(tail_center - 12, body_bottom - 1)
+        tail.lineTo(tail_center, self.height())
+        tail.lineTo(tail_center + 12, body_bottom - 1)
         tail.closeSubpath()
         return body.united(tail)
 
