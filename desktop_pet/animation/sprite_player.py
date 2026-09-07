@@ -102,11 +102,17 @@ class SpritePlayer(QObject):
         frame = frames[min(self.current_index, len(frames) - 1)]
         if self.scale == 1.0:
             return frame
+        # 整数倍放大保留像素风；缩小或非整数倍缩放用覆盖率采样，避免细边跳像素。
+        transformation = (
+            Qt.TransformationMode.FastTransformation
+            if self.scale >= 1.0 and float(self.scale).is_integer()
+            else Qt.TransformationMode.SmoothTransformation
+        )
         return frame.scaled(
             int(frame.width() * self.scale),
             int(frame.height() * self.scale),
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation,
+            transformation,
         )
 
     # 返回按当前缩放计算后的基础显示尺寸。

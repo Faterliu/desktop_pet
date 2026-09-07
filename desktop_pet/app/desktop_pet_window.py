@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     QObject,
     Slot,
 )
-from PySide6.QtGui import QAction, QCloseEvent, QMouseEvent, QPixmap
+from PySide6.QtGui import QAction, QCloseEvent, QMouseEvent, QPixmap, QRegion
 from PySide6.QtWidgets import QApplication, QInputDialog, QLabel, QWidget
 
 from ai.context_manager import ContextManager
@@ -74,6 +74,7 @@ from storage.memory_store import MemoryStore, memory_descriptions, normalize_mem
 from storage.reminder_store import ReminderStore
 from utils.dwm_border import apply_transparent_window_fixes, force_window_topmost, suppress_dwm_border
 from utils.logger import get_logger
+from utils.sprite_mask import visible_sprite_mask
 
 
 logger = get_logger(__name__)
@@ -3267,16 +3268,18 @@ class DesktopPetWindow(QWidget):
         self._apply_sprite_window_mask(pixmap)
         self._sync_floating_widgets()
 
-    # 按精灵帧的透明区域裁剪窗口，避免系统沿矩形外接框绘制边框。
+    # 仅裁剪完全透明区域，保留平滑缩放后的半透明轮廓。
     def _apply_sprite_window_mask(self, pixmap: QPixmap) -> None:
-        """按精灵帧的透明区域裁剪窗口，避免系统沿矩形外接框绘制边框。"""
-        mask = pixmap.mask()
+        """保留细边的透明度，由顶层窗口统一裁剪，避免标签再次截断边缘。"""
+        mask = visible_sprite_mask(pixmap)
         if mask.isNull():
             self.clearMask()
             self.sprite_label.clearMask()
             return
-        self.setMask(mask)
-        self.sprite_label.setMask(mask)
+        region = QRegion(mask)
+        if self.mask() != region:
+            self.setMask(region)
+        self.sprite_label.clearMask()
 
     # 恢复上次窗口位置；首次启动则放到屏幕右下角。
     def _restore_position(self) -> None:
