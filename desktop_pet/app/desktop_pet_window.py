@@ -1030,13 +1030,15 @@ class DesktopPetWindow(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """处理鼠标释放事件，区分点击聊天和拖拽结束；双击通过计时器抑制单击。"""
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.dragging:
+            was_dragging = self.dragging
+            if was_dragging:
                 self._save_window_position()
             elif self.config_service.get_bool("ui.click_to_chat", True):
                 if self._suppress_click:
                     self._suppress_click = False
                 else:
                     self._click_timer.start(QApplication.doubleClickInterval())
+            self.dragging = False
         super().mouseReleaseEvent(event)
 
     # 双击人物视为回复/打招呼；若在主动问候后窗口内则回复 feedback 话术。

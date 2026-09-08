@@ -18,9 +18,9 @@ logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
 sys.modules.setdefault("utils.logger", logger_module)
 
-from PySide6.QtCore import QAbstractAnimation  # noqa: E402
-from PySide6.QtGui import QPixmap  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QAbstractAnimation, QEvent, QPointF, Qt  # noqa: E402
+from PySide6.QtGui import QMouseEvent, QPixmap  # noqa: E402
+from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from animation.sprite_player import SpritePlayer  # noqa: E402
 from app.desktop_pet_window import (  # noqa: E402
@@ -125,6 +125,32 @@ class FakeReminderWaitWindow:
 
 class InteractionActionConflictTests(unittest.TestCase):
     """验证用户回应动作不会被通用 idle 收尾或旧移动回调覆盖。"""
+
+    def test_drag_release_clears_movement_lock_for_follow_up_jump(self) -> None:
+        """拖动结束后必须解除移动锁，保证测试跳跃可以继续执行。"""
+        app = QApplication.instance() or QApplication([])
+        window = DesktopPetWindow.__new__(DesktopPetWindow)
+        QWidget.__init__(window)
+        saved: list[bool] = []
+        window.dragging = True
+        window.exit_animation_in_progress = False
+        window._save_window_position = lambda: saved.append(True)
+        event = QMouseEvent(
+            QEvent.Type.MouseButtonRelease,
+            QPointF(1, 1),
+            QPointF(1, 1),
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        DesktopPetWindow.mouseReleaseEvent(window, event)
+
+        self.assertEqual(saved, [True])
+        self.assertFalse(window.dragging)
+        self.assertFalse(DesktopPetWindow._movement_locked(window))
+        window.deleteLater()
+        del app
 
     def test_double_click_starts_waving_after_mouse_event_without_settling(self) -> None:
         """双击回应延后播放挥手，且不调用互动收尾。"""

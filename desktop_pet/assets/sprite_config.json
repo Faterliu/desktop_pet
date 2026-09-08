@@ -16,7 +16,7 @@
       "label": "呼吸眨眼",
       "row": 0,
       "frames": 16,
-      "fps": 6,
+      "fps": 4,
       "loop": true
     },
     "running_right": {
