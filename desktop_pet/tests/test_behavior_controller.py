@@ -388,6 +388,23 @@ class BehaviorControllerTests(unittest.TestCase):
 
             self.assertEqual(controller.pick_context_menu_line(), "有什么可以帮你的吗？")
 
+    # 验证左键打开聊天和长时间等待使用不同的本地台词组。
+    def test_chat_opening_line_is_separate_from_waiting_line(self) -> None:
+        """验证刚打开输入框不会提前使用三十秒后的 waiting 话术。"""
+        with tempfile.TemporaryDirectory() as temp:
+            controller = self._controller(
+                Path(temp),
+                {},
+                local_lines={
+                    "chat_opening": ["想聊点什么？"],
+                    "waiting": ["我还在等你哦。"],
+                    "first_start": {"enable": False, "data": []},
+                },
+            )
+
+            self.assertEqual(controller.pick_chat_opening_line(), "想聊点什么？")
+            self.assertEqual(controller.pick_waiting_line(), "我还在等你哦。")
+
     # 验证到期提醒前缀只从专用本地台词组读取。
     def test_reminder_prefix_uses_dedicated_local_group(self) -> None:
         """验证提醒前缀不会误用主动问候或菜单台词。"""

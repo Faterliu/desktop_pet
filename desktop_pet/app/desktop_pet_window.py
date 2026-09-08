@@ -104,6 +104,7 @@ LOCAL_LINE_REFRESH_LABELS = {
     "comfort": "安慰话术",
     "happy": "开心反馈",
     "sad": "低落反馈",
+    "chat_opening": "打开聊天招呼",
     "waiting": "输入等待提醒",
     "context_menu": "右键菜单招呼",
     "reminder_prefix": "提醒前缀",
@@ -149,6 +150,7 @@ LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE = {
         "thinking",
         "api_error",
         "ignored",
+        "chat_opening",
         "waiting",
         "context_menu",
         "reminder_prefix",
@@ -2082,6 +2084,9 @@ class DesktopPetWindow(QWidget):
             force_single_cycle=True,
             owner="chat_input",
         )
+        opening_line = self.behavior_controller.pick_chat_opening_line()
+        if opening_line:
+            self._display_message(opening_line, 6000, "system")
         self._waiting_timer.start(30_000)
 
     _poetry_keywords = {"诗", "诗歌", "写诗", "念诗", "吟诗", "背诗", "来首", "作诗", "赋诗"}

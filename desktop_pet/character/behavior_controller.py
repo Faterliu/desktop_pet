@@ -647,6 +647,11 @@ class BehaviorController(QObject):
         """从恢复置顶提示台词组中随机选择一条可展示文本。"""
         return self._random_line("return_after_idle")
 
+    # 从打开聊天招呼台词组中随机选择一条可展示文本。
+    def pick_chat_opening_line(self) -> str:
+        """从打开聊天招呼台词组中随机选择一条可展示文本。"""
+        return self._random_line("chat_opening")
+
     # 从输入等待台词组中随机选择一条可展示文本。
     def pick_waiting_line(self) -> str:
         """从输入等待台词组中随机选择一条可展示文本。"""

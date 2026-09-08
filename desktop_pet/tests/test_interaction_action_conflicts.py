@@ -152,6 +152,42 @@ class InteractionActionConflictTests(unittest.TestCase):
         window.deleteLater()
         del app
 
+    def test_open_chat_input_immediately_shows_local_opening_line(self) -> None:
+        """左键打开聊天输入框时应立即展示专用的打开招呼话术。"""
+        displayed: list[tuple] = []
+        timer_starts: list[int] = []
+        shown_near: list[object] = []
+        fake = types.SimpleNamespace(
+            _pending_screenshot=None,
+            bubble=types.SimpleNamespace(source="system"),
+            chat_input=types.SimpleNamespace(
+                set_always_on_top=lambda _enabled: None,
+                show_near=lambda geometry: shown_near.append(geometry),
+            ),
+            config_service=types.SimpleNamespace(get_bool=lambda *_args: True),
+            behavior_controller=types.SimpleNamespace(
+                pick_chat_opening_line=lambda: "我在哦，想和我聊点什么？"
+            ),
+            sprite_player=FakeSpritePlayer(),
+            move_animation=None,
+            _waiting_timer=types.SimpleNamespace(
+                start=lambda interval: timer_starts.append(interval)
+            ),
+            geometry=lambda: "pet-geometry",
+            _display_message=lambda *args: displayed.append(args),
+            _record_user_interaction=lambda _source: None,
+            _chat_in_progress=lambda: False,
+            _clear_history_in_progress=lambda: False,
+        )
+
+        DesktopPetWindow._open_chat_input(fake)
+
+        self.assertEqual(shown_near, ["pet-geometry"])
+        self.assertEqual(displayed, [("我在哦，想和我聊点什么？", 6000, "system")])
+        self.assertEqual(timer_starts, [30_000])
+        self.assertEqual(fake.sprite_player.actions[0][0], ("waiting",))
+        self.assertEqual(fake._sprite_action_owner, "chat_input")
+
     def test_double_click_starts_waving_after_mouse_event_without_settling(self) -> None:
         """双击回应延后播放挥手，且不调用互动收尾。"""
         displayed: list[tuple] = []
