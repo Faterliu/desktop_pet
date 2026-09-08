@@ -419,6 +419,29 @@ class LocalLinesServiceTests(unittest.TestCase):
         self.assertNotIn("reply", groups)
         self.assertIn("feedback", groups)
 
+    # 验证任务场景模板固定保留三条，不被自动刷新追加普通问候。
+    def test_refresh_targets_exclude_fixed_scenario_templates(self) -> None:
+        """验证场景类刷新只更新低打扰和知识问候话术。"""
+        window = SimpleNamespace(
+            app_config={
+                "local_lines_refresh": {
+                    "greeting_types": {
+                        "time": {"enabled": False},
+                        "arrival": {"enabled": False},
+                        "care": {"enabled": False},
+                        "scenario": {"enabled": True},
+                        "interaction": {"enabled": False},
+                    },
+                }
+            }
+        )
+
+        targets = DesktopPetWindow._local_lines_refresh_targets(window)
+
+        groups = [target["group"] for target in targets]
+        self.assertNotIn("scenario_greeting_templates", groups)
+        self.assertEqual(groups, ["low_interrupt", "knowledge_speak_intro"])
+
     # 验证旧版按具体分组的更新配置同样不会改写固定或用户确认话术。
     def test_refresh_targets_exclude_fixed_groups_from_legacy_groups(self) -> None:
         """验证旧版配置不能重新启用首次启动问候或 reply 自动更新。"""

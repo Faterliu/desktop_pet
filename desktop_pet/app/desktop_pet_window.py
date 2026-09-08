@@ -108,7 +108,7 @@ LOCAL_LINE_REFRESH_LABELS = {
     "waiting": "输入等待提醒",
     "context_menu": "右键菜单招呼",
     "reminder_prefix": "提醒前缀",
-    "feedback": "主动问候反馈",
+    "feedback": "用户双击回应主动问候后的简短回应",
     "scenario_greeting_templates": "场景问候模板",
     "low_interrupt": "低打扰问候",
     "knowledge_speak_intro": "知识问候前置提示",
@@ -160,7 +160,12 @@ LOCAL_LINE_REFRESH_GROUPS_BY_GREETING_TYPE = {
 }
 
 # 这些本地台词仅供固定功能或用户确认使用，禁止被自动刷新任务改写。
-LOCAL_LINE_REFRESH_EXCLUDED_GROUPS = {"first_start", "poetry", "reply"}
+LOCAL_LINE_REFRESH_EXCLUDED_GROUPS = {
+    "first_start",
+    "poetry",
+    "reply",
+    "scenario_greeting_templates",
+}
 
 CLIPBOARD_ASSISTANT_INSTRUCTIONS = {
     "summarize": "总结下面文本的重点，使用清晰的要点，不补充原文没有的信息。",
@@ -1002,7 +1007,10 @@ class DesktopPetWindow(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """处理鼠标按下事件，用于拖拽和右键菜单。"""
         if event.button() == Qt.MouseButton.LeftButton:
-            self._record_user_interaction("pet_click")
+            self._record_user_interaction(
+                "pet_click",
+                preserve_proactive_reply=True,
+            )
             self.dragging = False
             self.drag_start_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self.mouse_press_position = event.globalPosition().toPoint()
@@ -2074,7 +2082,10 @@ class DesktopPetWindow(QWidget):
         if self._clear_history_in_progress():
             self._display_message("先等一下，我正在整理笔记。", 3200, "system")
             return
-        self._record_user_interaction("open_chat_input")
+        self._record_user_interaction(
+            "open_chat_input",
+            preserve_proactive_reply=True,
+        )
         self.chat_input.set_always_on_top(self.config_service.get_bool("ui.always_on_top", True))
         self.chat_input.show_near(self.geometry())
         _set_pet_action(
@@ -3454,9 +3465,18 @@ class DesktopPetWindow(QWidget):
         )
 
     # 统一将有效用户操作通知给行为控制器，并终止不合时宜的自主移动。
-    def _record_user_interaction(self, source: str, *, settle: bool = True) -> None:
+    def _record_user_interaction(
+        self,
+        source: str,
+        *,
+        settle: bool = True,
+        preserve_proactive_reply: bool = False,
+    ) -> None:
         """统一将有效用户操作通知给行为控制器。"""
-        self.behavior_controller.notify_user_interaction(source)
+        self.behavior_controller.notify_user_interaction(
+            source,
+            preserve_proactive_reply=preserve_proactive_reply,
+        )
         if settle:
             self._settle_after_user_interaction()
 

@@ -214,6 +214,22 @@ class BehaviorControllerTests(unittest.TestCase):
             self.assertNotIn("memory_context_greeting", config["proactive_content_ratio"])
             self.assertEqual(config["proactive_content_ratio"]["regular_greeting"], 0.65)
 
+    # 验证人物点击不会在双击回调执行前清除主动问候等待状态。
+    def test_pet_click_can_preserve_proactive_reply_window(self) -> None:
+        """验证双击人物仍能被识别为对主动问候的回应。"""
+        with tempfile.TemporaryDirectory() as temp:
+            controller = self._controller(Path(temp), {})
+            controller.notify_proactive_shown("regular_greeting")
+
+            controller.notify_user_interaction(
+                "pet_click",
+                preserve_proactive_reply=True,
+            )
+
+            self.assertTrue(controller.is_within_proactive_reply_window())
+            self.assertTrue(controller.notify_proactive_response())
+            self.assertFalse(controller.awaiting_user_reply)
+
     # 验证low interrupt 问候 takes priority after ignored prompts场景下的预期结果。
     def test_low_interrupt_greeting_takes_priority_after_ignored_prompts(self) -> None:
         """验证low interrupt 问候 takes priority after ignored prompts场景下的预期结果。"""

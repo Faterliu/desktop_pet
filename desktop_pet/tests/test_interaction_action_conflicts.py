@@ -175,7 +175,7 @@ class InteractionActionConflictTests(unittest.TestCase):
             ),
             geometry=lambda: "pet-geometry",
             _display_message=lambda *args: displayed.append(args),
-            _record_user_interaction=lambda _source: None,
+            _record_user_interaction=lambda _source, **_kwargs: None,
             _chat_in_progress=lambda: False,
             _clear_history_in_progress=lambda: False,
         )
@@ -326,19 +326,41 @@ class InteractionActionConflictTests(unittest.TestCase):
 
     def test_menu_follow_up_interaction_does_not_settle_new_action(self) -> None:
         """二级菜单完成信号只记录互动，不能覆盖刚启动的动作。"""
-        notified: list[str] = []
+        notified: list[tuple[str, bool]] = []
         settled: list[bool] = []
         fake = types.SimpleNamespace(
             behavior_controller=types.SimpleNamespace(
-                notify_user_interaction=lambda source: notified.append(source)
+                notify_user_interaction=lambda source, preserve_proactive_reply=False: notified.append(
+                    (source, preserve_proactive_reply)
+                )
             ),
             _settle_after_user_interaction=lambda: settled.append(True),
         )
 
         DesktopPetWindow._record_user_interaction(fake, "context_menu", settle=False)
 
-        self.assertEqual(notified, ["context_menu"])
+        self.assertEqual(notified, [("context_menu", False)])
         self.assertEqual(settled, [])
+
+    def test_pet_click_wiring_preserves_proactive_reply_window(self) -> None:
+        """人物点击链路应把保留主动回应窗口的参数传给行为控制器。"""
+        notified: list[tuple[str, bool]] = []
+        fake = types.SimpleNamespace(
+            behavior_controller=types.SimpleNamespace(
+                notify_user_interaction=lambda source, preserve_proactive_reply=False: notified.append(
+                    (source, preserve_proactive_reply)
+                )
+            ),
+            _settle_after_user_interaction=lambda: None,
+        )
+
+        DesktopPetWindow._record_user_interaction(
+            fake,
+            "pet_click",
+            preserve_proactive_reply=True,
+        )
+
+        self.assertEqual(notified, [("pet_click", True)])
 
     def test_delayed_double_click_reply_still_runs_after_idle_settling(self) -> None:
         """双击后的常规 idle 收尾不能误取消回应气泡和挥手。"""

@@ -117,13 +117,19 @@ class BehaviorController(QObject):
         self.last_proactive_shown_at = to_utc(value) if value else None
         self._last_proactive_shown_monotonic = None
 
-    # 记录最近一次用户交互时间，并清除等待回复状态。
-    def notify_user_interaction(self, source: str = "unknown") -> None:
-        """记录最近一次用户交互时间，并清除等待回复状态。"""
+    # 记录最近一次用户交互时间，并按场景清除或保留等待回复状态。
+    def notify_user_interaction(
+        self,
+        source: str = "unknown",
+        *,
+        preserve_proactive_reply: bool = False,
+    ) -> None:
+        """记录最近一次用户交互时间，并按场景清除或保留等待回复状态。"""
         del source
         self.last_user_interaction_at = now_utc()
         self._last_user_interaction_monotonic = time.monotonic()
-        self.awaiting_user_reply = False
+        if not preserve_proactive_reply:
+            self.awaiting_user_reply = False
         self._consecutive_unanswered = 0
         self._unanswered_counted_for = ""
         self._schedule_runtime_state_save()
