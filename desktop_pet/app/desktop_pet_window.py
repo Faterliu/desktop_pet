@@ -46,16 +46,14 @@ from app.context_menu import (
 from app.formal_answer_panel import FormalAnswerPanel
 from app.history_clear_worker import ChatHistoryClearWorker
 from app.message_splitter import split_informal_answer_text, split_knowledge_bubble_text
-from app.reminder_controller import ReminderController
-from app.reminder_input_dialog import ReminderInputDialog
-from app.reminder_tool import ReminderTool, ReminderToolRequest
-from app.screenshot_analysis_worker import ScreenshotAnalysisWorker
-from app.screenshot_capture_service import (
+from app.reminder import ReminderController, ReminderInputDialog, ReminderTool, ReminderToolRequest
+from app.screenshot import (
     CapturedScreenshot,
+    ScreenshotAnalysisWorker,
     ScreenshotCaptureError,
     ScreenshotCaptureService,
+    ScreenshotSelectionOverlay,
 )
-from app.screenshot_selection_overlay import ScreenshotSelectionOverlay
 from app.speech_bubble import ReplyBubble, SpeechBubble
 from app.window_position_service import WindowPositionService
 from character.behavior_controller import BehaviorController
@@ -185,6 +183,16 @@ CLIPBOARD_ASSISTANT_LABELS = {
 }
 
 MOVEMENT_ACTIONS = frozenset({"running_right", "running_left", "jumping"})
+
+
+# 根据本地小时返回自主动作候选；深夜至清晨取消跳跃并提高困倦动作概率。
+def _auto_move_choices(hour: int) -> tuple[tuple[str, ...], tuple[int, ...]]:
+    """在 23:00–06:00 使用不含跳跃且偏向 sleepy 的自主动作序列。"""
+    actions = ("left", "right", "jump")
+    weights = (4, 4, 2)
+    if hour >= 23 or hour < 6:
+        return ("left", "right", "sleepy"), (2, 2, 6)
+    return actions, weights
 
 
 # 统一记录动作来源；非移动动作会先安全停止旧移动，避免其完成回调覆盖新动作。
@@ -3338,7 +3346,7 @@ class DesktopPetWindow(QWidget):
     def _refresh_auto_move_timer(self) -> None:
         """根据配置决定是否开启自主移动定时器。"""
         if self.config_service.get_bool("ui.enable_free_move", False):
-            self.auto_move_timer.start(random.randint(15_000, 28_000))
+            self.auto_move_timer.start(random.randint(60_000, 180_000))
         else:
             self.auto_move_timer.stop()
 
@@ -3355,7 +3363,17 @@ class DesktopPetWindow(QWidget):
             return
         available = screen.availableGeometry()
         current = self.pos()
-        move_kind = random.choices(["left", "right", "jump"], weights=[4, 4, 2], k=1)[0]
+        move_kinds, move_weights = _auto_move_choices(datetime.now().hour)
+        move_kind = random.choices(move_kinds, weights=move_weights, k=1)[0]
+        if move_kind == "sleepy":
+            _set_pet_action(
+                self,
+                "sleepy",
+                fallback_action="idle",
+                force_single_cycle=True,
+                owner="auto_action",
+            )
+            return
         if move_kind == "jump":
             self._start_jump_auto_move(current, available)
             return

@@ -93,6 +93,14 @@ Startup diagnostics:
 
 - Plain-text helper for splitting knowledge-greeting replies into at most two bubble segments.
 
+`desktop_pet/app/screenshot.py`
+
+- Screenshot capture and in-memory encoding, frozen-screen region selection UI, and background vision analysis worker.
+
+`desktop_pet/app/reminder.py`
+
+- Reminder input dialog, model-facing local reminder tool, and main-thread due-reminder controller. Persistent reminder data remains in `storage/reminder_store.py`.
+
 `desktop_pet/app/context_menu.py`
 
 - Builds the right-click card and legacy-backed submenus. New menu items usually require both this file and callback wiring in `DesktopPetWindow`; card interaction signals must not perform a late idle reset after an action has started.
@@ -139,7 +147,8 @@ Startup diagnostics:
 - Chat behavior: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `ChatWorker`, `llm_client.py`, `prompt_builder.py`, `context_manager.py`, and `summarizer.py`.
 - Formal Q&A: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `formal_answer_panel.py`, dual chat stores, and prompt mode handling.
 - Proactive greetings and local line refresh: inspect `behavior_controller.py`, `proactive_context.py`, `DesktopPetWindow` worker callbacks, `local_lines_service.py`, `local_lines.json`, and `config/app_config.example.json`.
-- Screenshot and vision: inspect `screenshot_capture_service.py`, `screenshot_selection_overlay.py`, `ScreenshotAnalysisWorker`, `LlmClient`, `DesktopPetWindow`, and `tests/test_screenshot_analysis.py`.
+- Screenshot and vision: inspect `app/screenshot.py`, `LlmClient`, `DesktopPetWindow`, and `tests/test_screenshot_analysis.py`.
+- Reminders: inspect `app/reminder.py`, `storage/reminder_store.py`, `DesktopPetWindow`, and the reminder tests.
 - Memory changes: inspect `memory_store.py`, `summarizer.py`, `prompt_builder.py`, and related tests.
 - Bubbles and positioning: inspect `speech_bubble.py`, `bubble_position_service.py`, `chat_input.py`, and `_sync_floating_widgets()`.
 - Background work: use `background_task_registry.py`; verify duplicate task handling and shutdown behavior.
@@ -151,6 +160,7 @@ Startup diagnostics:
 - Read source code, configuration, documentation, and other text files explicitly as UTF-8. On PowerShell, use `Get-Content -Encoding UTF8`; do not rely on the terminal's default encoding, especially for Chinese text.
 - When piping inline Python from PowerShell, do not place raw Chinese literals in the here-string. Use Unicode escapes such as `\u4e2d\u6587`, or use `apply_patch` for text edits, then read and write target files explicitly as UTF-8.
 - Write new or updated code comments and docstrings in Chinese. Keep identifiers and established external-interface terms unchanged where English is required.
+- Unless necessary, do not add new files. Add a new file only when implementing a clearly distinct, independent feature; otherwise extend or refactor the appropriate existing file.
 - Prefer small services with pure logic where possible; keep QWidget creation and signal wiring in UI modules.
 - Keep long-running work off the Qt main thread.
 - Background workers should report back through signals; UI updates must happen in the main window/main thread.

@@ -18,7 +18,7 @@ sys.modules.setdefault("utils.logger", logger_module)
 
 from PySide6.QtCore import QCoreApplication  # noqa: E402
 
-from app.reminder_controller import ReminderController  # noqa: E402
+from app.reminder import ReminderController  # noqa: E402
 from storage.reminder_store import ReminderStore  # noqa: E402
 
 

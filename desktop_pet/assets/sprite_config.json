@@ -56,7 +56,7 @@
       "label": "期待回应",
       "row": 6,
       "frames": 12,
-      "fps": 5,
+      "fps": 4,
       "loop": true
     },
     "running": {

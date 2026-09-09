@@ -16,7 +16,7 @@ logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
 sys.modules.setdefault("utils.logger", logger_module)
 
-from app.reminder_tool import ReminderTool, ReminderToolRequest  # noqa: E402
+from app.reminder import ReminderTool, ReminderToolRequest  # noqa: E402
 from storage.reminder_store import ReminderStore  # noqa: E402
 
 

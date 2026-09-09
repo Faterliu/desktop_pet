@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 from animation.sprite_player import SpritePlayer  # noqa: E402
 from app.desktop_pet_window import (  # noqa: E402
     DesktopPetWindow,
+    _auto_move_choices,
     _finish_pet_action_if_owned,
     _set_pet_action,
 )
@@ -125,6 +126,49 @@ class FakeReminderWaitWindow:
 
 class InteractionActionConflictTests(unittest.TestCase):
     """验证用户回应动作不会被通用 idle 收尾或旧移动回调覆盖。"""
+
+    def test_sleepy_is_only_available_in_late_night_auto_actions(self) -> None:
+        """23:00 至次日 06:00 的自主动作候选应额外包含 sleepy。"""
+        for hour in (23, 0, 5):
+            with self.subTest(hour=hour):
+                actions, weights = _auto_move_choices(hour)
+                self.assertEqual(actions, ("left", "right", "sleepy"))
+                self.assertEqual(weights, (2, 2, 6))
+                self.assertNotIn("jump", actions)
+
+        for hour in (6, 12, 22):
+            with self.subTest(hour=hour):
+                actions, weights = _auto_move_choices(hour)
+                self.assertEqual(actions, ("left", "right", "jump"))
+                self.assertEqual(weights, (4, 4, 2))
+
+    def test_selected_sleepy_auto_action_plays_one_cycle_then_returns_idle(self) -> None:
+        """自主序列选中 sleepy 后应播放一轮，并由精灵播放器回到 idle。"""
+        fake = types.SimpleNamespace(
+            _refresh_auto_move_timer=lambda: None,
+            _interaction_busy=lambda: False,
+            _movement_locked=lambda: False,
+            bubble=types.SimpleNamespace(isVisible=lambda: False),
+            sprite_player=FakeSpritePlayer(),
+            _current_screen=lambda: types.SimpleNamespace(availableGeometry=lambda: object()),
+            pos=lambda: object(),
+            move_animation=None,
+        )
+        fake.sprite_player.current_action = "idle"
+
+        with patch("app.desktop_pet_window.random.choices", return_value=["sleepy"]):
+            DesktopPetWindow._trigger_auto_move(fake)
+
+        self.assertEqual(
+            fake.sprite_player.actions,
+            [
+                (
+                    ("sleepy",),
+                    {"fallback_action": "idle", "force_single_cycle": True},
+                )
+            ],
+        )
+        self.assertEqual(fake._sprite_action_owner, "auto_action")
 
     def test_drag_release_clears_movement_lock_for_follow_up_jump(self) -> None:
         """拖动结束后必须解除移动锁，保证测试跳跃可以继续执行。"""

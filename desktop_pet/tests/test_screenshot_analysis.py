@@ -25,18 +25,14 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 from app.chat_input import ChatInput  # noqa: E402
 from app.context_menu import build_context_menu_actions, build_pet_context_menu  # noqa: E402
 from app.desktop_pet_window import DesktopPetWindow  # noqa: E402
-from app.screenshot_analysis_worker import (  # noqa: E402
+from app.screenshot import (  # noqa: E402
     SCREENSHOT_ANALYSIS_PROMPT,
-    ScreenshotAnalysisWorker,
-    build_screenshot_analysis_prompt,
-)
-from app.screenshot_capture_service import (  # noqa: E402
     CapturedScreenshot,
+    ScreenshotAnalysisWorker,
     ScreenshotCaptureError,
     ScreenshotCaptureService,
-)
-from app.screenshot_selection_overlay import (  # noqa: E402
     ScreenshotSelectionOverlay,
+    build_screenshot_analysis_prompt,
     is_valid_selection,
 )
 
