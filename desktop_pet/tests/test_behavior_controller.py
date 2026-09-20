@@ -102,6 +102,12 @@ class BehaviorControllerTests(unittest.TestCase):
             behavior = config["behavior"]
             self.assertNotIn("max_local_lines_per_day", behavior)
             self.assertNotIn("max_api_proactive_per_day", behavior)
+            self.assertIn("reminders", behavior)
+            self.assertIn("chat", behavior)
+            self.assertIn("proactive_content_ratio", behavior)
+            self.assertNotIn("reminders", config)
+            self.assertNotIn("chat", config)
+            self.assertNotIn("proactive_content_ratio", config)
 
     # 为测试准备控制器数据或断言辅助结果。
     def _controller(
@@ -158,8 +164,11 @@ class BehaviorControllerTests(unittest.TestCase):
                     "do_not_disturb": False,
                     "max_local_lines_per_day": 0,
                     "min_proactive_interval_minutes": 1,
+                    "proactive_content_ratio": {
+                        "extra_knowledge": 0.0,
+                        "regular_greeting": 1.0,
+                    },
                 },
-                "proactive_content_ratio": {"extra_knowledge": 0.0, "regular_greeting": 1.0},
             }
             controller = self._controller(Path(temp), config)
             controller.last_user_interaction = now_local().replace(year=2000)
@@ -176,9 +185,11 @@ class BehaviorControllerTests(unittest.TestCase):
         """验证主动行为 ratio adjustment calls save callback场景下的预期结果。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
-                "proactive_content_ratio": {
-                    "extra_knowledge": 0.35,
-                    "regular_greeting": 0.65,
+                "behavior": {
+                    "proactive_content_ratio": {
+                        "extra_knowledge": 0.35,
+                        "regular_greeting": 0.65,
+                    }
                 }
             }
             saved = 0
@@ -194,16 +205,21 @@ class BehaviorControllerTests(unittest.TestCase):
             controller.notify_proactive_response()
 
             self.assertEqual(saved, 1)
-            self.assertGreater(config["proactive_content_ratio"]["extra_knowledge"], 0.35)
+            self.assertGreater(
+                config["behavior"]["proactive_content_ratio"]["extra_knowledge"],
+                0.35,
+            )
 
     # 验证场景 问候 响应 does not add ratio bucket场景下的预期结果。
     def test_scenario_greeting_response_does_not_add_ratio_bucket(self) -> None:
         """验证场景 问候 响应 does not add ratio bucket场景下的预期结果。"""
         with tempfile.TemporaryDirectory() as temp:
             config = {
-                "proactive_content_ratio": {
-                    "extra_knowledge": 0.35,
-                    "regular_greeting": 0.65,
+                "behavior": {
+                    "proactive_content_ratio": {
+                        "extra_knowledge": 0.35,
+                        "regular_greeting": 0.65,
+                    }
                 }
             }
             controller = self._controller(Path(temp), config)
@@ -211,8 +227,9 @@ class BehaviorControllerTests(unittest.TestCase):
             controller.notify_proactive_shown("memory_context_greeting")
             controller.notify_proactive_response()
 
-            self.assertNotIn("memory_context_greeting", config["proactive_content_ratio"])
-            self.assertEqual(config["proactive_content_ratio"]["regular_greeting"], 0.65)
+            ratio = config["behavior"]["proactive_content_ratio"]
+            self.assertNotIn("memory_context_greeting", ratio)
+            self.assertEqual(ratio["regular_greeting"], 0.65)
 
     # 验证人物点击不会在双击回调执行前清除主动问候等待状态。
     def test_pet_click_can_preserve_proactive_reply_window(self) -> None:

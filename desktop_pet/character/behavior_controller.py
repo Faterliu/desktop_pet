@@ -202,8 +202,18 @@ class BehaviorController(QObject):
     def _proactive_ratio(self) -> dict[str, float]:
         """读取主动内容比例配置，缺失时写入普通问候和知识问候默认比例。"""
         config = self.config_loader()
+        behavior = config.setdefault("behavior", {})
         default = {"extra_knowledge": 0.35, "regular_greeting": 0.65}
-        return config.setdefault("proactive_content_ratio", default)
+        ratio = behavior.get("proactive_content_ratio")
+        if isinstance(ratio, dict):
+            return ratio
+
+        legacy_ratio = config.get("proactive_content_ratio")
+        if isinstance(legacy_ratio, dict):
+            behavior["proactive_content_ratio"] = legacy_ratio
+            return legacy_ratio
+
+        return behavior.setdefault("proactive_content_ratio", default)
 
     # 根据用户回应的主动内容类型，微调普通问候与知识问候比例。
     def _adjust_ratio(self, responded_type: str) -> None:
@@ -215,7 +225,7 @@ class BehaviorController(QObject):
         other_type = "extra_knowledge" if responded_type == "regular_greeting" else "regular_greeting"
         ratio[responded_type] = min(0.7, round(ratio.get(responded_type, 0.5) + 0.005, 4))
         ratio[other_type] = max(0.3, round(ratio.get(other_type, 0.5) - 0.001, 4))
-        config["proactive_content_ratio"] = ratio
+        config.setdefault("behavior", {})["proactive_content_ratio"] = ratio
         self._save_config_snapshot()
 
     # 调用保存回调持久化主动行为配置，失败时静默跳过。

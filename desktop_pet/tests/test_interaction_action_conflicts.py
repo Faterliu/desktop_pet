@@ -23,6 +23,7 @@ from PySide6.QtGui import QMouseEvent, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from animation.sprite_player import SpritePlayer  # noqa: E402
+from app.config_service import ConfigService  # noqa: E402
 from app.desktop_pet_window import (  # noqa: E402
     DesktopPetWindow,
     _auto_move_choices,
@@ -126,6 +127,35 @@ class FakeReminderWaitWindow:
 
 class InteractionActionConflictTests(unittest.TestCase):
     """验证用户回应动作不会被通用 idle 收尾或旧移动回调覆盖。"""
+
+    def test_behavior_nested_settings_take_precedence_over_legacy_paths(self) -> None:
+        """提醒和聊天设置应优先从 behavior 的新层级读取。"""
+        fake = types.SimpleNamespace(
+            config_service=ConfigService(
+                {
+                    "behavior": {
+                        "reminders": {"enabled": False, "check_interval_seconds": 45},
+                        "chat": {
+                            "formal_qa_mode": True,
+                            "formal_answer_display": "append",
+                        },
+                    },
+                    "reminders": {"enabled": True, "check_interval_seconds": 30},
+                    "chat": {
+                        "formal_qa_mode": False,
+                        "formal_answer_display": "new_panel",
+                    },
+                }
+            )
+        )
+        fake._behavior_setting = lambda path, legacy_path, default: (
+            DesktopPetWindow._behavior_setting(fake, path, legacy_path, default)
+        )
+
+        self.assertFalse(DesktopPetWindow._reminders_enabled(fake))
+        self.assertEqual(DesktopPetWindow._reminder_check_interval_seconds(fake), 45)
+        self.assertTrue(DesktopPetWindow._formal_qa_enabled(fake))
+        self.assertEqual(DesktopPetWindow._formal_answer_display_mode(fake), "append")
 
     def test_sleepy_is_only_available_in_late_night_auto_actions(self) -> None:
         """23:00 至次日 06:00 的自主动作候选应额外包含 sleepy。"""

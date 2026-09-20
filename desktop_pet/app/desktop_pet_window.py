@@ -2005,8 +2005,8 @@ class DesktopPetWindow(QWidget):
             summarizer=summarizer,
             chat_store=chat_store,
             force_summarize=self.config_service.get_bool(
-                "chat.force_summarize_before_clear",
-                True,
+                "behavior.chat.force_summarize_before_clear",
+                self.config_service.get_bool("chat.force_summarize_before_clear", True),
             ),
         )
         self.clear_history_worker.moveToThread(self.clear_history_thread)
@@ -3681,12 +3681,24 @@ class DesktopPetWindow(QWidget):
     # 判断当前是否开启正式问答模式。
     def _formal_qa_enabled(self) -> bool:
         """判断当前是否开启正式问答模式。"""
-        return self.config_service.get_bool("chat.formal_qa_mode", False)
+        return bool(
+            self._behavior_setting(
+                "chat.formal_qa_mode",
+                "chat.formal_qa_mode",
+                False,
+            )
+        )
 
     # 读取正式问答多回答显示方式。
     def _formal_answer_display_mode(self) -> str:
         """读取正式问答多回答显示方式。"""
-        mode = self.config_service.get_str("chat.formal_answer_display", "new_panel")
+        mode = str(
+            self._behavior_setting(
+                "chat.formal_answer_display",
+                "chat.formal_answer_display",
+                "new_panel",
+            )
+        )
         return mode if mode in {"new_panel", "append"} else "new_panel"
 
     # 读取并返回当前 UI 缩放比例。
@@ -3707,6 +3719,12 @@ class DesktopPetWindow(QWidget):
         """返回行为配置字典，不存在时自动补默认节点。"""
         return self.app_config.setdefault("behavior", {})
 
+    # 优先读取 behavior 内的新配置路径，旧顶层路径仅用于兼容已有用户配置。
+    def _behavior_setting(self, path: str, legacy_path: str, default: Any) -> Any:
+        """读取 behavior 配置，并在新路径缺失时回退到旧路径。"""
+        legacy_value = self.config_service.get(legacy_path, default)
+        return self.config_service.get(f"behavior.{path}", legacy_value)
+
     # 返回 API 配置字典，不存在时自动补默认节点。
     def _api_config(self) -> dict[str, Any]:
         """返回 API 配置字典，不存在时自动补默认节点。"""
@@ -3715,27 +3733,51 @@ class DesktopPetWindow(QWidget):
     # 读取提醒功能开关，缺失时默认启用。
     def _reminders_enabled(self) -> bool:
         """读取提醒功能开关，缺失时默认启用。"""
-        return self.config_service.get_bool("reminders.enabled", True)
+        return bool(self._behavior_setting("reminders.enabled", "reminders.enabled", True))
 
     # 读取提醒轮询间隔，异常配置回退到 30 秒。
     def _reminder_check_interval_seconds(self) -> int:
         """读取提醒轮询间隔，异常配置回退到 30 秒。"""
-        return _positive_int(self.config_service.get("reminders.check_interval_seconds", 30), 30)
+        return _positive_int(
+            self._behavior_setting(
+                "reminders.check_interval_seconds",
+                "reminders.check_interval_seconds",
+                30,
+            ),
+            30,
+        )
 
     # 读取进行中提醒数量上限，异常配置回退到 20 条。
     def _max_active_reminders(self) -> int:
         """读取进行中提醒数量上限，异常配置回退到 20 条。"""
-        return _positive_int(self.config_service.get("reminders.max_active_reminders", 20), 20)
+        return _positive_int(
+            self._behavior_setting(
+                "reminders.max_active_reminders",
+                "reminders.max_active_reminders",
+                20,
+            ),
+            20,
+        )
 
     # 读取已完成提醒自动清理开关，缺失配置时默认启用。
     def _reminder_auto_cleanup_enabled(self) -> bool:
         """读取已完成提醒自动清理开关，缺失配置时默认启用。"""
-        return self.config_service.get_bool("reminders.auto_cleanup_enabled", True)
+        return bool(
+            self._behavior_setting(
+                "reminders.auto_cleanup_enabled",
+                "reminders.auto_cleanup_enabled",
+                True,
+            )
+        )
 
     # 读取已完成提醒保留天数，异常配置回退到 7 天。
     def _reminder_completed_retention_days(self) -> int:
         """读取已完成提醒保留天数，异常配置回退到 7 天。"""
-        value = self.config_service.get("reminders.completed_retention_days", 7)
+        value = self._behavior_setting(
+            "reminders.completed_retention_days",
+            "reminders.completed_retention_days",
+            7,
+        )
         try:
             return max(0, int(value))
         except (TypeError, ValueError):
@@ -3744,24 +3786,42 @@ class DesktopPetWindow(QWidget):
     # 读取待确认提醒的重复提示间隔，异常配置回退到 5 分钟。
     def _reminder_ack_repeat_minutes(self) -> int:
         """读取待确认提醒的重复提示间隔，异常配置回退到 5 分钟。"""
-        return _positive_int(self.config_service.get("reminders.ack_repeat_minutes", 5), 5)
+        return _positive_int(
+            self._behavior_setting(
+                "reminders.ack_repeat_minutes",
+                "reminders.ack_repeat_minutes",
+                5,
+            ),
+            5,
+        )
 
     # 读取提醒延后分钟数，异常配置回退到 10 分钟。
     def _reminder_snooze_minutes(self) -> int:
         """读取提醒延后分钟数，异常配置回退到 10 分钟。"""
-        return _positive_int(self.config_service.get("reminders.snooze_minutes", 10), 10)
+        return _positive_int(
+            self._behavior_setting(
+                "reminders.snooze_minutes",
+                "reminders.snooze_minutes",
+                10,
+            ),
+            10,
+        )
 
     # 根据提醒和免打扰配置决定当前是否应投递提醒气泡。
     def _can_deliver_reminders(self) -> bool:
         """根据提醒和免打扰配置决定当前是否应投递提醒气泡。"""
-        if not self.config_service.get_bool("reminders.respect_do_not_disturb", False):
+        if not self._behavior_setting(
+            "reminders.respect_do_not_disturb",
+            "reminders.respect_do_not_disturb",
+            False,
+        ):
             return True
         return not self.config_service.get_bool("behavior.do_not_disturb", False)
 
     # 返回聊天配置字典，不存在时自动补默认节点。
     def _chat_config(self) -> dict[str, Any]:
         """返回聊天配置字典，不存在时自动补默认节点。"""
-        return self.app_config.setdefault("chat", {})
+        return self._behavior_config().setdefault("chat", {})
 
     # 读取助手回复气泡展示时长，配置无效时使用默认毫秒数。
     def _assistant_reply_bubble_duration_ms(self) -> int:

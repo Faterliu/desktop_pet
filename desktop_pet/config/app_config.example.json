@@ -66,17 +66,26 @@
     "scenario_greeting_max_chars": 80,
     "scenario_greeting_min_memory_items": 1,
     "scenario_greeting_cooldown_minutes": 60,
-    "scenario_greeting_low_interrupt_after_ignored": 2
-  },
-  "reminders": {
-    "enabled": true,
-    "check_interval_seconds": 30,
-    "max_active_reminders": 20,
-    "respect_do_not_disturb": false,
-    "auto_cleanup_enabled": true,
-    "completed_retention_days": 7,
-    "ack_repeat_minutes": 5,
-    "snooze_minutes": 10
+    "scenario_greeting_low_interrupt_after_ignored": 2,
+    "reminders": {
+      "enabled": true,
+      "check_interval_seconds": 30,
+      "max_active_reminders": 20,
+      "respect_do_not_disturb": false,
+      "auto_cleanup_enabled": true,
+      "completed_retention_days": 7,
+      "ack_repeat_minutes": 5,
+      "snooze_minutes": 10
+    },
+    "chat": {
+      "formal_qa_mode": false,
+      "formal_answer_display": "new_panel",
+      "force_summarize_before_clear": true
+    },
+    "proactive_content_ratio": {
+      "extra_knowledge": 0.35,
+      "regular_greeting": 0.65
+    }
   },
   "clipboard": {
     "enabled": true,
@@ -115,14 +124,5 @@
         "enabled": true
       }
     }
-  },
-  "chat": {
-    "formal_qa_mode": false,
-    "formal_answer_display": "new_panel",
-    "force_summarize_before_clear": true
-  },
-  "proactive_content_ratio": {
-    "extra_knowledge": 0.35,
-    "regular_greeting": 0.65
   }
 }

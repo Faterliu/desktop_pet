@@ -18,7 +18,7 @@ desktop_pet\start_main.vbs
 
 程序配置以 `desktop_pet/config/app_config.example.json` 为示例模板；
 项目功能基本依赖于语言模型，
-api.deepseek.api_key与api.openai.api_key下需填入对应的api key才可使用功能。
+api.deepseek.api_key与api.openai.api_key下需填入对应的api key才可使用功能，任意填一个即可。
 api.openai.base_url可填入中转站网址。
 如需保存本机配置，将其复制为同目录的 `app_config.json` 后修改。未创建 `app_config.json` 时，程序会直接使用示例配置。常用配置分组如下：
 - `api`：聊天服务提供商、模型、API Key、超时和上下文长度限制；密钥仅填写在本机 `app_config.json`，不要提交。
@@ -268,3 +268,6 @@ api.openai.base_url可填入中转站网址。
 
 [v2.2.1] - 20260907
 1. 话术场景修复。
+
+[v2.2.1] - 20260920
+1. 修改配置
