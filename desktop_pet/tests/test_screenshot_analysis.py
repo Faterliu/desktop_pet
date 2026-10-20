@@ -13,6 +13,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qt_test_app import ensure_app  # noqa: E402
 
 logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
@@ -81,7 +83,7 @@ class ScreenshotCaptureServiceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         """创建 QPixmap 所需的全局 Qt 应用。"""
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = ensure_app()
 
     # 验证有效截图优先编码为 PNG 且不产生文件。
     def test_encode_pixmap_prefers_png(self) -> None:
@@ -287,7 +289,7 @@ class ResultDisplayRoutingTests(unittest.TestCase):
     # 验证三类正式结果共享 new_panel 与 append 的现有面板语义。
     def test_formal_result_sources_share_panel_display_modes(self) -> None:
         """验证普通问答、剪贴板和截图均由同一正式面板逻辑处理。"""
-        app = QApplication.instance() or QApplication([])
+        app = ensure_app()
         del app
         fake = types.SimpleNamespace(
             _formal_answer_display_mode=lambda: "new_panel",
@@ -392,7 +394,7 @@ class ChatInputScreenshotTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         """确保输入框测试存在 Qt 应用。"""
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = ensure_app()
 
     # 验证截图占位文字和长度限制在提交后恢复默认值。
     def test_context_is_temporary_and_empty_submit_cancels(self) -> None:

@@ -10,6 +10,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qt_test_app import ensure_app  # noqa: E402
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt  # noqa: E402
 from PySide6.QtGui import QCursor, QKeyEvent  # noqa: E402
@@ -29,7 +31,7 @@ class PetContextMenuTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         """准备 Qt 应用对象，供悬浮菜单组件创建窗口。"""
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = ensure_app()
 
     # 构造独立的动作模型，避免测试依赖旧 QMenu 构建器签名。
     def _menu_actions(self, **overrides: object) -> tuple[MenuAction, ...]:

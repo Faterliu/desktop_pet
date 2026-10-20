@@ -9,6 +9,8 @@ from PySide6.QtWidgets import QApplication
 
 DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qt_test_app import ensure_app  # noqa: E402
 
 from animation.sprite_player import DEFAULT_SPRITE_CONFIG, SpritePlayer  # noqa: E402
 
@@ -26,7 +28,7 @@ class SpritePlayerLoadingTests(unittest.TestCase):
     # 验证实际精灵图集会裁切新动作，并能切换到对应动作而不回退 idle。
     def test_new_actions_are_loaded_and_selectable(self) -> None:
         """验证新增动作被加载并可切换。"""
-        app = QApplication.instance() or QApplication([])
+        app = ensure_app()
         player = SpritePlayer(DESKTOP_PET_ROOT / "assets" / "sprite_config.json", scale=0.9)
         try:
             for action_name in ("happy", "sleepy", "leaf-hug"):

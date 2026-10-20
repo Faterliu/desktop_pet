@@ -11,6 +11,8 @@ from pathlib import Path
 
 DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qt_test_app import ensure_app  # noqa: E402
 
 logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
@@ -27,7 +29,7 @@ class ReminderControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         """准备 Qt 定时器所需的应用实例。"""
-        cls.app = QCoreApplication.instance() or QCoreApplication([])
+        cls.app = ensure_app() or QCoreApplication.instance() or QCoreApplication([])
 
     # 验证启动时会补发已过期的 active 提醒并等待用户确认。
     def test_start_claims_overdue_active_reminder_once(self) -> None:

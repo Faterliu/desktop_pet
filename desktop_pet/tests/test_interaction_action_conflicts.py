@@ -13,6 +13,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qt_test_app import ensure_app  # noqa: E402
 
 logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
@@ -304,7 +306,7 @@ class InteractionActionConflictTests(unittest.TestCase):
 
     def test_drag_release_clears_movement_lock_for_follow_up_jump(self) -> None:
         """拖动结束后必须解除移动锁，保证测试跳跃可以继续执行。"""
-        app = QApplication.instance() or QApplication([])
+        app = ensure_app()
         window = DesktopPetWindow.__new__(DesktopPetWindow)
         QWidget.__init__(window)
         saved: list[bool] = []
@@ -611,7 +613,7 @@ class InteractionActionConflictTests(unittest.TestCase):
 
     def test_sprite_timer_cannot_apply_an_old_action_fallback_after_replacement(self) -> None:
         """精灵定时器只推进当前动作，旧挥手不会在之后把 review 切回 idle。"""
-        app = QApplication.instance() or QApplication([])
+        app = ensure_app()
         del app
         player = SpritePlayer(DESKTOP_PET_ROOT / "assets" / "sprite_config.json")
         frame = QPixmap(1, 1)

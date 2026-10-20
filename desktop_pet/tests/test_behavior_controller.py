@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 DESKTOP_PET_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DESKTOP_PET_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qt_test_app import ensure_app  # noqa: E402
 
 try:
     from PySide6.QtCore import QCoreApplication
@@ -90,7 +92,7 @@ class BehaviorControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         """准备当前测试类共用的环境和数据。"""
-        cls.app = QCoreApplication.instance() or QCoreApplication([])
+        cls.app = ensure_app() or QCoreApplication.instance() or QCoreApplication([])
 
     # 验证默认配置不再提供主动问候每日次数配额。
     def test_default_configs_remove_proactive_daily_limits(self) -> None:

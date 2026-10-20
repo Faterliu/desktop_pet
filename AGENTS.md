@@ -10,7 +10,7 @@ Project handoff notes for future AI coding agents. This file is meant to be read
 - Main coordinator: `desktop_pet/app/desktop_pet_window.py`.
 - Default config template: `desktop_pet/config/app_config.example.json`.
 - Runtime user data: `desktop_pet/config/app_config.json`, `desktop_pet/data/`, logs, caches, and virtual environments must not be committed.
-- Tests: `desktop_pet/tests/` uses `unittest`; there is no pytest, packaging, formatter, lint, or CI setup. `test_interaction_action_conflicts.py` covers movement, delayed interaction and stale callback action conflicts.
+- Tests: `desktop_pet/tests/` uses `unittest`; there is no pytest, packaging, formatter, lint, or CI setup. `test_interaction_action_conflicts.py` covers movement, delayed interaction and stale callback action conflicts. Qt-using modules take the application object from `tests/qt_test_app.py` (`ensure_app()`); creating a bare `QCoreApplication` first makes every later `QWidget` test abort the whole run.
 - Older planning and asset notes live under `xiaohu_codex_package/xiaohu_codex/`.
 
 ## Run And Setup
@@ -38,6 +38,8 @@ py main.py
 ```
 
 Use `py` / `py -m pip` on Windows for first-time environment setup. Run project tests with `.\desktop_pet_venv\Scripts\python.exe`, not the global `py`, because the virtual environment is the application runtime and contains project dependencies such as `requests`. Do not assume `python` or `pip` points to the intended interpreter; they may be Microsoft Store aliases or old launchers.
+
+`setup_env.bat` recreates the venv only when its interpreter is unusable; dependencies are compared against `requirements.txt` with `pip --no-index --dry-run`, so a newly added requirement is installed on the next run without recreating the venv. Installs try `DESKTOP_PET_PIP_INDEX` when set, then the default PyPI, then the Tsinghua and Aliyun mirrors, each with `--timeout 15 --retries 1`, so an unreachable default index costs seconds instead of a hang. The script clears `PIP_*`, proxy and index environment variables, so a download that still stalls is a network problem, not a wrong setting.
 
 Startup diagnostics:
 
@@ -166,7 +168,7 @@ Startup diagnostics:
 - 默认不修改根目录 `README.md`（含同名大小写变体）；只有用户明确要求修改该文档时才更新。代码、素材或流程变更不要自动同步 README，相关说明优先写入对应的专项文档。
 - Read source code, configuration, documentation, and other text files explicitly as UTF-8. On PowerShell, use `Get-Content -Encoding UTF8`; do not rely on the terminal's default encoding, especially for Chinese text.
 - When piping inline Python from PowerShell, do not place raw Chinese literals in the here-string. Use Unicode escapes such as `\u4e2d\u6587`, or use `apply_patch` for text edits, then read and write target files explicitly as UTF-8.
-- Write new or updated code comments and docstrings in Chinese. Keep identifiers and established external-interface terms unchanged where English is required.
+- Write new or updated code comments and docstrings in Chinese. Keep identifiers and established external-interface terms unchanged where English is required. Exception: keep `.bat` files ASCII-only, because `cmd.exe` decodes them in the OEM code page and UTF-8 Chinese comments there get mangled into stray commands.
 - Unless necessary, do not add new files. Add a new file only when implementing a clearly distinct, independent feature; otherwise extend or refactor the appropriate existing file.
 - Prefer small services with pure logic where possible; keep QWidget creation and signal wiring in UI modules.
 - Keep long-running work off the Qt main thread.
@@ -258,4 +260,5 @@ External services:
 - No packaging plan exists yet; source-code execution is the current assumption.
 - `ai/safety_filter.py` exists but is not wired into the main chat flow.
 - Some reserved character-state modules are present but not clearly used by the main flow.
+- `setup_env.bat` still has two pre-existing nested `exit /b 1` branches (failed venv removal). `cmd.exe` loses the exit code for `exit /b` inside nested parentheses, so the printed message is the reliable signal there; new failure paths use top-level `goto` labels instead.
 - If Chinese text displays incorrectly, first reread the file explicitly as UTF-8 and verify the source bytes before changing any text.

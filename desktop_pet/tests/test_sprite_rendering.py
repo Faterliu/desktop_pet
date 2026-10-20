@@ -10,6 +10,8 @@ from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qt_test_app import ensure_app  # noqa: E402
 
 from animation.sprite_player import SpritePlayer
 from utils.sprite_mask import visible_sprite_mask
@@ -19,7 +21,7 @@ class SpriteRenderingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         """共享离屏应用，测试不启动宠物业务和后台任务。"""
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = ensure_app()
 
     def test_mask_preserves_every_nonzero_alpha_and_row_padding(self) -> None:
         """跨越字节边界的弱透明细边必须保留，全透明背景仍可穿透。"""

@@ -23,6 +23,13 @@ set "HTTPS_PROXY="
 set "ALL_PROXY="
 set "NO_PROXY="
 
+rem Keep this file ASCII-only: cmd.exe decodes .bat in the OEM code page, so UTF-8
+rem Chinese comments can be mangled into commands here.
+rem Install source order: DESKTOP_PET_PIP_INDEX (optional) -> default PyPI -> bundled mirrors.
+rem Every source gets a short timeout so a stalled default index falls back quickly.
+set "PIP_INSTALL_OPTS=--timeout 15 --retries 1 --disable-pip-version-check"
+set "PIP_FALLBACK_INDEXES=https://pypi.tuna.tsinghua.edu.cn/simple https://mirrors.aliyun.com/pypi/simple"
+
 if not exist "%PIP_TEMP_DIR%" mkdir "%PIP_TEMP_DIR%"
 set "TEMP=%PIP_TEMP_DIR%"
 set "TMP=%PIP_TEMP_DIR%"
@@ -73,9 +80,10 @@ echo !BASE_PYTHON!
 echo.
 
 if exist "%VENV_PYTHON%" (
-    "%VENV_PYTHON%" -c "import PySide6, requests" >nul 2>nul
+    rem Only check that the interpreter runs; missing packages are handled further down.
+    "%VENV_PYTHON%" -c "import sys" >nul 2>nul
     if errorlevel 1 (
-        echo Existing virtual environment is missing project dependencies. Recreating it...
+        echo Existing virtual environment cannot run Python. Recreating it...
         rmdir /s /q "%VENV_DIR%" >nul 2>nul
         if exist "%VENV_DIR%" (
             echo Failed to remove existing virtual environment:
@@ -117,25 +125,22 @@ if not exist "%VENV_PYTHON%" (
     exit /b 1
 )
 
-"%VENV_PYTHON%" -c "import PySide6, requests" >nul 2>nul
-if errorlevel 1 (
-    echo Installing project dependencies into local virtual environment...
-    "!BASE_PYTHON!" -m pip --python "%VENV_PYTHON%" install -r requirements.txt
-    if errorlevel 1 (
-        echo Failed to install dependencies into the project virtual environment.
-        echo No global Python packages were changed.
-        pause
-        exit /b 1
-    )
-)
+echo Checking project dependencies against requirements.txt...
+call :dependencies_satisfied
+if not errorlevel 1 goto :deps_ready
 
-"%VENV_PYTHON%" -c "import PySide6, requests" >nul 2>nul
-if errorlevel 1 (
-    echo Dependency verification failed.
-    pause
-    exit /b 1
-)
+rem Keep this flow flat on purpose: exit /b inside nested parentheses loses both the
+rem remaining block and the exit code, so failures leave via goto to a top-level label.
+set "INSTALL_OK="
+if defined DESKTOP_PET_PIP_INDEX call :install_requirements "!DESKTOP_PET_PIP_INDEX!"
+if not defined INSTALL_OK call :install_requirements ""
+if not defined INSTALL_OK for %%M in (%PIP_FALLBACK_INDEXES%) do if not defined INSTALL_OK call :install_requirements "%%M"
+if not defined INSTALL_OK goto :install_failed
 
+call :dependencies_satisfied
+if errorlevel 1 goto :verify_failed
+
+:deps_ready
 if exist "%LEGACY_PIP_CACHE_DIR%" (
     echo Removing old local pip cache...
     rmdir /s /q "%LEGACY_PIP_CACHE_DIR%" >nul 2>nul
@@ -151,6 +156,33 @@ echo.
 echo You can now run start_main.vbs.
 pause
 exit /b 0
+
+:install_failed
+echo Failed to install dependencies into the project virtual environment.
+echo No global Python packages were changed.
+echo Set DESKTOP_PET_PIP_INDEX to a reachable index URL and run setup_env.bat again.
+pause
+exit /b 1
+
+:verify_failed
+echo Dependency verification failed.
+pause
+exit /b 1
+
+:install_requirements
+rem Try the given source, then the default PyPI, then the bundled mirrors; stop at the first success.
+set "INDEX_ARGS="
+if not "%~1"=="" set "INDEX_ARGS=--index-url %~1"
+if "%~1"=="" (echo Installing project dependencies from the default PyPI...) else (echo Installing project dependencies from %~1...)
+"!BASE_PYTHON!" -m pip --python "%VENV_PYTHON%" install %INDEX_ARGS% %PIP_INSTALL_OPTS% -r "%~dp0requirements.txt"
+if not errorlevel 1 set "INSTALL_OK=1"
+goto :eof
+
+:dependencies_satisfied
+rem Resolve requirements.txt with pip itself against the installed versions: --no-index stays
+rem local and never touches the network, --dry-run writes nothing. 0 means fully satisfied.
+"!BASE_PYTHON!" -m pip --python "%VENV_PYTHON%" install --no-index --dry-run --quiet --disable-pip-version-check -r "%~dp0requirements.txt"
+goto :eof
 
 :find_python
 set "BASE_PYTHON="

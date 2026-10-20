@@ -17,6 +17,8 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from qt_test_app import ensure_app  # noqa: E402
 
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QImage, QRegion
@@ -31,7 +33,7 @@ class VideoPlayerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """创建同一个离屏 GUI 应用，不启动宠物业务或网络任务。"""
-        cls.app = QApplication.instance() or QApplication([])
+        cls.app = ensure_app()
 
     def setUp(self):
         """记录播放器以保证测试失败时同样回收子进程。"""
