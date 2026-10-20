@@ -75,25 +75,34 @@ class VideoPlayerTests(unittest.TestCase):
         self.assertEqual(player.current_action, "idle")
         self.assertLessEqual(player._worker.frames.qsize(), 6)
 
-    def test_formal_idle_loop_has_identical_first_and_last_rgba(self):
-        """正式待机循环重新解码后的首尾逐通道一致，不能只看容器标记。"""
+    def test_formal_idle_loop_has_consistent_first_and_last_composites(self):
+        """有损待机的首尾在逻辑尺寸和深浅底下保持连续，并保留真实透明。"""
         import imageio_ffmpeg
 
         clip = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))["video"]["clips"]["idle"]
         result = subprocess.run(
             [imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error", "-threads", "2",
              "-c:v", "libvpx-vp9", "-i", str(ROOT / clip["file"]),
-             "-vf", f"select=eq(n\\,0)+eq(n\\,{clip['frames'] - 1})", "-fps_mode", "passthrough",
+             "-vf", f"select=eq(n\\,0)+eq(n\\,{clip['frames'] - 1}),scale=240:320:flags=lanczos", "-fps_mode", "passthrough",
              "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"],
             capture_output=True, check=True, timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        frame_size = 720 * 960 * 4
+        frame_size = 240 * 320 * 4
         self.assertEqual(len(result.stdout), frame_size * 2)
         first, last = result.stdout[:frame_size], result.stdout[frame_size:]
-        self.assertEqual(first, last)
-        self.assertEqual(min(first[3::4]), 0)
-        self.assertEqual(max(first[3::4]), 255)
+        for frame in (first, last):
+            self.assertEqual(min(frame[3::4]), 0)
+            self.assertEqual(max(frame[3::4]), 255)
+        for background in (0, 255):
+            error = 0.0
+            for offset in range(0, frame_size, 4):
+                a, b = first[offset + 3] / 255, last[offset + 3] / 255
+                for channel in range(3):
+                    before = first[offset + channel] * a + background * (1 - a)
+                    after = last[offset + channel] * b + background * (1 - b)
+                    error += abs(before - after)
+            self.assertLess(error / (240 * 320 * 3), 1.0)
 
     def test_waving_last_frame_duration_and_single_completion(self):
         """挥手的第 85 帧显示足一帧，约 3.58 秒结束且只报告一次。"""
@@ -324,7 +333,7 @@ class VideoPlayerTests(unittest.TestCase):
     def test_probe_rejects_missing_alpha(self):
         """能读出 RGBA 并不代表有透明通道，纯不透明帧必须拒绝。"""
         fake_process = types.SimpleNamespace(communicate=lambda timeout: (bytes([255]) * (96 * 128 * 4), None), returncode=0)
-        worker = _DecodeWorker(1, "ffmpeg", {"idle": {"path": ROOT / "assets/videos/idle_refined.webm"}}, "idle", (240, 320), True, True)
+        worker = _DecodeWorker(1, "ffmpeg", {"idle": {"path": ROOT / "assets/videos/idle.webm"}}, "idle", (240, 320), True, True)
         with patch.object(worker, "_launch", return_value=fake_process):
             with self.assertRaises(ValueError):
                 worker._validate_clips()

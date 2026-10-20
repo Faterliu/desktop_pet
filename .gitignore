@@ -10,6 +10,7 @@
 !/scripts/run_trial.py
 !/scripts/make_idle_loop.py
 !/scripts/refine_walking_colors.py
+!/scripts/compress_webm.py
 !/scripts/watermark_step01.py
 !/scripts/chroma_step02.py
 !/scripts/fill_nn.py

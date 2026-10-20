@@ -14,12 +14,12 @@
   "video": {
     "display_size": [240, 320],
     "clips": {
-      "idle": {"file": "assets/videos/idle_loop.webm", "frames": 163, "fps": 24},
-      "thinking": {"file": "assets/videos/running_refined.webm", "frames": 241, "fps": 24},
-      "waving": {"file": "assets/videos/waving_long.webm", "frames": 86, "fps": 24},
+      "idle": {"file": "assets/videos/idle.webm", "frames": 163, "fps": 24},
+      "thinking": {"file": "assets/videos/thinking.webm", "frames": 241, "fps": 24},
+      "waving": {"file": "assets/videos/waving.webm", "frames": 86, "fps": 24},
       "happy": {"file": "assets/videos/happy.webm", "frames": 241, "fps": 24},
-      "walking_right": {"file": "assets/videos/running_right.webm", "frames": 269, "fps": 24, "movement_frames": [33, 224]},
-      "walking_left": {"file": "assets/videos/running_left.webm", "frames": 216, "fps": 24, "movement_frames": [25, 198]}
+      "walking_right": {"file": "assets/videos/right-walking.webm", "frames": 269, "fps": 24, "movement_frames": [33, 224]},
+      "walking_left": {"file": "assets/videos/left-walking.webm", "frames": 216, "fps": 24, "movement_frames": [25, 198]}
     },
     "actions": {
       "idle": "idle", "waiting": "idle", "running": "thinking", "review": "thinking",
