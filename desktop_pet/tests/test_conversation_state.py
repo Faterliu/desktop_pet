@@ -25,7 +25,7 @@ class ConversationStateControllerTests(unittest.TestCase):
             ("你好", False, EmotionState.HAPPY, "normal", "companion", "waving"),
             ("这个 bug 为什么报错", False, EmotionState.THINKING, "normal", "task", "review"),
             ("我好累", False, EmotionState.SLEEPY, "low", "emotional_support", "waiting"),
-            ("终于成功了", False, EmotionState.HAPPY, "high", "companion", "jumping"),
+            ("终于成功了", False, EmotionState.HAPPY, "high", "companion", "happy"),
             ("今天随便聊聊", False, EmotionState.CALM, "normal", "companion", "running"),
         ]
 
@@ -101,6 +101,17 @@ class ConversationStateControllerTests(unittest.TestCase):
         self.assertEqual(plan.action_name, "waving")
         self.assertEqual(plan.fallback_action, "waiting")
         self.assertTrue(plan.force_single_cycle)
+
+    def test_positive_feedback_plays_happy_then_waits_or_idles(self) -> None:
+        """开心反馈播放一次，API 尚未完成时继续等待，本地回复结束后待机。"""
+        for message in ("终于成功了", "好开心", "太好了"):
+            state = self.controller.update(message, False)
+            for pending, fallback in ((True, "waiting"), (False, "idle")):
+                with self.subTest(message=message, waiting_for_api=pending):
+                    plan = self.controller.action_plan(state, pending)
+                    self.assertEqual(plan.action_name, "happy")
+                    self.assertEqual(plan.fallback_action, fallback)
+                    self.assertTrue(plan.force_single_cycle)
 
 
 if __name__ == "__main__":

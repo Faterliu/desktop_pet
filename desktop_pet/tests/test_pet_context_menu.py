@@ -185,6 +185,22 @@ class PetContextMenuTests(unittest.TestCase):
         self.assertNotIn("清除非正式聊天记录", titles)
         self.assertNotIn("重新加载配置", titles)
 
+    def test_video_mode_hides_movement_entries(self) -> None:
+        """三视频阶段不显示自主移动与跑跳测试入口。"""
+        actions = self._menu_actions(show_test_menu=True, movement_enabled=False, auto_move=True)
+        self.assertNotIn("auto_move", {item.action_id for item in actions})
+        tests = next(item for item in actions if item.action_id == "test")
+        self.assertFalse({"test_move_left", "test_move_right", "test_jump"} & {item.action_id for item in tests.children})
+
+    def test_walking_video_exposes_horizontal_entries_without_jump(self) -> None:
+        """左右行走素材可用时显示自主移动与左右测试，保留跳跃屏蔽。"""
+        actions = self._menu_actions(show_test_menu=True, movement_enabled=True, jump_enabled=False)
+        self.assertIn("auto_move", {item.action_id for item in actions})
+        tests = next(item for item in actions if item.action_id == "test")
+        ids = {item.action_id for item in tests.children}
+        self.assertTrue({"test_move_left", "test_move_right"} <= ids)
+        self.assertNotIn("test_jump", ids)
+
     # 验证测试菜单会展示新增精灵动作，并将点击动作原样交给窗口处理。
     def test_test_menu_exposes_new_sprite_actions(self) -> None:
         """验证测试菜单可触发新增精灵动作。"""

@@ -573,6 +573,8 @@ def build_context_menu_actions(
     on_clear_completed_reminders: Callable[[], None],
     on_clipboard_assistant: Callable[[str], None],
     on_screenshot_analysis: Callable[[str], None],
+    movement_enabled: bool = True,
+    jump_enabled: bool = True,
 ) -> tuple[MenuAction, ...]:
     """根据当前配置快照和回调构建唯一的右键菜单动作树。"""
     def action(
@@ -721,6 +723,12 @@ def build_context_menu_actions(
                 ),
             ),
         ]
+        if not movement_enabled:
+            test_actions = [item for item in test_actions if item.action_id not in {
+                "test_movement_separator", "test_move_left", "test_move_right", "test_jump",
+            }]
+        elif not jump_enabled:
+            test_actions = [item for item in test_actions if item.action_id != "test_jump"]
         actions.append(MenuAction("test", "测试", "submenu", children=tuple(test_actions)))
 
     actions.extend(
@@ -748,6 +756,8 @@ def build_context_menu_actions(
             MenuAction("auto_move", "自主移动", "toggle", on_toggle_auto_move, auto_move),
         )
     )
+    if not movement_enabled:
+        actions = [item for item in actions if item.action_id != "auto_move"]
     if show_chat_api_menu:
         actions.append(MenuAction("api_chat", "聊天接入 API", "toggle", on_toggle_api_chat, api_chat_enabled))
     actions.extend(

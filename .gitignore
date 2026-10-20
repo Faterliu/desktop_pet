@@ -6,6 +6,15 @@
 !/desktop_pet/**
 !/README.md
 !/LICENSE
+!/scripts/
+!/scripts/run_trial.py
+!/scripts/make_idle_loop.py
+!/scripts/refine_walking_colors.py
+!/scripts/watermark_step01.py
+!/scripts/chroma_step02.py
+!/scripts/fill_nn.py
+!/scripts/MP4_TO_WEBM_WORKFLOW.md
+!/scripts/DSH_PET_LICENSE.txt
 
 # Python 缓存与构建产物
 desktop_pet/**/__pycache__/

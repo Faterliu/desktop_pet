@@ -48,7 +48,8 @@ Startup diagnostics:
 ## Core Behavior
 
 - Transparent, borderless, always-on-top desktop character window.
-- Sprite animation is configured by `desktop_pet/assets/sprite_config.json` (the current atlas is `assets/raw_spritesheet_short_arm.webp`).
+- Animation defaults to six transparent WebM clips under `desktop_pet/assets/videos/`, registered in the `video` section of `assets/sprite_config.json`. The old `assets/spritesheet.webp` atlas remains an entire-backend fallback. Video mode uses a 240×320 logical canvas and independent `ui.video_scale`. Right walking plays once for 269 frames with displacement during frames 33–224; left walking uses the independently generated, color-matched 216-frame clip with displacement during frames 25–198, ten opening standing frames and five closing standing frames. Window displacement follows presented frames and holds during the opening turn and closing stand. Autonomous walking honors `ui.enable_free_move`; left/right tests are available, while jumping stays disabled in video mode.
+- Positive informal messages such as “终于成功了” request `happy`, using the color-matched `assets/videos/happy.webm` once for 241 frames (about 10.04 seconds), then idle. API-pending happy/waving completion returns to waiting while retaining `chat` ownership so the worker can finish it. Greetings still wave; formal/task messages still think. Older configurations without a happy clip remain supported.
 - Click opens a floating chat input; double-click triggers reply or proactive-feedback behavior.
 - Right-click opens a compact card beside the character: clipboard assistant, reminders, screenshots and do-not-disturb are first-level entries; other settings remain in submenus. “关闭菜单” only closes the card; “退出程序” exits the pet.
 - Screenshot supports full-screen quick analysis and frozen single-screen region selection with a follow-up question. Images exist only in memory; only the returned text enters the isolated `screenshot` history.
@@ -113,6 +114,11 @@ Startup diagnostics:
 
 - Loads sprite config and atlas, crops frames, advances actions with `QTimer`, emits `frame_changed`. Action names must match `assets/sprite_config.json`.
 
+`desktop_pet/animation/video_player.py`
+
+- Default player facade; retains logical action names and the sprite interface. Decodes VP9 Alpha with bundled FFmpeg/libvpx-vp9 in registered background threads with a six-frame queue. QPixmap and UI updates remain on the main thread. Playback serials reject stale frames/errors/completions; single-cycle completion holds the last frame for its full interval. Exit must stop the player before destroying the window. Failed video validation/playback falls back to the entire old atlas backend for this run.
+- `frame_presented(action, serial, frame_index)` drives video walking in the main window; do not start an independent wall-clock position animation for these clips. `movement_frames` defines the displacement interval. Action interruption clears `_video_walk`; scaling/DPI restarts rebind its serial and origin to the current position. Keep callbacks guarded against action changes during frame delivery. Older three-clip configurations still work with walking disabled.
+
 `desktop_pet/ai/llm_client.py`
 
 - Handles compatible chat and vision requests with `requests.post()`. Preserve missing-key, API-error, timeout and response-shape handling; vision sends Data URL images to `/responses` and must not log image data or keys.
@@ -157,6 +163,7 @@ Startup diagnostics:
 
 ## Project Conventions
 
+- 默认不修改根目录 `README.md`（含同名大小写变体）；只有用户明确要求修改该文档时才更新。代码、素材或流程变更不要自动同步 README，相关说明优先写入对应的专项文档。
 - Read source code, configuration, documentation, and other text files explicitly as UTF-8. On PowerShell, use `Get-Content -Encoding UTF8`; do not rely on the terminal's default encoding, especially for Chinese text.
 - When piping inline Python from PowerShell, do not place raw Chinese literals in the here-string. Use Unicode escapes such as `\u4e2d\u6587`, or use `apply_patch` for text edits, then read and write target files explicitly as UTF-8.
 - Write new or updated code comments and docstrings in Chinese. Keep identifiers and established external-interface terms unchanged where English is required.
@@ -239,6 +246,7 @@ Dependencies are in `desktop_pet/requirements.txt`.
 
 - `PySide6-Essentials`: QtCore, QtGui, QtWidgets for the desktop UI. Avoid switching to full PySide6 unless a required module proves necessary.
 - `requests`: DeepSeek HTTP calls.
+- `imageio-ffmpeg==0.6.0`: bundled FFmpeg for transparent VP9 video decoding; no system FFmpeg or QtMultimedia dependency required.
 
 External services:
 

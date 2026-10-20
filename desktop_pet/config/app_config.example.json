@@ -36,6 +36,8 @@
   "ui": {
     "always_on_top": true,
     "scale": 0.6,
+    "animation_backend": "video",
+    "video_scale": 1.0,
     "enable_free_move": true,
     "click_to_chat": true,
     "start_position": "bottom_right",

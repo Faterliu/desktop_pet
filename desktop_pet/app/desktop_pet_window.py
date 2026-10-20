@@ -27,7 +27,7 @@ from ai.llm_client import LlmClient, LlmError
 from ai.memory_summarizer import MemorySummarizer
 from ai.prompt_builder import PromptBuilder
 from ai.summarizer import Summarizer
-from animation.sprite_player import SpritePlayer
+from animation.video_player import VideoPlayer
 from app.background_task_registry import BackgroundTaskRegistry
 from app.bubble_position_service import BubblePositionService
 from app.chat_input import ChatInput
@@ -206,17 +206,27 @@ def _set_pet_action(
     interrupt_movement: bool = True,
 ) -> None:
     """设置人物动作，并记录当前动作归属以隔离异步回调。"""
+    if getattr(window, "exit_animation_in_progress", False) and owner != "exit":
+        return
+    if (
+        getattr(window.sprite_player, "video_enabled", False)
+        and owner in {"screenshot", "clipboard"}
+        and action_name in {"review", "running"}
+    ):
+        # 后台分析完成前持续思考，由持有动作归属的任务回调结束。
+        force_single_cycle = False
     if interrupt_movement and action_name not in MOVEMENT_ACTIONS:
         animation = getattr(window, "move_animation", None)
         stop_animation = getattr(window, "_stop_active_move_animation", None)
-        if animation is not None and callable(stop_animation):
+        if (animation is not None or getattr(window, "_video_walk", None) is not None) and callable(stop_animation):
             stop_animation()
+    window._sprite_action_owner = owner or action_name
     window.sprite_player.set_action(
         action_name,
         fallback_action=fallback_action,
         force_single_cycle=force_single_cycle,
     )
-    window._sprite_action_owner = owner or action_name
+    window._sprite_action_serial = getattr(window.sprite_player, "playback_serial", None)
 
 
 # 仅在指定异步流程仍拥有当前动作时，才允许它切换到结束状态。
@@ -788,6 +798,7 @@ class DesktopPetWindow(QWidget):
         self.local_lines_refresh_worker: QObject | None = None
         self.background_tasks = BackgroundTaskRegistry(default_wait_timeout_ms=1000)
         self.move_animation: QPropertyAnimation | None = None
+        self._video_walk: dict | None = None
         self.behavior_started = False
         self.reminders_started = False
         self.conversation_maintenance_started = False
@@ -903,7 +914,12 @@ class DesktopPetWindow(QWidget):
             self._config_snapshot,
         )
 
-        self.sprite_player = SpritePlayer(self.sprite_config_path, self._ui_scale())
+        self.sprite_player = VideoPlayer(
+            self.sprite_config_path,
+            scale=self.config_service.get("ui.video_scale", 1.0),
+            legacy_scale=self.config_service.get("ui.scale", 0.6),
+            enabled=self.config_service.get_str("ui.animation_backend", "video") != "sprite",
+        )
         self._sprite_action_owner = "idle"
         self.bubble = SpeechBubble()
         self.reply_bubble = ReplyBubble()
@@ -967,6 +983,11 @@ class DesktopPetWindow(QWidget):
     def _connect_signals(self) -> None:
         """连接动画、输入框和主动行为等信号。"""
         self.sprite_player.frame_changed.connect(self._update_sprite)
+        self.sprite_player.frame_presented.connect(self._on_video_frame_presented)
+        self.sprite_player.action_finished.connect(self._on_video_action_finished)
+        self.sprite_player.action_changed.connect(self._on_video_action_changed)
+        self.sprite_player.playback_failed.connect(self._on_video_playback_failed)
+        self.sprite_player.backend_changed.connect(self._on_animation_backend_changed)
         self.chat_input.message_submitted.connect(self._handle_chat_input_message)
         self.chat_input.cancelled.connect(self._handle_chat_input_cancelled)
         self.behavior_controller.speak_requested.connect(self._handle_behavior_speak)
@@ -1022,6 +1043,9 @@ class DesktopPetWindow(QWidget):
             self.dragging = False
             self.drag_start_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             self.mouse_press_position = event.globalPosition().toPoint()
+            if self._video_walk is not None:
+                self._stop_active_move_animation()
+                _finish_pet_action_if_owned(self, "movement")
             if self.move_animation and self.move_animation.state() == QPropertyAnimation.State.Running:
                 self._stop_active_move_animation()
         elif event.button() == Qt.MouseButton.RightButton:
@@ -1101,6 +1125,11 @@ class DesktopPetWindow(QWidget):
             event.ignore()
             self.request_exit()
             return
+        self._stop_active_move_animation()
+        if not self.sprite_player.stop():
+            event.ignore()
+            QTimer.singleShot(100, self._finalize_exit)
+            return
         self._clear_screenshot_interaction(restore_widgets=False)
         if self._background_workers_running():
             self._close_after_workers_finished = True
@@ -1179,6 +1208,8 @@ class DesktopPetWindow(QWidget):
             on_clear_completed_reminders=self._clear_completed_reminders,
             on_clipboard_assistant=self._handle_clipboard_assistant,
             on_screenshot_analysis=self._handle_screenshot_analysis,
+            movement_enabled=self.sprite_player.horizontal_movement_enabled,
+            jump_enabled=not self.sprite_player.video_enabled,
         )
         menu = build_pet_context_menu(
             self,
@@ -1236,7 +1267,70 @@ class DesktopPetWindow(QWidget):
             self.bubble.show_message(farewell, self.geometry(), duration_ms + 400, "system")
         else:
             self.bubble.hide()
-        QTimer.singleShot(duration_ms + 50, self._finalize_exit)
+        if self.sprite_player.video_enabled:
+            # 正常退出等待实际末帧事件，超时仅用于解码异常时兜底。
+            QTimer.singleShot(max(8000, duration_ms + 5000), self._finalize_exit)
+        else:
+            QTimer.singleShot(duration_ms + 50, self._finalize_exit)
+
+    def _on_video_action_finished(self, action: str, serial: int) -> None:
+        """只有当前动作归属对应的播放结束，才恢复待机或完成退出。"""
+        if serial != getattr(self, "_sprite_action_serial", None):
+            return
+        owner = self._sprite_action_owner
+        if owner == "exit" and self.exit_animation_in_progress:
+            self._finalize_exit()
+            return
+        if owner == "movement" and getattr(self, "_video_walk", None) is not None:
+            self._stop_active_move_animation()
+        if owner == "chat" and self.sprite_player.fallback_action == "waiting":
+            # 开心或挥手播完后继续等待 API，完成回调仍需保有 chat 动作归属。
+            _set_pet_action(self, "waiting", owner="chat")
+            return
+        _finish_pet_action_if_owned(self, owner, self.sprite_player.fallback_action)
+
+    def _on_video_action_changed(self, action: str) -> None:
+        """缩放或跨屏重启播放时同步序号，继续保护原动作归属。"""
+        self._sprite_action_serial = self.sprite_player.playback_serial
+        walk = getattr(self, "_video_walk", None)
+        if walk is not None:
+            if action != walk["action"] or self._sprite_action_owner != "movement":
+                self._stop_active_move_animation()
+            elif walk["serial"] != self._sprite_action_serial:
+                # 缩放或跨 DPI 重启后，从当前位置继续，旧序号不能把窗口拉回去。
+                walk["origin"] = QPoint(self.pos())
+                walk["serial"] = self._sprite_action_serial
+
+    def _on_video_frame_presented(self, action: str, serial: int, index: int) -> None:
+        """按当前播放帧更新窗口位移，站姿、转身和回正期间停在原位。"""
+        walk = getattr(self, "_video_walk", None)
+        if (walk is None or serial != walk["serial"] or action != walk["action"]
+                or self._sprite_action_owner != "movement" or self._movement_locked()):
+            return
+        start, end = walk["frames"]
+        progress = max(0.0, min(1.0, (index - start) / (end - start)))
+        origin, target, available = walk["origin"], walk["target"], walk["available"]
+        x = round(origin.x() + (target.x() - origin.x()) * progress)
+        y = round(origin.y() + (target.y() - origin.y()) * progress)
+        x = max(available.left(), min(x, available.right() - self.width()))
+        y = max(available.top(), min(y, available.bottom() - self.height()))
+        point = QPoint(x, y)
+        if point != self.pos():
+            self.move(point)
+
+    def _on_video_playback_failed(self, serial: int, reason: str) -> None:
+        """视频失败后仍允许退出，其余交互使用完整旧图集继续工作。"""
+        if self.exit_animation_in_progress:
+            self._finalize_exit()
+
+    def _on_animation_backend_changed(self) -> None:
+        """整体回退后刷新移动能力、菜单和窗口布局。"""
+        self._stop_active_move_animation()
+        if self._context_menu is not None:
+            self._context_menu.close()
+            self._context_menu = None
+        self._refresh_auto_move_timer()
+        self._resize_for_sprite()
 
     # 在退出动作播放完成后真正关闭程序。
     def _finalize_exit(self) -> None:
@@ -1350,7 +1444,8 @@ class DesktopPetWindow(QWidget):
     def _set_scale(self, scale: float) -> None:
         """设置人物显示缩放比例并持久化到配置文件。"""
         normalized_scale = max(0.3, min(scale, 3.0))
-        self.app_config.setdefault("ui", {})["scale"] = round(normalized_scale, 2)
+        scale_key = "video_scale" if self.sprite_player.video_enabled else "scale"
+        self.app_config.setdefault("ui", {})[scale_key] = round(normalized_scale, 2)
         self.sprite_player.set_scale(normalized_scale)
         self._resize_for_sprite()
         self._save_app_config()
@@ -2049,6 +2144,8 @@ class DesktopPetWindow(QWidget):
     # 重新读取配置文件，并刷新动画和行为控制状态。
     def _reload_config(self) -> None:
         """重新读取配置文件，并刷新动画和行为控制状态。"""
+        if self.exit_animation_in_progress:
+            return
         self.app_config = self._load_app_config()
         self.config_service.update(self.app_config)
         self.reminder_controller.configure(
@@ -2058,8 +2155,13 @@ class DesktopPetWindow(QWidget):
             self._reminder_completed_retention_days(),
             self._reminder_ack_repeat_minutes(),
         )
-        self.sprite_player.set_scale(self._ui_scale())
+        self._stop_active_move_animation()
+        self.sprite_player.enabled = self.config_service.get_str("ui.animation_backend", "video") != "sprite"
+        self.sprite_player.scale = self.config_service.get("ui.video_scale", 1.0)
+        self.sprite_player.legacy_scale = self.config_service.get("ui.scale", 0.6)
         self.sprite_player.load()
+        self._sprite_action_owner = "idle"
+        self._sprite_action_serial = self.sprite_player.playback_serial
         self._setup_window()
         self._resize_for_sprite()
         self.show()
@@ -3281,6 +3383,9 @@ class DesktopPetWindow(QWidget):
     def _update_sprite(self, pixmap) -> None:
         """把最新精灵帧绘制到主窗口标签上。"""
         self.sprite_label.setPixmap(pixmap)
+        player = getattr(self, "sprite_player", None)
+        if isinstance(player, VideoPlayer):
+            player.set_device_pixel_ratio(self.devicePixelRatioF())
         self._resize_for_sprite()
 
     # 根据当前精灵帧尺寸同步调整窗口大小。
@@ -3289,8 +3394,10 @@ class DesktopPetWindow(QWidget):
         pixmap = self.sprite_label.pixmap()
         if not pixmap:
             return
-        self.resize(pixmap.width(), pixmap.height())
-        self.sprite_label.setGeometry(0, 0, pixmap.width(), pixmap.height())
+        logical_size = pixmap.deviceIndependentSize().toSize()
+        if self.size() != logical_size:
+            self.resize(logical_size)
+            self.sprite_label.setGeometry(self.rect())
         self._apply_sprite_window_mask(pixmap)
         self._sync_floating_widgets()
 
@@ -3345,7 +3452,7 @@ class DesktopPetWindow(QWidget):
     # 根据配置决定是否开启自主移动定时器。
     def _refresh_auto_move_timer(self) -> None:
         """根据配置决定是否开启自主移动定时器。"""
-        if self.config_service.get_bool("ui.enable_free_move", False):
+        if self.sprite_player.horizontal_movement_enabled and self.config_service.get_bool("ui.enable_free_move", False):
             self.auto_move_timer.start(random.randint(60_000, 180_000))
         else:
             self.auto_move_timer.stop()
@@ -3364,6 +3471,12 @@ class DesktopPetWindow(QWidget):
         available = screen.availableGeometry()
         current = self.pos()
         move_kinds, move_weights = _auto_move_choices(datetime.now().hour)
+        if getattr(self.sprite_player, "video_enabled", False):
+            if not self.sprite_player.horizontal_movement_enabled:
+                return
+            supported = [(kind, weight) for kind, weight in zip(move_kinds, move_weights)
+                         if kind in {"left", "right"}]
+            move_kinds, move_weights = zip(*supported)
         move_kind = random.choices(move_kinds, weights=move_weights, k=1)[0]
         if move_kind == "sleepy":
             _set_pet_action(
@@ -3402,6 +3515,16 @@ class DesktopPetWindow(QWidget):
             return
 
         action = "running_right" if target.x() > current.x() else "running_left"
+        if getattr(self.sprite_player, "video_enabled", False):
+            frames = self.sprite_player.movement_frame_range(action)
+            if frames is None:
+                return
+            self._video_walk = {
+                "serial": None, "action": action, "origin": QPoint(current), "target": target,
+                "frames": frames, "available": QRect(available),
+            }
+            _set_pet_action(self, action, force_single_cycle=True, owner="movement", interrupt_movement=False)
+            return
         _set_pet_action(self, action, owner="movement", interrupt_movement=False)
         animation = QPropertyAnimation(self, b"pos", self)
         self.move_animation = animation
@@ -3415,6 +3538,8 @@ class DesktopPetWindow(QWidget):
     # 执行一次带 jumping 动作的自主跳跃。
     def _start_jump_auto_move(self, current: QPoint, available: QRect) -> None:
         """执行一次带 jumping 动作的自主跳跃。"""
+        if getattr(self.sprite_player, "video_enabled", False):
+            return
         self._stop_active_move_animation()
         jump_height = max(24, self.height() // 2)
         peak_y = max(available.top(), current.y() - jump_height)
@@ -3454,6 +3579,10 @@ class DesktopPetWindow(QWidget):
     # 停止当前移动动画并清空动画引用。
     def _stop_active_move_animation(self) -> None:
         """停止当前移动动画并清空动画引用。"""
+        walk = getattr(self, "_video_walk", None)
+        self._video_walk = None
+        if walk is not None:
+            self._save_window_position()
         animation = self.move_animation
         if animation is not None:
             try:
@@ -3467,7 +3596,7 @@ class DesktopPetWindow(QWidget):
     # 判断当前窗口是否处于禁止自动移动的状态。
     def _movement_locked(self) -> bool:
         """判断当前窗口是否处于禁止自动移动的状态。"""
-        return self.dragging or self.exit_animation_in_progress
+        return self.dragging or self.exit_animation_in_progress or getattr(self, "_is_closing", False)
 
     # 判断互动后是否仍有任务、提醒或输入状态需要保留当前动作。
     def _interaction_busy(self, *, ignore_chat_task: bool = False) -> bool:
@@ -3705,7 +3834,8 @@ class DesktopPetWindow(QWidget):
     def _ui_scale(self) -> float:
         """读取并返回当前 UI 缩放比例。"""
         try:
-            return float(self.config_service.get("ui.scale", 1.0) or 1.0)
+            key = "ui.video_scale" if getattr(getattr(self, "sprite_player", None), "video_enabled", False) else "ui.scale"
+            return float(self.config_service.get(key, 1.0) or 1.0)
         except (TypeError, ValueError):
             return 1.0
 

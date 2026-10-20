@@ -18,7 +18,7 @@ logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
 sys.modules.setdefault("utils.logger", logger_module)
 
-from PySide6.QtCore import QAbstractAnimation, QEvent, QPointF, Qt  # noqa: E402
+from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, QRect, Qt  # noqa: E402
 from PySide6.QtGui import QMouseEvent, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
@@ -127,6 +127,108 @@ class FakeReminderWaitWindow:
 
 class InteractionActionConflictTests(unittest.TestCase):
     """验证用户回应动作不会被通用 idle 收尾或旧移动回调覆盖。"""
+
+    def _walking_window(self):
+        """构造无界面的行走窗口，记录位置和动作归属变化。"""
+        position = [QPoint(100, 100)]
+        saved = []
+        player = FakeSpritePlayer()
+        player.video_enabled = True
+        player.playback_serial = 7
+        player.fallback_action = "idle"
+        player.horizontal_movement_enabled = True
+        player.movement_frame_range = lambda _action: (33, 224)
+        fake = types.SimpleNamespace(
+            sprite_player=player, move_animation=None, _video_walk=None,
+            _sprite_action_owner="movement", _sprite_action_serial=7,
+            dragging=False, exit_animation_in_progress=False,
+            pos=lambda: QPoint(position[0]), move=lambda point: position.__setitem__(0, QPoint(point)),
+            width=lambda: 240, height=lambda: 320, _movement_locked=lambda: False,
+            _save_window_position=lambda: saved.append(QPoint(position[0])),
+            _sync_floating_widgets=lambda: None,
+        )
+        fake._stop_active_move_animation = lambda: DesktopPetWindow._stop_active_move_animation(fake)
+        record = player.set_action
+
+        def set_action(action, **kwargs):
+            """模拟动作切换同步发送新播放序号。"""
+            record(action, **kwargs)
+            player.current_action = action
+            player.playback_serial += 1
+            DesktopPetWindow._on_video_action_changed(fake, action)
+
+        player.set_action = set_action
+        return fake, saved
+
+    def test_video_walk_moves_only_during_stride_and_finishes_owned_action(self):
+        """转身和收尾原地播放，迈步期间才位移，视频结束统一恢复待机。"""
+        fake, saved = self._walking_window()
+        DesktopPetWindow._start_horizontal_move_test(fake, 140, QRect(0, 0, 1000, 800))
+        serial = fake.sprite_player.playback_serial
+        self.assertIsNone(fake.move_animation)
+        self.assertEqual(fake.sprite_player.current_action, "running_right")
+        for index in (0, 20, 32, 33):
+            DesktopPetWindow._on_video_frame_presented(fake, "running_right", serial, index)
+            self.assertEqual(fake.pos(), QPoint(100, 100))
+        DesktopPetWindow._on_video_frame_presented(fake, "running_right", serial, 128)
+        self.assertEqual(fake.pos(), QPoint(170, 100))
+        for index in (224, 230, 246, 268):
+            DesktopPetWindow._on_video_frame_presented(fake, "running_right", serial, index)
+            self.assertEqual(fake.pos(), QPoint(240, 100))
+        self.assertEqual(fake._sprite_action_owner, "movement")
+        DesktopPetWindow._on_video_action_finished(fake, "running_right", serial)
+        self.assertIsNone(fake._video_walk)
+        self.assertEqual(fake._sprite_action_owner, "idle")
+        self.assertEqual(fake.sprite_player.current_action, "idle")
+        self.assertEqual(saved, [QPoint(240, 100)])
+
+    def test_interruption_and_stale_walk_frames_cannot_move_window(self):
+        """新交互停止行走后，旧视频帧和结束事件不得再移动或改动作。"""
+        fake, _saved = self._walking_window()
+        DesktopPetWindow._start_horizontal_move_test(fake, -140, QRect(0, 0, 1000, 800))
+        serial = fake.sprite_player.playback_serial
+        self.assertEqual(fake.sprite_player.current_action, "running_left")
+        DesktopPetWindow._on_video_frame_presented(fake, "running_left", serial, 128)
+        position = fake.pos()
+        _set_pet_action(fake, "waving", owner="user_reply")
+        self.assertIsNone(fake._video_walk)
+        DesktopPetWindow._on_video_frame_presented(fake, "running_left", serial, 268)
+        DesktopPetWindow._on_video_action_finished(fake, "running_left", serial)
+        self.assertEqual(fake.pos(), position)
+        self.assertEqual(fake.sprite_player.current_action, "waving")
+        self.assertEqual(fake._sprite_action_owner, "user_reply")
+
+    def test_walk_restart_uses_current_position_and_new_serial(self):
+        """跨 DPI 重启行走时更新起点与序号，不接受旧帧或退回旧起点。"""
+        fake, _saved = self._walking_window()
+        DesktopPetWindow._start_horizontal_move_test(fake, 140, QRect(0, 0, 1000, 800))
+        old_serial = fake.sprite_player.playback_serial
+        DesktopPetWindow._on_video_frame_presented(fake, "running_right", old_serial, 128)
+        fake.sprite_player.playback_serial += 1
+        DesktopPetWindow._on_video_action_changed(fake, "running_right")
+        DesktopPetWindow._on_video_frame_presented(fake, "running_right", old_serial, 268)
+        self.assertEqual(fake.pos(), QPoint(170, 100))
+        DesktopPetWindow._on_video_frame_presented(fake, "running_right", old_serial + 1, 0)
+        self.assertEqual(fake.pos(), QPoint(170, 100))
+        fake.width = lambda: 900
+        DesktopPetWindow._on_video_frame_presented(fake, "running_right", old_serial + 1, 268)
+        self.assertLessEqual(fake.pos().x() + fake.width(), 999)
+
+    def test_video_auto_move_filters_out_jump_and_unavailable_emotions(self):
+        """视频自主移动只选择左右行走，不执行缺失的跳跃或困倦素材。"""
+        fake, _saved = self._walking_window()
+        requests = []
+        fake._refresh_auto_move_timer = lambda: None
+        fake._interaction_busy = lambda: False
+        fake.bubble = types.SimpleNamespace(isVisible=lambda: False)
+        fake.sprite_player.current_action = "idle"
+        fake._current_screen = lambda: types.SimpleNamespace(availableGeometry=lambda: QRect(0, 0, 1000, 800))
+        fake._start_horizontal_move_test = lambda delta, **kwargs: requests.append(delta)
+        with patch("app.desktop_pet_window.random.choices", return_value=["right"]) as choices:
+            with patch("app.desktop_pet_window.random.choice", return_value=140):
+                DesktopPetWindow._trigger_auto_move(fake)
+        self.assertEqual(tuple(choices.call_args.args[0]), ("left", "right"))
+        self.assertEqual(requests, [140])
 
     def test_behavior_nested_settings_take_precedence_over_legacy_paths(self) -> None:
         """提醒和聊天设置应优先从 behavior 的新层级读取。"""

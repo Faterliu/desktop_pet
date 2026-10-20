@@ -11,6 +11,22 @@
   "rows": 12,
   "columns": 16,
   "default_fps": 8,
+  "video": {
+    "display_size": [240, 320],
+    "clips": {
+      "idle": {"file": "assets/videos/idle_loop.webm", "frames": 163, "fps": 24},
+      "thinking": {"file": "assets/videos/running_refined.webm", "frames": 241, "fps": 24},
+      "waving": {"file": "assets/videos/waving_long.webm", "frames": 86, "fps": 24},
+      "happy": {"file": "assets/videos/happy.webm", "frames": 241, "fps": 24},
+      "walking_right": {"file": "assets/videos/running_right.webm", "frames": 269, "fps": 24, "movement_frames": [33, 224]},
+      "walking_left": {"file": "assets/videos/running_left.webm", "frames": 216, "fps": 24, "movement_frames": [25, 198]}
+    },
+    "actions": {
+      "idle": "idle", "waiting": "idle", "running": "thinking", "review": "thinking",
+      "waving": "waving", "failed": "idle", "happy": "happy", "sleepy": "idle",
+      "leaf-hug": "idle", "running_left": "walking_left", "running_right": "walking_right", "jumping": "idle"
+    }
+  },
   "actions": {
     "idle": {
       "label": "呼吸眨眼",

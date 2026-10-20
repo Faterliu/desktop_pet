@@ -59,13 +59,14 @@ class SpriteRenderingTests(unittest.TestCase):
             player.timer.stop()
 
     def test_integer_enlargement_preserves_pixel_edges(self) -> None:
-        """整数倍放大仍保持像素边界，不引入半透明模糊。"""
+        """整数倍放大精确保留原像素，原图已有半透明边缘也不能被改写。"""
         player = SpritePlayer(ROOT / "assets" / "sprite_config.json", scale=2.0)
         player.timer.stop()
         try:
             result = player.current_pixmap().toImage()
+            source = player.frames_by_action[player.current_action][player.current_index].toImage()
             self.assertEqual((result.width(), result.height()), (384, 416))
-            self.assertTrue(all(result.pixelColor(x, y).alpha() in (0, 255)
+            self.assertTrue(all(result.pixelColor(x, y) == source.pixelColor(x // 2, y // 2)
                                 for y in range(result.height()) for x in range(result.width())))
         finally:
             player.timer.stop()

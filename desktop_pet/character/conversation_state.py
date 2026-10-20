@@ -204,7 +204,7 @@ class ConversationStateController:
         elif state.mode == "emotional_support":
             action_name = "waiting"
         elif state.mood == EmotionState.HAPPY and state.energy == "high":
-            action_name = "jumping"
+            action_name = "happy"
         elif state.mood == EmotionState.HAPPY:
             action_name = "waving"
         else:
@@ -212,7 +212,7 @@ class ConversationStateController:
 
         if not waiting_for_api:
             return ConversationActionPlan(action_name, "idle", True)
-        if action_name in {"waving", "jumping"}:
+        if action_name in {"waving", "jumping", "happy"}:
             return ConversationActionPlan(action_name, "waiting", True)
         return ConversationActionPlan(action_name, "idle", False)
 

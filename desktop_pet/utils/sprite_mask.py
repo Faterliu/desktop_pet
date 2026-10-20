@@ -1,5 +1,6 @@
 """保留精灵半透明边缘的窗口裁剪掩码。"""
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QBitmap, QImage, QPixmap, qRgb
 
 
@@ -8,6 +9,11 @@ def visible_sprite_mask(pixmap: QPixmap) -> QBitmap:
     if pixmap.isNull():
         return QBitmap()
     image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+    logical_size = pixmap.deviceIndependentSize().toSize()
+    if image.size() != logical_size:
+        image = image.scaled(logical_size, Qt.AspectRatioMode.IgnoreAspectRatio,
+                             Qt.TransformationMode.SmoothTransformation)
+    image.setDevicePixelRatio(1.0)
     width, height = image.width(), image.height()
     source = image.constBits()
     source_stride = image.bytesPerLine()
