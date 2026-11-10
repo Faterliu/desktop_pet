@@ -78,6 +78,8 @@ def main() -> None:
                 hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                 corners = np.zeros((height, width), dtype=np.uint8)
                 corners[:int(height * .12), :int(width * .28)] = 255
+                corners[:int(height * .12), int(width * .72):] = 255
+                corners[int(height * .90):, :int(width * .28)] = 255
                 corners[int(height * .90):, int(width * .72):] = 255
                 letters = ((hsv[..., 1] < 135) & (hsv[..., 2] > 110)
                            & (corners > 0)).astype(np.uint8) * 255
@@ -226,7 +228,16 @@ def main() -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True, help="720×960、24 fps 绿幕 MP4")
-    parser.add_argument("--action", choices=("idle", "waving", "running", "running_right", "running_left", "happy"), default=ACTION, help="输出动作名；running 表示思考，running_right/running_left 表示左右行走，happy 表示开心")
+    parser.add_argument(
+        "--action",
+        choices=(
+            "idle", "waving", "running", "running_right", "running_left", "happy",
+            "deep-breath", "failed", "leaf-hug", "review", "hair-adjust", "yawn",
+            "one-arm-stretch", "guide-right", "look-right", "listen-nod",
+        ),
+        default=ACTION,
+        help="输出动作名；running 表示思考，running_right/running_left 表示左右行走",
+    )
     parser.add_argument("--work-dir", type=Path, help="独立处理目录，默认 desktop_pet/tmp_work/video_export/动作名")
     parser.add_argument("--reuse-cleaned", action="store_true", help="复用同处理目录的 step01 视频和已有报告，只重新抠像")
     parser.add_argument("--sat-min", type=float, default=SAT_MIN, help="抠绿最低饱和度，默认 0.35；侧身深色头发可尝试 0.5")

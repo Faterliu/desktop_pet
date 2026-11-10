@@ -104,19 +104,23 @@ def validate(source, output, expected, ffmpeg):
             "visible_rgb_psnr_db": psnr, "first_last_composite_mae_240x320": seam}, sample
 
 
-def compress(source_dir, output_dir, crf):
+def compress(source_dir, output_dir, crf, files=None):
     """使用外部母版统一编码到独立目录，不覆盖母版或自动替换正式文件。"""
     source_dir, output_dir = source_dir.resolve(), output_dir.resolve()
     if source_dir == output_dir:
         raise ValueError("输出目录必须与源目录分开")
-    clips = json.loads((APP_ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))["video"]["clips"]
+    clips = list(json.loads((APP_ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))["video"]["clips"].values())
+    if files is not None:
+        if any(Path(name).name != name or Path(name).suffix.lower() != ".webm" for name in files):
+            raise ValueError("--files 仅接受当前源目录中的 WebM 文件名")
+        clips = [{"file": name} for name in files]
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     output_dir.mkdir(parents=True, exist_ok=True)
     report = {"encoder": "libvpx-vp9", "crf": crf, "lossless": False,
               "resolution": [720, 960], "fps": 24, "audio": False, "clips": []}
-    sheet = Image.new("RGB", (1080, 1040), "#dddddd")
+    sheet = Image.new("RGB", (1080, 520 * ((len(clips) + 2) // 3)), "#dddddd")
     draw = ImageDraw.Draw(sheet)
-    for index, clip in enumerate(clips.values()):
+    for index, clip in enumerate(clips):
         name = Path(clip["file"]).name
         source, output = source_dir / name, output_dir / name
         if not source.is_file():
@@ -130,6 +134,12 @@ def compress(source_dir, output_dir, crf):
                 raise ValueError(f"源视频时序不符：{name}")
         finally:
             capture.release()
+        expected = clip.get("frames")
+        if expected is None:
+            # 未登记的新动作以完整解码计数，避免容器时长推算少一帧。
+            expected = sum(1 for _ in frames(source, ffmpeg))
+            if expected < 1:
+                raise ValueError(f"源视频没有可解码帧：{name}")
         print(f"编码 {name}，CRF {crf}", flush=True)
         subprocess.run(
             [ffmpeg, "-y", "-v", "error", "-threads", "2", "-c:v", "libvpx-vp9", "-i", str(source),
@@ -139,7 +149,7 @@ def compress(source_dir, output_dir, crf):
              "-deadline", "good", "-cpu-used", "2", "-row-mt", "1", "-threads", "4", str(output)],
             check=True, timeout=180, creationflags=FLAGS,
         )
-        metrics, sample = validate(source, output, clip["frames"], ffmpeg)
+        metrics, sample = validate(source, output, expected, ffmpeg)
         with source.open("rb") as stream:
             source_hash = hashlib.file_digest(stream, "sha256").hexdigest()
         with output.open("rb") as stream:
@@ -165,7 +175,8 @@ if __name__ == "__main__":
     parser.add_argument("--source-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--crf", type=int, default=20)
+    parser.add_argument("--files", nargs="+", help="只压缩指定文件名；省略时处理配置中的正式素材")
     args = parser.parse_args()
     if not 1 <= args.crf <= 40:
         parser.error("--crf 需要在 1 到 40 之间")
-    compress(args.source_dir, args.output_dir, args.crf)
+    compress(args.source_dir, args.output_dir, args.crf, args.files)

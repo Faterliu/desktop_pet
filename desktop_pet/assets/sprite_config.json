@@ -18,13 +18,26 @@
       "thinking": {"file": "assets/videos/thinking.webm", "frames": 241, "fps": 24},
       "waving": {"file": "assets/videos/waving.webm", "frames": 86, "fps": 24},
       "happy": {"file": "assets/videos/happy.webm", "frames": 241, "fps": 24},
+      "failed": {"file": "assets/videos/failed.webm", "frames": 241, "fps": 24},
+      "review": {"file": "assets/videos/review.webm", "frames": 241, "fps": 24},
+      "leaf-hug": {"file": "assets/videos/leaf-hug.webm", "frames": 241, "fps": 24},
+      "deep-breath": {"file": "assets/videos/deep-breath.webm", "frames": 241, "fps": 24},
+      "hair-adjust": {"file": "assets/videos/hair-adjust.webm", "frames": 241, "fps": 24},
+      "yawn": {"file": "assets/videos/yawn.webm", "frames": 241, "fps": 24},
+      "one-arm-stretch": {"file": "assets/videos/one-arm-stretch.webm", "frames": 241, "fps": 24},
+      "guide-right": {"file": "assets/videos/guide-right.webm", "frames": 241, "fps": 24},
+      "look-right": {"file": "assets/videos/look-right.webm", "frames": 241, "fps": 24},
+      "listen-nod": {"file": "assets/videos/listen-nod.webm", "frames": 241, "fps": 24},
       "walking_right": {"file": "assets/videos/right-walking.webm", "frames": 269, "fps": 24, "movement_frames": [33, 224]},
       "walking_left": {"file": "assets/videos/left-walking.webm", "frames": 216, "fps": 24, "movement_frames": [25, 198]}
     },
     "actions": {
-      "idle": "idle", "waiting": "idle", "running": "thinking", "review": "thinking",
-      "waving": "waving", "failed": "idle", "happy": "happy", "sleepy": "idle",
-      "leaf-hug": "idle", "running_left": "walking_left", "running_right": "walking_right", "jumping": "idle"
+      "idle": "idle", "waiting": "idle", "running": "thinking", "review": "review",
+      "waving": "waving", "failed": "failed", "happy": "happy", "sleepy": "idle",
+      "leaf-hug": "leaf-hug", "deep-breath": "deep-breath",
+      "hair-adjust": "hair-adjust", "yawn": "yawn", "one-arm-stretch": "one-arm-stretch",
+      "guide-right": "guide-right", "look-right": "look-right", "listen-nod": "listen-nod",
+      "running_left": "walking_left", "running_right": "walking_right", "jumping": "idle"
     }
   },
   "actions": {

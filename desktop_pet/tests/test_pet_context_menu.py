@@ -223,10 +223,22 @@ class PetContextMenuTests(unittest.TestCase):
         self.assertIsNotNone(test_menu)
         test_actions = {action.text(): action for action in test_menu.actions()}
 
-        for action_name in ("happy", "sleepy", "leaf-hug"):
-            test_actions[f"测试动作：{action_name}"].trigger()
+        expected_actions = {
+            "happy": "happy",
+            "sleepy": "sleepy",
+            "leaf-hug": "leaf-hug",
+            "deep-breath": "deep-breath",
+            "整理头发": "hair-adjust",
+            "打哈欠": "yawn",
+            "单臂伸展": "one-arm-stretch",
+            "右侧指引": "guide-right",
+            "朝右侧看": "look-right",
+            "倾听点头": "listen-nod",
+        }
+        for label in expected_actions:
+            test_actions[f"测试动作：{label}"].trigger()
 
-        self.assertEqual(selected_actions, ["happy", "sleepy", "leaf-hug"])
+        self.assertEqual(selected_actions, list(expected_actions.values()))
         card.close()
         parent.close()
 

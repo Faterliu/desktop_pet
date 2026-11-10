@@ -1,264 +1,94 @@
 # AGENTS.md
 
-Project handoff notes for future AI coding agents. This file is meant to be read quickly before changing the repository; keep it concise and grounded in the current code.
+本指南适用于仓库根目录及其所有子目录。应用位于 `desktop_pet/`，素材处理脚本位于 `scripts/`。
 
-## 5-Minute Overview
+## 1. 项目介绍
 
-- Project: Windows desktop AI pet prototype built with Python and PySide6.
-- App root: `desktop_pet/`.
-- Entry point: `desktop_pet/main.py`.
-- Main coordinator: `desktop_pet/app/desktop_pet_window.py`.
-- Default config template: `desktop_pet/config/app_config.example.json`.
-- Runtime user data: `desktop_pet/config/app_config.json`, `desktop_pet/data/`, logs, caches, and virtual environments must not be committed.
-- Tests: `desktop_pet/tests/` uses `unittest`; there is no pytest, packaging, formatter, lint, or CI setup. `test_interaction_action_conflicts.py` covers movement, delayed interaction and stale callback action conflicts. Qt-using modules take the application object from `tests/qt_test_app.py` (`ensure_app()`); creating a bare `QCoreApplication` first makes every later `QWidget` test abort the whole run.
-- Older planning and asset notes live under `xiaohu_codex_package/xiaohu_codex/`.
+小桃是用 Python 和 PySide6 实现的 Windows 桌面 AI 宠物。它接收鼠标、聊天文本、剪贴板文本、截图和提醒设置，通过透明置顶窗口、角色动画、气泡和正式问答面板反馈。应用支持本地台词和远程模型，并在本地保存会话历史、摘要、记忆与提醒。
 
-## Run And Setup
+## 2. 维护要求
 
-First launch:
+### 项目维护
 
-```powershell
-cd desktop_pet
-.\setup_env.bat
-```
+- 读写源代码、配置和文档时显式指定 UTF-8。PowerShell 读取文本使用 `Get-Content -Encoding UTF8`。通过管道传入内联 Python 时用 Unicode 转义表示中文，或用 `apply_patch` 直接编辑文件。遇到乱码先核对源字节。
+- 新增或修改的代码注释和文档字符串使用中文，标识符与外部接口术语保留原文。`.bat` 文件仅使用 ASCII，避免 `cmd.exe` 按 OEM 代码页误读。
+- 优先修改现有文件。职责独立且确有需要时再新增文件。纯逻辑留在服务模块，控件创建和信号连接留在界面模块。
+- 新增后台任务使用 `BackgroundTaskRegistry` 管理。耗时操作放到后台，结果通过信号回主线程更新界面。退出时限时回收任务和解码器，防止回调访问正在关闭的窗口。
+- 角色动作统一经 `_set_pet_action()` 请求，异步完成经 `_finish_pet_action_if_owned()` 收尾。修改动作时验证移动结束、延迟交互和过期回调不会覆盖新动作。
+- 修改配置项时同步更新代码与 `desktop_pet/config/app_config.example.json`。保留配置保存路径、存储结构和旧数据兼容性，维护原子写入及损坏文件恢复。
+- 保持 `desktop_pet/config/app_config.json`、`desktop_pet/data/`、日志、缓存、虚拟环境和本地生成状态受 Git 忽略。提交内容不得含真实密钥。日志使用脱敏辅助函数，避免记录完整提示词、记忆、模型回复、图像和原始 API 请求或响应。
+- 从 `desktop_pet/` 运行 `.\.desktop_pet_venv\Scripts\python.exe -B -m unittest discover -s tests`。Qt 测试统一使用 `desktop_pet/tests/qt_test_app.py` 的 `ensure_app()`，保证进程先创建 `QApplication`。仅检查语法时用 `compile()` 避免写入字节码。若默认临时目录无写权限，将测试临时目录指向 `desktop_pet/tmp_work/`。验证结束后回收本次启动的临时进程。
 
-Daily terminal-free startup:
+### 文档维护
 
-```powershell
-cd desktop_pet
-wscript.exe .\start_main.vbs
-```
+- 仅在用户明确要求时修改根目录 `README.md`，含同名大小写变体。专项参数、教程和操作细节归入对应文档，本指南只维护长期约束、接口和代码入口。
+- 收到新动作 MP4 时，按 [MP4 转透明 WebM 工作流](scripts/MP4_TO_WEBM_WORKFLOW.md) 默认完成转码验收、母版与播放版归档、程序映射和测试菜单接入，并补齐已验收但遗漏的动作。
+- 项目职责或约定变化时直接更新对应章节，避免另设同步日志或变更记录。
 
-Manual startup:
+## 3. 接口说明
 
-```powershell
-cd desktop_pet
-py -m pip install -r requirements.txt
-py main.py
-```
+| 接口 | 方向 | 作用 |
+| --- | --- | --- |
+| `QApplication.clipboard()`、`QScreen.grabWindow()` | 输入 | 读取系统剪贴板文本和屏幕像素，供辅助分析。 |
+| `desktop_pet/config/app_config.json` | 双向 | 读取本机运行配置，保存设置变更。缺少本机配置时读取示例模板。 |
+| 文本模型 `/chat/completions`、`/responses` | 双向 | 按所选供应商及协议发送文本上下文，接收回复或工具调用。 |
+| 视觉模型 `/responses` | 双向 | 使用 `api.openai` 配置发送内存截图的 Data URL，接收文字分析。 |
+| 提醒工具 `create_reminder` | 双向 | 校验模型给出的提醒参数并写入本地提醒，返回执行结果。 |
+| `desktop_pet/data/` | 双向 | 持久化会话历史、摘要、记忆、提醒和运行状态。 |
+| `desktop_pet/assets/sprite_config.json` | 输入 | 定义图集动作，以及视频素材、逻辑动作映射和行走位移区间。 |
 
-Use `py` / `py -m pip` on Windows for first-time environment setup. Run project tests with `.\desktop_pet_venv\Scripts\python.exe`, not the global `py`, because the virtual environment is the application runtime and contains project dependencies such as `requests`. Do not assume `python` or `pip` points to the intended interpreter; they may be Microsoft Store aliases or old launchers.
+配置为 KLD Responses 文本服务时，主备线路对可重试错误依次尝试，两者均不可用后可回退到已配置的 DeepSeek。视觉请求独立于文本供应商。截图只在内存中处理，`screenshot` 历史仅记录成功返回的文本。提醒优先使用原生工具调用，端点不支持时使用严格 JSON 协议。
 
-`setup_env.bat` recreates the venv only when its interpreter is unusable; dependencies are compared against `requirements.txt` with `pip --no-index --dry-run`, so a newly added requirement is installed on the next run without recreating the venv. Installs try `DESKTOP_PET_PIP_INDEX` when set, then the default PyPI, then the Tsinghua and Aliyun mirrors, each with `--timeout 15 --retries 1`, so an unreachable default index costs seconds instead of a hang. The script clears `PIP_*`, proxy and index environment variables, so a download that still stalls is a network problem, not a wrong setting.
+## 4. 已有功能
 
-Startup diagnostics:
+环境与启动 → 交互采集与调度 → 回复与工具执行 → 界面与动画呈现 → 本地存储与后台维护。
 
-- `desktop_pet/data/startup_bootstrap.log` is written before importing PySide6.
-- `desktop_pet/data/app.log` contains normal app logs.
-- `start_main.vbs` reads `data/runtime_python.txt`, runs `git pull --ff-only` best-effort, then launches `main.py` hidden. Failures are logged to `data/start_main_error.log`.
+### 4.1 环境与启动
 
-## Core Behavior
+| 文件 | 功能 |
+| --- | --- |
+| `desktop_pet/setup_env.bat`、`desktop_pet/requirements.txt` | 创建或复用 `.desktop_pet_venv`，安装 PySide6-Essentials、requests 和提供 FFmpeg 的 imageio-ffmpeg，并记录运行解释器。 |
+| `desktop_pet/start_main.vbs` | 读取解释器记录，尝试 `git pull --ff-only`，随后隐藏终端启动程序。 |
+| `desktop_pet/main.py` | 在导入 PySide6 和业务模块前写入启动诊断，初始化日志和 Qt 应用，显示桌宠窗口。 |
+| `desktop_pet/app/config_service.py` | 以点分隔路径读取已加载的配置。 |
 
-- Transparent, borderless, always-on-top desktop character window.
-- Animation defaults to six transparent WebM clips under `desktop_pet/assets/videos/`: `idle.webm`, `thinking.webm`, `waving.webm`, `happy.webm`, `left-walking.webm`, and `right-walking.webm`, registered in the `video` section of `assets/sprite_config.json`. Shipping clips use lossy VP9 (CRF 20, lossless=0). Lossless masters/backups stay outside this project in `C:\file\pet-image`; keep only lossy playback videos in the project. Logical action names remain compatible through the manifest mapping. The old `assets/spritesheet.webp` atlas remains an entire-backend fallback. Video mode uses a 240×320 logical canvas and independent `ui.video_scale`. Right walking plays once for 269 frames with displacement during frames 33–224; left walking uses the independently generated, color-matched 216-frame clip with displacement during frames 25–198, ten opening standing frames and five closing standing frames. Window displacement follows presented frames and holds during the opening turn and closing stand. Autonomous walking honors `ui.enable_free_move`; left/right tests are available, while jumping stays disabled in video mode.
-- Positive informal messages such as “终于成功了” request `happy`, using the color-matched `assets/videos/happy.webm` once for 241 frames (about 10.04 seconds), then idle. API-pending happy/waving completion returns to waiting while retaining `chat` ownership so the worker can finish it. Greetings still wave; formal/task messages still think. Older configurations without a happy clip remain supported.
-- Click opens a floating chat input; double-click triggers reply or proactive-feedback behavior.
-- Right-click opens a compact card beside the character: clipboard assistant, reminders, screenshots and do-not-disturb are first-level entries; other settings remain in submenus. “关闭菜单” only closes the card; “退出程序” exits the pet.
-- Screenshot supports full-screen quick analysis and frozen single-screen region selection with a follow-up question. Images exist only in memory; only the returned text enters the isolated `screenshot` history.
-- Chat can use local scripted replies or compatible APIs. Chat prefers the configured KLD Responses endpoint and falls back to DeepSeek when its SSL connection is interrupted; vision always uses the configured OpenAI Responses API.
-- Local JSON/JSONL stores keep chat history, append-only mode summaries, memory, usage counters, generated local lines, and window position. Chat history is shared `data/chat_history.jsonl`; `formal`, `informal`, and `clipboard` feed their own summaries through one background maintenance task, while `remind` and reserved `screenshot` remain outside summaries and memory. `memory.json` stores each semantic field as numbered description/timestamp records; only the three-summary memory pipeline may add or update them.
-- Proactive behavior includes startup greetings, idle greetings, scenario-based greetings, knowledge greetings, time-period greetings, and low-interruption fallback. Knowledge greetings no longer show a local intro line before the generated content.
+首次配置和日常启动见 [README 的运行说明](README.md)。静默启动失败时先查 `desktop_pet/data/start_main_error.log` 和 `desktop_pet/data/startup_bootstrap.log`，常规运行日志在 `desktop_pet/data/app.log`。
 
-## Key Files
+### 4.2 交互采集与调度
 
-`desktop_pet/main.py`
+| 文件 | 功能 |
+| --- | --- |
+| `desktop_pet/app/desktop_pet_window.py` | 协调窗口、输入事件、聊天状态、后台任务、动作归属及退出。 |
+| `desktop_pet/app/context_menu.py` | 构建右键卡片和子菜单，分派剪贴板、截图、提醒和动作测试入口。 |
+| `desktop_pet/app/chat_input.py`、`desktop_pet/app/clipboard_service.py`、`desktop_pet/app/screenshot.py` | 采集聊天输入、读取剪贴板文本、获取全屏或冻结画面选区并提交视觉分析。 |
+| `desktop_pet/character/behavior_controller.py`、`desktop_pet/character/proactive_context.py` | 调度启动、空闲、分时段与场景问候，构建场景上下文和本地兜底内容。 |
+| `desktop_pet/app/background_task_registry.py` | 注册、去重并清理后台线程与工作对象。 |
 
-- Application entry. Writes early boot logs, imports PySide6, configures logging, creates `QApplication`, then shows `DesktopPetWindow`.
-- Avoid importing business modules before early startup diagnostics.
+### 4.3 回复与工具执行
 
-`desktop_pet/app/desktop_pet_window.py`
+| 文件 | 功能 |
+| --- | --- |
+| `desktop_pet/app/chat_flow_controller.py` | 决定本地或 API 回复分支，准备正式与闲聊模式快照及持久化决策。 |
+| `desktop_pet/ai/prompt_builder.py`、`desktop_pet/ai/context_manager.py` | 组装角色设定和安全约束，按预算选取近期历史、摘要与记忆。 |
+| `desktop_pet/ai/llm_client.py` | 选择模型线路与协议，解析文本、视觉和工具响应，处理超时和服务错误。 |
+| `desktop_pet/app/reminder.py`、`desktop_pet/storage/reminder_store.py` | 接收手动或模型创建的提醒，保存提醒状态并调度到期反馈。 |
 
-- Main UI and flow coordinator: window flags, mouse/menu events, chat flow, background worker wiring, formal Q&A panels, bubbles, movement, topmost enforcement, config reload, and exit animation.
-- Large and stateful. Be careful around `QThread` lifecycle, `closeEvent()`, chat pending state, timers, topmost state, formal/informal mode, floating-widget positioning, and action ownership.
-- All character actions must go through `_set_pet_action()`; it stops active movement before non-movement actions and records ownership. Async worker callbacks must use `_finish_pet_action_if_owned()` so stale completions cannot replace newer actions. Do not reintroduce direct `sprite_player.set_action()` calls in this window.
+### 4.4 界面与动画呈现
 
-`desktop_pet/app/background_task_registry.py`
+| 文件 | 功能 |
+| --- | --- |
+| `desktop_pet/app/speech_bubble.py`、`desktop_pet/app/formal_answer_panel.py`、`desktop_pet/app/bubble_position_service.py` | 展示气泡和正式问答，并计算气泡位置。 |
+| `desktop_pet/animation/video_player.py`、`desktop_pet/animation/sprite_player.py` | 播放透明 WebM 或旧图集，通过播放序号隔离过期视频事件。 |
 
-- Central lifecycle manager for `QThread`/worker pairs. Use it for new background tasks instead of ad hoc thread cleanup.
+视频校验或播放失败时，本次运行整体回退旧图集。视频行走根据 `frame_presented` 推进位移，裁剪或换片时须核对 `movement_frames` 与真实帧数。测试菜单受 `ui.show_test_menu` 控制，普通动作测试播完一轮回待机，左右行走走专用移动入口。
 
-`desktop_pet/app/chat_flow_controller.py`
+### 4.5 本地存储与后台维护
 
-- Non-UI chat-flow helper. It prepares local/API branches, formal/informal snapshots, worker args, and persistence decisions. It must not create widgets or call the model directly.
+| 文件 | 功能 |
+| --- | --- |
+| `desktop_pet/storage/json_store.py`、`desktop_pet/storage/chat_store.py` | 管理 JSON 持久化和共享 JSONL 历史，按模式隔离读取和清理。 |
+| `desktop_pet/app/conversation_maintenance_worker.py`、`desktop_pet/ai/summarizer.py` | 生成模式摘要，在摘要成功后清理对应历史快照。 |
+| `desktop_pet/ai/memory_summarizer.py`、`desktop_pet/storage/memory_store.py` | 按每三份同模式摘要更新语义记忆，保存批处理进度。 |
+| `desktop_pet/storage/local_lines_service.py` | 管理本地台词及按组配置的 API 刷新。 |
 
-`desktop_pet/app/config_service.py`
-
-- Read-only dot-path config helper. It does not load, save, migrate, or write config.
-
-`desktop_pet/app/bubble_position_service.py`
-
-- Pure positioning service for speech and reply bubbles. Keep QWidget creation and display timing outside this module.
-
-`desktop_pet/app/history_clear_worker.py`
-
-- Background worker for forced summarization, history clearing, and `last_cleaned_at` updates. It must not touch QWidget objects directly.
-
-`desktop_pet/app/message_splitter.py`
-
-- Plain-text helper for splitting knowledge-greeting replies into at most two bubble segments.
-
-`desktop_pet/app/screenshot.py`
-
-- Screenshot capture and in-memory encoding, frozen-screen region selection UI, and background vision analysis worker.
-
-`desktop_pet/app/reminder.py`
-
-- Reminder input dialog, model-facing local reminder tool, and main-thread due-reminder controller. Persistent reminder data remains in `storage/reminder_store.py`.
-
-`desktop_pet/app/context_menu.py`
-
-- Builds the right-click card and legacy-backed submenus. New menu items usually require both this file and callback wiring in `DesktopPetWindow`; card interaction signals must not perform a late idle reset after an action has started.
-
-`desktop_pet/app/chat_input.py`, `speech_bubble.py`, `formal_answer_panel.py`
-
-- Floating input, message bubbles, reply bubble, and formal Q&A panels. Keep topmost/follow-position behavior synchronized with the main window.
-
-`desktop_pet/animation/sprite_player.py`
-
-- Loads sprite config and atlas, crops frames, advances actions with `QTimer`, emits `frame_changed`. Action names must match `assets/sprite_config.json`.
-
-`desktop_pet/animation/video_player.py`
-
-- Default player facade; retains logical action names and the sprite interface. Decodes VP9 Alpha with bundled FFmpeg/libvpx-vp9 in registered background threads with a six-frame queue. QPixmap and UI updates remain on the main thread. Playback serials reject stale frames/errors/completions; single-cycle completion holds the last frame for its full interval. Exit must stop the player before destroying the window. Failed video validation/playback falls back to the entire old atlas backend for this run.
-- `frame_presented(action, serial, frame_index)` drives video walking in the main window; do not start an independent wall-clock position animation for these clips. `movement_frames` defines the displacement interval. Action interruption clears `_video_walk`; scaling/DPI restarts rebind its serial and origin to the current position. Keep callbacks guarded against action changes during frame delivery. Older three-clip configurations still work with walking disabled.
-
-`desktop_pet/ai/llm_client.py`
-
-- Handles compatible chat and vision requests with `requests.post()`. Preserve missing-key, API-error, timeout and response-shape handling; vision sends Data URL images to `/responses` and must not log image data or keys.
-
-`desktop_pet/ai/prompt_builder.py`
-
-- Builds system prompt, safety rules, character settings, formal/informal instructions, summaries, local memory, and recent context. Safety and expression constraints should remain high priority.
-
-`desktop_pet/ai/context_manager.py`, `summarizer.py`
-
-- Context selection and summarization/memory extraction. Summarization must tolerate API failure and should not block normal chat.
-
-`desktop_pet/character/behavior_controller.py`
-
-- Startup greetings, idle proactive lines, time-period checks, dynamic greeting intervals, local line selection, and proactive response ratio updates.
-
-`desktop_pet/character/proactive_context.py`
-
-- Pure logic for scenario-greeting context, local fallback templates, and API prompt messages. No UI, threads, or network calls here.
-
-`desktop_pet/storage/*.py`
-
-- JSON persistence, chat stores, memory stores, local line service, and usage counters. Preserve compatibility with existing user data. Local line API refresh is configured per `local_lines.json` group under `local_lines_refresh.groups`; all groups default to disabled and use a 14-day interval unless overridden.
-
-`desktop_pet/utils/logger.py`, `utils/log_sanitizer.py`
-
-- Rotating logs and privacy-safe logging helpers. Do not log full prompts, API keys, memory contents, model replies, or raw API payloads.
-
-## Common Edit Paths
-
-- Startup or silent launch failure: start with `main.py`, `setup_env.bat`, `start_main.vbs`, `utils/logger.py`, and startup logs.
-- Chat behavior: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `ChatWorker`, `llm_client.py`, `prompt_builder.py`, `context_manager.py`, and `summarizer.py`.
-- Formal Q&A: inspect `desktop_pet_window.py`, `chat_flow_controller.py`, `formal_answer_panel.py`, dual chat stores, and prompt mode handling.
-- Proactive greetings and local line refresh: inspect `behavior_controller.py`, `proactive_context.py`, `DesktopPetWindow` worker callbacks, `local_lines_service.py`, `local_lines.json`, and `config/app_config.example.json`.
-- Screenshot and vision: inspect `app/screenshot.py`, `LlmClient`, `DesktopPetWindow`, and `tests/test_screenshot_analysis.py`.
-- Reminders: inspect `app/reminder.py`, `storage/reminder_store.py`, `DesktopPetWindow`, and the reminder tests.
-- Memory changes: inspect `memory_store.py`, `summarizer.py`, `prompt_builder.py`, and related tests.
-- Bubbles and positioning: inspect `speech_bubble.py`, `bubble_position_service.py`, `chat_input.py`, and `_sync_floating_widgets()`.
-- Background work: use `background_task_registry.py`; verify duplicate task handling and shutdown behavior.
-- Config changes: update both code and `config/app_config.example.json`; never commit real keys or local `app_config.json`.
-- Sprites/actions: update `sprite_config.json`, assets, `SpritePlayer`, and all action call sites together. Use `_set_pet_action()` in `DesktopPetWindow`; also verify movement completion, delayed callbacks and worker completion do not overwrite the new action.
-
-## Project Conventions
-
-- 默认不修改根目录 `README.md`（含同名大小写变体）；只有用户明确要求修改该文档时才更新。代码、素材或流程变更不要自动同步 README，相关说明优先写入对应的专项文档。
-- Read source code, configuration, documentation, and other text files explicitly as UTF-8. On PowerShell, use `Get-Content -Encoding UTF8`; do not rely on the terminal's default encoding, especially for Chinese text.
-- When piping inline Python from PowerShell, do not place raw Chinese literals in the here-string. Use Unicode escapes such as `\u4e2d\u6587`, or use `apply_patch` for text edits, then read and write target files explicitly as UTF-8.
-- Write new or updated code comments and docstrings in Chinese. Keep identifiers and established external-interface terms unchanged where English is required. Exception: keep `.bat` files ASCII-only, because `cmd.exe` decodes them in the OEM code page and UTF-8 Chinese comments there get mangled into stray commands.
-- Unless necessary, do not add new files. Add a new file only when implementing a clearly distinct, independent feature; otherwise extend or refactor the appropriate existing file.
-- Prefer small services with pure logic where possible; keep QWidget creation and signal wiring in UI modules.
-- Keep long-running work off the Qt main thread.
-- Background workers should report back through signals; UI updates must happen in the main window/main thread.
-- Configuration reads may use `ConfigService`; writes should preserve the existing JSON structure and save paths.
-- JSON stores should remain crash-tolerant and backward compatible.
-- Example configs and docs must not contain real API keys.
-- Runtime data, logs, caches, virtual environments, and generated local user state are ignored and should stay ignored.
-- When editing this file, update the relevant section directly. Do not add a sync log or changelog section.
-
-## High-Risk Areas
-
-- `desktop_pet_window.py`: many UI states and timers interact; regressions can appear only during exit, reload, movement completion, delayed interaction, or background task completion. Direct action changes and unguarded callbacks are especially high risk.
-- `closeEvent()` and worker cleanup: avoid unbounded waits and avoid callbacks mutating UI during shutdown.
-- `json_store.py`: affects all runtime persistence; preserve atomic write, corrupt-file recovery, and old data compatibility.
-- `app_config.example.json`: missing defaults can break first launch on new devices.
-- `PromptBuilder`, `Summarizer`, `LlmClient`: affect safety, privacy, token budget, formal/informal routing, and model failures.
-- `SpritePlayer` and `sprite_config.json`: atlas layout, frame counts, action names, and UI call sites are coupled.
-- `.gitignore`: do not unignore user data, logs, caches, or real config.
-
-## Common Commands
-
-Install dependencies:
-
-```powershell
-cd desktop_pet
-py -m pip install -r requirements.txt
-```
-
-Run tests:
-
-```powershell
-.\desktop_pet_venv\Scripts\python.exe -m unittest discover -s tests
-```
-
-Check Python syntax without writing `__pycache__`:
-
-```powershell
-@'
-import ast
-from pathlib import Path
-for path in Path("desktop_pet").rglob("*.py"):
-    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    print(f"OK {path}")
-'@ | py -3 -B -
-```
-
-Check JSON validity:
-
-```powershell
-@'
-import json
-from pathlib import Path
-for path in Path("desktop_pet").rglob("*.json"):
-    json.loads(path.read_text(encoding="utf-8"))
-    print(f"OK {path}")
-'@ | py -3 -B -
-```
-
-Inspect logs:
-
-```powershell
-Get-Content .\desktop_pet\data\startup_bootstrap.log -Tail 80
-Get-Content .\desktop_pet\data\app.log -Tail 80
-```
-
-Inspect current changes:
-
-```powershell
-git status --short
-git diff -- AGENTS.md
-```
-
-## Dependencies And Services
-
-Dependencies are in `desktop_pet/requirements.txt`.
-
-- `PySide6-Essentials`: QtCore, QtGui, QtWidgets for the desktop UI. Avoid switching to full PySide6 unless a required module proves necessary.
-- `requests`: DeepSeek HTTP calls.
-- `imageio-ffmpeg==0.6.0`: bundled FFmpeg for transparent VP9 video decoding; no system FFmpeg or QtMultimedia dependency required.
-
-External services:
-
-- DeepSeek API: default base URL `https://api.deepseek.com`, path `/chat/completions`.
-- Keys come from config or environment variables. Never commit real keys.
-
-## Open Questions
-
-- No packaging plan exists yet; source-code execution is the current assumption.
-- `ai/safety_filter.py` exists but is not wired into the main chat flow.
-- Some reserved character-state modules are present but not clearly used by the main flow.
-- `setup_env.bat` still has two pre-existing nested `exit /b 1` branches (failed venv removal). `cmd.exe` loses the exit code for `exit /b` inside nested parentheses, so the printed message is the reliable signal there; new failure paths use top-level `goto` labels instead.
-- If Chinese text displays incorrectly, first reread the file explicitly as UTF-8 and verify the source bytes before changing any text.
+`formal`、`informal` 和 `clipboard` 参与摘要与记忆维护。`remind` 和 `screenshot` 保留独立模式，不进入该流程。

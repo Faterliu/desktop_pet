@@ -29,6 +29,9 @@ from app.desktop_pet_window import DesktopPetWindow, _finish_pet_action_if_owned
 from utils.sprite_mask import visible_sprite_mask
 
 
+ADDED_ACTIONS = ("hair-adjust", "yawn", "one-arm-stretch", "guide-right", "look-right", "listen-nod")
+
+
 class VideoPlayerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -128,7 +131,7 @@ class VideoPlayerTests(unittest.TestCase):
     def test_mapping_and_repeated_loop_keep_progress(self):
         """思考与等待保留逻辑动作名，相同循环请求保持原播放序号。"""
         player = self.player()
-        for action, clip in (("running", "thinking"), ("review", "thinking"), ("waiting", "idle")):
+        for action, clip in (("running", "thinking"), ("review", "review"), ("waiting", "idle")):
             player.set_action(action)
             self.assertEqual(player.current_action, action)
             self.assertEqual(player._worker.clip_name, clip)
@@ -143,13 +146,134 @@ class VideoPlayerTests(unittest.TestCase):
     def test_unavailable_single_actions_settle_without_waiting(self):
         """未制作的单次动作和跳跃请求直接待机，不播放十秒占位。"""
         player = self.player()
-        for action in ("failed", "sleepy", "leaf-hug", "jumping"):
+        for action in ("sleepy", "jumping"):
             player.set_action(action, force_single_cycle=True)
             self.assertEqual(player.current_action, "idle")
             self.assertTrue(player._worker.loop)
             self.assertEqual(player.action_duration_ms(action, True), 0)
-        player.set_action("failed")
+
+    def test_failed_business_callback_plays_once_and_releases_ownership(self):
+        """业务失败回调播放真实失败素材，末帧完成后释放归属并恢复待机。"""
+        player = self.player()
+        fake = types.SimpleNamespace(sprite_player=player)
+        completed = []
+        player.action_finished.connect(lambda *args: completed.append((*args, player._last_index)))
+        player.action_finished.connect(lambda action, serial: DesktopPetWindow._on_video_action_finished(fake, action, serial))
+        _set_pet_action(fake, "review", owner="clipboard")
+        self.assertTrue(_finish_pet_action_if_owned(fake, "clipboard", "failed", force_single_cycle=True))
+        serial = player.playback_serial
+        self.assertEqual(fake._sprite_action_owner, "clipboard:failed")
+        self.assertEqual(player._worker.clip_name, "failed")
+        self.assertFalse(player._worker.loop)
+        self.assertEqual(player.action_duration_ms("failed"), 10042)
+        self.wait_for(lambda: player._last_index >= 0)
+        image = player.current_pixmap().toImage()
+        self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
+        self.assertGreaterEqual(image.pixelColor(120, 180).alpha(), 250)
+        player._started -= 11
+        self.wait_for(lambda: ("failed", serial, 240) in completed)
         self.assertEqual(player.current_action, "idle")
+        self.assertEqual(fake._sprite_action_owner, "idle")
+        player.set_action("failed")
+        self.assertEqual(player.current_action, "failed")
+        self.assertFalse(player._worker.loop)
+
+    def test_review_explicit_single_cycle_uses_its_own_clip(self):
+        """显式单次端详播放完整素材，并按调用方要求恢复输入等待。"""
+        player = self.player()
+        completed = []
+        player.action_finished.connect(lambda *args: completed.append((*args, player._last_index)))
+        player.set_action("review", fallback_action="waiting", force_single_cycle=True)
+        serial = player.playback_serial
+        self.assertEqual(player._worker.clip_name, "review")
+        self.assertFalse(player._worker.loop)
+        self.assertEqual(player.action_duration_ms("review", True), 10042)
+        self.wait_for(lambda: player._last_index >= 0)
+        self.assertEqual(player.current_pixmap().toImage().pixelColor(0, 0).alpha(), 0)
+        player._started -= 11
+        self.wait_for(lambda: ("review", serial, 240) in completed)
+        self.assertEqual(player.current_action, "waiting")
+        self.assertTrue(player._worker.loop)
+
+    def test_optional_menu_actions_play_once_then_idle(self):
+        """测试入口播放完整动作，结束后回待机并释放测试归属。"""
+        player = self.player()
+        fake = types.SimpleNamespace(sprite_player=player)
+        completed = []
+        player.action_finished.connect(lambda *args: completed.append((*args, player._last_index)))
+        player.action_finished.connect(lambda action, serial: DesktopPetWindow._on_video_action_finished(fake, action, serial))
+        for name in ("leaf-hug", "deep-breath", *ADDED_ACTIONS):
+            with self.subTest(action=name):
+                DesktopPetWindow._handle_test_action(fake, name)
+                serial = player.playback_serial
+                self.assertEqual(player.current_action, name)
+                self.assertEqual(player._worker.clip_name, name)
+                self.assertEqual(fake._sprite_action_owner, "test")
+                self.assertFalse(player._worker.loop)
+                self.assertEqual(player.action_duration_ms(name, True), 10042)
+                self.wait_for(lambda: player._last_index >= 0)
+                image = player.current_pixmap().toImage()
+                self.assertEqual(image.pixelColor(0, 0).alpha(), 0)
+                self.assertGreaterEqual(image.pixelColor(120, 180).alpha(), 250)
+                player._started -= 11
+                self.wait_for(lambda: (name, serial, 240) in completed)
+                self.assertEqual(player.current_action, "idle")
+                self.assertEqual(fake._sprite_action_owner, "idle")
+                DesktopPetWindow._handle_test_action(fake, name)
+                interrupted_serial = player.playback_serial
+                _set_pet_action(fake, "review", owner="screenshot")
+                DesktopPetWindow._on_video_action_finished(fake, name, interrupted_serial)
+                player._fail(interrupted_serial, "已结束的测试动作回调")
+                self.assertTrue(player.video_enabled)
+                self.assertEqual(player.current_action, "review")
+                self.assertEqual(fake._sprite_action_owner, "screenshot")
+
+    def test_old_config_without_optional_menu_actions_stays_idle(self):
+        """旧配置未登记可选视频时仍能启动，测试请求直接回待机。"""
+        config = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))
+        for name in ("leaf-hug", "deep-breath", *ADDED_ACTIONS):
+            del config["video"]["clips"][name]
+            del config["video"]["actions"][name]
+        config["video"]["actions"]["leaf-hug"] = "idle"
+        with patch("animation.video_player.load_json", return_value=config):
+            player = self.player()
+        self.wait_for(lambda: player._last_index >= 0)
+        self.assertTrue(player.video_enabled)
+        fake = types.SimpleNamespace(sprite_player=player)
+        for name in ("leaf-hug", "deep-breath", *ADDED_ACTIONS):
+            DesktopPetWindow._handle_test_action(fake, name)
+            self.assertEqual(player.current_action, "idle")
+            self.assertTrue(player._worker.loop)
+            self.assertEqual(player.action_duration_ms(name, True), 0)
+
+    def test_old_config_without_failed_or_review_remains_compatible(self):
+        """旧配置缺少两份新素材时，失败直接待机，端详继续使用思考循环。"""
+        config = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))
+        for name, fallback in (("failed", "idle"), ("review", "thinking")):
+            del config["video"]["clips"][name]
+            config["video"]["actions"][name] = fallback
+        with patch("animation.video_player.load_json", return_value=config):
+            player = self.player()
+        self.wait_for(lambda: player._last_index >= 0)
+        self.assertTrue(player.video_enabled)
+        for single in (False, True):
+            player.set_action("failed", force_single_cycle=single)
+            self.assertEqual(player.current_action, "idle")
+            self.assertEqual(player.action_duration_ms("failed", single), 0)
+        player.set_action("review")
+        self.assertEqual(player._worker.clip_name, "thinking")
+        self.assertTrue(player._worker.loop)
+
+    def test_registered_optional_clip_missing_triggers_whole_backend_fallback(self):
+        """已登记的新素材缺失时必须整体回退，不能悄悄播放占位动作。"""
+        for name in ("failed", "review", "leaf-hug", "deep-breath", "listen-nod"):
+            with self.subTest(clip=name):
+                config = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))
+                config["video"]["clips"][name]["file"] = f"assets/videos/missing_{name}.webm"
+                with patch("animation.video_player.load_json", return_value=config):
+                    player = self.player()
+                self.wait_for(lambda: not player.video_enabled)
+                self.assertIsNone(player._worker)
 
     def test_walking_clips_play_once_and_report_current_media_frames(self):
         """左右行走按各自帧数播完后回待机，帧事件带当前动作和播放序号。"""
@@ -182,6 +306,12 @@ class VideoPlayerTests(unittest.TestCase):
         config = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))
         del config["video"]["clips"]["happy"]
         config["video"]["actions"]["happy"] = "idle"
+        for name, fallback in (("failed", "idle"), ("review", "thinking"), ("leaf-hug", "idle"), ("deep-breath", "idle")):
+            del config["video"]["clips"][name]
+            config["video"]["actions"][name] = fallback
+        for name in ADDED_ACTIONS:
+            del config["video"]["clips"][name]
+            del config["video"]["actions"][name]
         for direction in ("left", "right"):
             del config["video"]["clips"][f"walking_{direction}"]
             config["video"]["actions"][f"running_{direction}"] = "idle"
@@ -226,6 +356,23 @@ class VideoPlayerTests(unittest.TestCase):
         player._fail(old_serial, "旧开心解码失败")
         self.assertTrue(player.video_enabled)
         self.assertEqual(player.current_action, "review")
+        self.assertEqual(fake._sprite_action_owner, "screenshot")
+
+    def test_failed_restart_and_late_completion_cannot_interrupt_review(self):
+        """重复失败重播，随后开始的端详不受旧失败结束或故障回调影响。"""
+        player = self.player()
+        fake = types.SimpleNamespace(sprite_player=player)
+        _set_pet_action(fake, "failed", owner="chat_failure")
+        old_serial = player.playback_serial
+        _set_pet_action(fake, "failed", owner="chat_failure")
+        self.assertGreater(player.playback_serial, old_serial)
+        interrupted_serial = player.playback_serial
+        _set_pet_action(fake, "review", owner="screenshot")
+        for serial in (old_serial, interrupted_serial):
+            DesktopPetWindow._on_video_action_finished(fake, "failed", serial)
+            player._fail(serial, "旧失败视频回调")
+        self.assertTrue(player.video_enabled)
+        self.assertEqual(player._worker.clip_name, "review")
         self.assertEqual(fake._sprite_action_owner, "screenshot")
 
     def test_happy_api_wait_keeps_chat_ownership_for_worker_completion(self):
@@ -345,13 +492,15 @@ class VideoPlayerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=ROOT / "tmp_work") as directory:
             corrupt = Path(directory) / "corrupt.webm"
             corrupt.write_bytes(b"invalid webm")
-            config = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))
-            config["video"]["clips"]["waving"]["file"] = str(corrupt)
-            with patch("animation.video_player.load_json", return_value=config):
-                player = self.player()
-            self.wait_for(lambda: not player.video_enabled)
-            self.assertIsNone(player._worker)
-            self.assertTrue(player.stop())
+            for name in ("waving", "failed", "review", "leaf-hug", "deep-breath"):
+                with self.subTest(clip=name):
+                    config = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))
+                    config["video"]["clips"][name]["file"] = str(corrupt)
+                    with patch("animation.video_player.load_json", return_value=config):
+                        player = self.player()
+                    self.wait_for(lambda: not player.video_enabled)
+                    self.assertIsNone(player._worker)
+                    self.assertTrue(player.stop())
 
     def test_high_dpi_size_mask_and_scale_invalidate_old_playback(self):
         """两倍设备密度仍为 240×320，掩码和窗口使用逻辑坐标。"""
@@ -418,4 +567,7 @@ class VideoPlayerTests(unittest.TestCase):
         fake = types.SimpleNamespace(sprite_player=player)
         _set_pet_action(fake, "review", owner="screenshot", force_single_cycle=True)
         self.assertTrue(player._worker.loop)
+        self.assertEqual(player._worker.clip_name, "review")
         self.assertEqual(fake._sprite_action_owner, "screenshot")
+        self.assertTrue(_finish_pet_action_if_owned(fake, "screenshot"))
+        self.assertEqual(player.current_action, "idle")

@@ -688,6 +688,13 @@ def build_context_menu_actions(
                     ("happy", "测试动作：happy"),
                     ("sleepy", "测试动作：sleepy"),
                     ("leaf-hug", "测试动作：leaf-hug"),
+                    ("deep-breath", "测试动作：deep-breath"),
+                    ("hair-adjust", "测试动作：整理头发"),
+                    ("yawn", "测试动作：打哈欠"),
+                    ("one-arm-stretch", "测试动作：单臂伸展"),
+                    ("guide-right", "测试动作：右侧指引"),
+                    ("look-right", "测试动作：朝右侧看"),
+                    ("listen-nod", "测试动作：倾听点头"),
                 ]
             ),
             MenuAction("test_movement_separator", kind="separator"),

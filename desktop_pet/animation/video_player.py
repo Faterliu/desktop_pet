@@ -20,6 +20,10 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 WALK_ACTIONS = frozenset({"running_left", "running_right"})
+OPTIONAL_SINGLE_ACTIONS = frozenset({
+    "happy", "failed", "leaf-hug", "deep-breath",
+    "hair-adjust", "yawn", "one-arm-stretch", "guide-right", "look-right", "listen-nod",
+})
 
 
 class _DecodeWorker(QObject):
@@ -230,7 +234,7 @@ class VideoPlayer(QObject):
         self._validated = False
         self.video_enabled = self.enabled and not self._failed
         required = {"idle", "thinking", "waving"}
-        base_clips = set(self.clips) - {"happy"}
+        base_clips = set(self.clips) - OPTIONAL_SINGLE_ACTIONS - {"review"}
         if self.video_enabled and base_clips not in (required, required | {"walking_left", "walking_right"}):
             self._fail(self.playback_serial, "视频素材配置不完整")
         elif self.video_enabled:
@@ -284,19 +288,26 @@ class VideoPlayer(QObject):
             self.playback_serial += 1
             self._legacy.set_action(action_name, fallback_action, force_single_cycle)
             return
-        if action_name not in self.config.get("actions", {}):
+        # 新视频动作可以只登记视频映射，不要求旧图集提供同名动作。
+        if action_name not in self.config.get("actions", {}) and action_name not in self.video.get("actions", {}):
             action_name = "idle"
+            force_single_cycle = False
         single_requested = force_single_cycle or not self.config.get("actions", {}).get(action_name, {}).get("loop", True)
         if (action_name == "jumping"
-            or (action_name == "happy" and self._clip_name(action_name) != "happy")
+            or (action_name in OPTIONAL_SINGLE_ACTIONS and self._clip_name(action_name) != action_name)
             or (action_name in WALK_ACTIONS and self.movement_frame_range(action_name) is None)
-            or (single_requested and action_name in {"failed", "sleepy", "leaf-hug"})
+            or (single_requested and action_name == "sleepy")
         ):
             action_name = "idle"
             force_single_cycle = False
         clip_name = self._clip_name(action_name)
         # 输入等待应持续待机，不能因历史单轮参数等待十秒后重置业务状态。
-        single = (force_single_cycle and action_name != "waiting") or clip_name in {"waving", "happy"} or action_name in WALK_ACTIONS
+        single = (
+            (force_single_cycle and action_name != "waiting")
+            or clip_name == "waving"
+            or clip_name in OPTIONAL_SINGLE_ACTIONS
+            or action_name in WALK_ACTIONS
+        )
         if self._worker is not None and self._worker.loop and self.current_action == action_name and not single and not self._done:
             return
         self._cancel_active()
@@ -457,8 +468,8 @@ class VideoPlayer(QObject):
         """返回完整素材时长，不能把循环的一帧间隔当作动作时长。"""
         if not self.video_enabled:
             return self._legacy.action_duration_ms(action_name, force_single_cycle)
-        if action_name in {"jumping", "failed", "sleepy", "leaf-hug"} or (
-            action_name == "happy" and self._clip_name(action_name) != "happy"
+        if action_name in {"jumping", "sleepy"} or (
+            action_name in OPTIONAL_SINGLE_ACTIONS and self._clip_name(action_name) != action_name
         ) or (
             action_name in WALK_ACTIONS and self.movement_frame_range(action_name) is None
         ):
