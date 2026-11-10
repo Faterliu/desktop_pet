@@ -184,15 +184,26 @@ CLIPBOARD_ASSISTANT_LABELS = {
 
 MOVEMENT_ACTIONS = frozenset({"running_right", "running_left", "jumping"})
 
+# 自主行为里原地播放一次的自我照料动作，与左右行走共用同一套空闲调度。
+SELF_CARE_ACTIONS = frozenset({
+    "sleepy",
+    "yawn",
+    "one-arm-stretch",
+    "hair-adjust",
+    "leaf-hug",
+})
 
-# 根据本地小时返回自主动作候选；深夜至清晨取消跳跃并提高困倦动作概率。
+
+# 根据本地小时返回自主动作候选；深夜收起跳跃并偏向哈欠与抱叶，白天保留跳跃并加入伸展。
 def _auto_move_choices(hour: int) -> tuple[tuple[str, ...], tuple[int, ...]]:
-    """在 23:00–06:00 使用不含跳跃且偏向 sleepy 的自主动作序列。"""
-    actions = ("left", "right", "jump")
-    weights = (4, 4, 2)
+    """在 23:00–06:00 用哈欠与抱叶替代跳跃，白天保留跳跃、伸展与整理头发。"""
     if hour >= 23 or hour < 6:
-        return ("left", "right", "sleepy"), (2, 2, 6)
-    return actions, weights
+        return (
+            "left", "right", "yawn", "sleepy", "hair-adjust", "leaf-hug"
+        ), (2, 2, 3, 3, 1, 2)
+    return (
+        "left", "right", "jump", "one-arm-stretch", "hair-adjust", "leaf-hug"
+    ), (4, 4, 2, 2, 2, 1)
 
 
 # 统一记录动作来源；非移动动作会先安全停止旧移动，避免其完成回调覆盖新动作。
@@ -1231,6 +1242,11 @@ class DesktopPetWindow(QWidget):
             self.bubble_position_service,
             self.config_service.get_bool("ui.always_on_top", True),
         )
+        # 卡片弹出后用指向动作把注意力带过去，菜单关闭后动作自然播完回落。
+        self._guide_toward_panel(
+            owner="context_menu",
+            action_names=("guide-right", "look-right"),
+        )
         line = self.behavior_controller.pick_context_menu_line()
         if line:
             self._display_message(line, 4500, "context_menu")
@@ -1238,6 +1254,7 @@ class DesktopPetWindow(QWidget):
     # 响应菜单中的测试动作切换请求。
     def _handle_test_action(self, action_name: str) -> None:
         """响应菜单中的测试动作切换请求。"""
+        logger.info("Test action requested: %s", action_name)
         _set_pet_action(
             self,
             action_name,
@@ -1874,13 +1891,7 @@ class DesktopPetWindow(QWidget):
                 continue
             self._active_reminder_reply_id = reminder_id
             self.reply_bubble.hide()
-            _set_pet_action(
-                self,
-                "waving",
-                fallback_action="idle",
-                force_single_cycle=True,
-                owner="reminder",
-            )
+            self._guide_toward_panel(owner="reminder")
             reminder_prefix = self.behavior_controller.pick_reminder_prefix_line() or "提醒你一下"
             reminder_text = f"{reminder_prefix}：{title}"
             self._display_message(reminder_text, 8000, "reminder")
@@ -2200,8 +2211,8 @@ class DesktopPetWindow(QWidget):
         self.chat_input.show_near(self.geometry())
         _set_pet_action(
             self,
-            "waiting",
-            fallback_action="idle",
+            "listen-nod",
+            fallback_action="waiting",
             force_single_cycle=True,
             owner="chat_input",
         )
@@ -2920,6 +2931,15 @@ class DesktopPetWindow(QWidget):
             "clipboard": self.summarizer_clipboard,
         }
 
+    # 返回参与摘要与记忆维护的三种模式聊天存储，用于检查是否存在待处理历史。
+    def _conversation_chat_stores(self) -> dict[str, ChatStore]:
+        """返回与摘要器一一对应的模式聊天存储。"""
+        return {
+            "formal": self.chat_store_formal,
+            "informal": self.chat_store_informal,
+            "clipboard": self.chat_store_clipboard,
+        }
+
     # 初始化启动补跑检查，并安排下一次本地凌晨一点的维护任务。
     def _initialize_conversation_maintenance(self) -> None:
         """初始化启动补跑检查，并安排下一次本地凌晨一点的维护任务。"""
@@ -2933,7 +2953,9 @@ class DesktopPetWindow(QWidget):
             else {"last_daily_summary_date": ""}
         )
         last_date = str(state.get("last_daily_summary_date", "")) if isinstance(state, dict) else ""
-        has_history = any(store.all_messages() for store in self._conversation_summarizers().values())
+        has_history = any(
+            store.all_messages() for store in self._conversation_chat_stores().values()
+        )
         if should_run_daily_catchup(now, last_date, has_history):
             self._start_conversation_maintenance(
                 list(self._conversation_summarizers()), "daily", force=True
@@ -3319,6 +3341,23 @@ class DesktopPetWindow(QWidget):
         self._display_message(parts[index], duration_ms, "assistant")
         self._schedule_next_answer_bubble(parts, index + 1, duration_ms, generation)
 
+    # 气泡或面板出现在人物旁边时，用指向动作把注意力引过去。
+    def _guide_toward_panel(
+        self,
+        owner: str,
+        action_names: tuple[str, ...] = ("guide-right",),
+    ) -> None:
+        """播放一次指向动作，动作结束后回到待机。"""
+        action_name = random.choice(action_names)
+        logger.info("Panel guide action: owner=%s action=%s", owner, action_name)
+        _set_pet_action(
+            self,
+            action_name,
+            fallback_action="idle",
+            force_single_cycle=True,
+            owner=owner,
+        )
+
     # 按正式问答显示方式展示回答，支持新建面板或追加内容。
     def _show_formal_answer_panel(self, question: str, answer: str) -> None:
         """按正式问答显示方式展示回答，支持新建面板或追加内容。"""
@@ -3342,6 +3381,7 @@ class DesktopPetWindow(QWidget):
         panel.set_content("正式问答", content, self.geometry(), len(self.formal_answer_panels))
         self.formal_answer_panels.append(panel)
         self.active_formal_answer_panel = panel
+        self._guide_toward_panel(owner="formal_panel")
 
     # 用正式面板承载较长的剪贴板处理结果，不创建聊天记录条目。
     def _show_clipboard_assistant_panel(self, mode: str, answer: str) -> None:
@@ -3358,6 +3398,7 @@ class DesktopPetWindow(QWidget):
         panel.set_content("剪贴板助手", content, self.geometry(), len(self.formal_answer_panels))
         self.formal_answer_panels.append(panel)
         self.active_formal_answer_panel = panel
+        self._guide_toward_panel(owner="clipboard_panel")
 
     # 关闭并销毁所有正式问答面板。
     def _destroy_formal_answer_panels(self) -> None:
@@ -3457,9 +3498,9 @@ class DesktopPetWindow(QWidget):
         else:
             self.auto_move_timer.stop()
 
-    # 随机触发一次桌宠横向移动动画。
+    # 随机触发一次自主移动，或原地播放一轮自我照料动作。
     def _trigger_auto_move(self) -> None:
-        """随机触发一次桌宠横向移动动画。"""
+        """随机触发一次自主移动或原地自我照料动作。"""
         self._refresh_auto_move_timer()
         if self._interaction_busy() or self._movement_locked():
             return
@@ -3472,16 +3513,22 @@ class DesktopPetWindow(QWidget):
         current = self.pos()
         move_kinds, move_weights = _auto_move_choices(datetime.now().hour)
         if getattr(self.sprite_player, "video_enabled", False):
-            if not self.sprite_player.horizontal_movement_enabled:
+            # 视频模式下左右行走要求素材可移动，原地动作要求有专属片段。
+            walk_available = bool(self.sprite_player.horizontal_movement_enabled)
+            supported = [
+                (kind, weight)
+                for kind, weight in zip(move_kinds, move_weights)
+                if (kind in {"left", "right"} and walk_available)
+                or (kind in SELF_CARE_ACTIONS and self.sprite_player.has_dedicated_clip(kind))
+            ]
+            if not supported:
                 return
-            supported = [(kind, weight) for kind, weight in zip(move_kinds, move_weights)
-                         if kind in {"left", "right"}]
             move_kinds, move_weights = zip(*supported)
         move_kind = random.choices(move_kinds, weights=move_weights, k=1)[0]
-        if move_kind == "sleepy":
+        if move_kind in SELF_CARE_ACTIONS:
             _set_pet_action(
                 self,
-                "sleepy",
+                move_kind,
                 fallback_action="idle",
                 force_single_cycle=True,
                 owner="auto_action",

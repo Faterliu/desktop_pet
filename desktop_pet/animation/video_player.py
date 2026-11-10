@@ -280,6 +280,15 @@ class VideoPlayer(QObject):
         """把业务动作映射到新版素材，不改变外部动作名称。"""
         return self.video.get("actions", {}).get(action, "idle")
 
+    # 判断动作是否有独立视频素材，供自主动作过滤缺失素材。
+    def has_dedicated_clip(self, action_name: str) -> bool:
+        """只有映射到专属素材的动作才算可用，回落待机素材的动作不可用。"""
+        if not self.video_enabled:
+            legacy = self._legacy
+            return bool(legacy) and legacy.has_dedicated_clip(action_name)
+        clip_name = self._clip_name(action_name)
+        return clip_name != "idle" and clip_name in self.clips
+
     def set_action(self, action_name, fallback_action="idle", force_single_cycle=False):
         """循环请求保持进度，显式单轮或不同动作创建新播放。"""
         if self._closed:

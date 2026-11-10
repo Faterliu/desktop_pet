@@ -291,18 +291,21 @@ class ResultDisplayRoutingTests(unittest.TestCase):
         """验证普通问答、剪贴板和截图均由同一正式面板逻辑处理。"""
         app = ensure_app()
         del app
+        guided: list[str] = []
         fake = types.SimpleNamespace(
             _formal_answer_display_mode=lambda: "new_panel",
             active_formal_answer_panel=None,
             formal_answer_panels=[],
             geometry=lambda: QRect(20, 20, 80, 80),
             _on_formal_answer_panel_destroyed=lambda _panel_id: None,
+            _guide_toward_panel=lambda owner: guided.append(owner),
         )
 
         DesktopPetWindow._show_formal_answer_panel(fake, "普通问答", "普通回答")
         DesktopPetWindow._show_formal_answer_panel(fake, "剪贴板处理结果", "剪贴板回答")
 
         self.assertEqual(len(fake.formal_answer_panels), 2)
+        self.assertEqual(guided, ["formal_panel", "formal_panel"])
         for panel in list(fake.formal_answer_panels):
             panel.close()
 
@@ -314,6 +317,8 @@ class ResultDisplayRoutingTests(unittest.TestCase):
 
         self.assertEqual(len(fake.formal_answer_panels), 1)
         self.assertEqual(fake.active_formal_answer_panel.text_edit.toPlainText(), "普通回答\n\n截图回答")
+        # 追加到已有面板时不再重复指引，避免每段回答都打断动作。
+        self.assertEqual(guided, ["formal_panel", "formal_panel", "formal_panel"])
         fake.active_formal_answer_panel.close()
 
     # 验证待处理截图问题提交后才启动 Worker，且不进入普通聊天。

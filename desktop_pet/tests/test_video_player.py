@@ -7,7 +7,6 @@ import os
 import queue
 import subprocess
 import sys
-import tempfile
 import time
 import types
 import unittest
@@ -489,18 +488,17 @@ class VideoPlayerTests(unittest.TestCase):
 
     def test_corrupt_video_falls_back(self):
         """必要素材存在但内容损坏时，真实 FFmpeg 校验必须触发整体回退。"""
-        with tempfile.TemporaryDirectory(dir=ROOT / "tmp_work") as directory:
-            corrupt = Path(directory) / "corrupt.webm"
-            corrupt.write_bytes(b"invalid webm")
-            for name in ("waving", "failed", "review", "leaf-hug", "deep-breath"):
-                with self.subTest(clip=name):
-                    config = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))
-                    config["video"]["clips"][name]["file"] = str(corrupt)
-                    with patch("animation.video_player.load_json", return_value=config):
-                        player = self.player()
-                    self.wait_for(lambda: not player.video_enabled)
-                    self.assertIsNone(player._worker)
-                    self.assertTrue(player.stop())
+        # 用仓库内已有的非视频文件冒充损坏素材，避免受限环境下创建临时目录。
+        corrupt = ROOT / "assets" / "sprite_config.json"
+        for name in ("waving", "failed", "review", "leaf-hug", "deep-breath"):
+            with self.subTest(clip=name):
+                config = json.loads((ROOT / "assets/sprite_config.json").read_text(encoding="utf-8"))
+                config["video"]["clips"][name]["file"] = str(corrupt)
+                with patch("animation.video_player.load_json", return_value=config):
+                    player = self.player()
+                self.wait_for(lambda: not player.video_enabled)
+                self.assertIsNone(player._worker)
+                self.assertTrue(player.stop())
 
     def test_high_dpi_size_mask_and_scale_invalidate_old_playback(self):
         """两倍设备密度仍为 240×320，掩码和窗口使用逻辑坐标。"""

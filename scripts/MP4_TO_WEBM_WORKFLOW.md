@@ -6,7 +6,7 @@
 
 收到新的动作 MP4 后，默认一并完成转码、程序映射和测试菜单接入。交付前按以下顺序检查：
 
-1. 去角标、抠绿幕，检查轮廓和衣料，按需要参考待机校色。生成透明无损母版和通过逐帧验收的有损播放版。
+1. 去角标、抠绿幕，检查轮廓和衣料，按需要校正整体色偏。以程序内的待机视频为基准检查动作首尾的肤色，有明显差异时做局部校色。生成透明无损母版和通过逐帧验收的有损播放版。
 2. 将母版和播放版分别归档到 `C:\file\pet-image\webm\lossless` 和 `compressed`，预览归档到 `previews`，保留对应的验收报告。
 3. 将播放版复制到程序素材目录，登记 `video.clips` 和 `video.actions`。检查 `compressed` 中是否还有已验收但未登记的动作，一并补齐。
 4. 在测试菜单加入新动作，并检查已登记动作是否都有测试入口。左右行走沿用专用移动测试。验证新动作可以播放完整一轮并回到待机；替换现有素材时复查原入口。
@@ -20,6 +20,7 @@
 | `fill_nn.py` | 上一步依赖的第 5 近邻背景取色算法 |
 | `chroma_step02.py` | 绿幕抠像，输出 VP9 Alpha WebM |
 | `refine_walking_colors.py` | 按需以待机素材为参考校色，输出无损 WebM |
+| `match_skin_colors.py` | 以待机为基准校正脸颊、手和腿的肤色，保留动作时序与母版 Alpha |
 | `compress_webm.py` | 从无损 WebM 生成有损播放版，逐帧验证并输出报告 |
 
 抠像统一通过 `run_trial.py` 执行。`watermark_step01.py`、`fill_nn.py` 和 `chroma_step02.py` 来自本地 `dsh-pet/scripts`。入口会设置尺寸、路径和抠像参数，适配当前竖版素材。
@@ -81,6 +82,14 @@ $work = '.\desktop_pet\tmp_work\video_export\leaf-hug_export'
 ```
 
 每次加工使用独立处理目录。`--action` 从 `run_trial.py` 的 `choices` 中取值，全新动作名需先加入该列表。按预览确定 `--sat-min`，上例使用已验证的 `0.5`。有偏色时，先按文末 `refine_walking_colors.py --reference` 的方法校色，再以校色后的无损文件作为母版。需要剪辑或修整循环时也在这一步完成。
+
+剪辑和整体校色完成后，用程序当前的待机首帧对照新动作首尾的脸颊、手背和小腿。如果有色差，且首尾都是同构图的正面站姿，可在独立目录生成肤色匹配后的母版。将 `--frames` 设为源片实际帧数：
+
+```powershell
+& $python -B .\scripts\match_skin_colors.py --source "$work\step02\leaf-hug_refined.webm" --reference .\desktop_pet\assets\videos\idle.webm --output "$work\skin_matched\leaf-hug.webm" --frames 241
+```
+
+已有整体校色定稿时，`--source` 指向该定稿。脚本按皮肤色度加权调整，首尾校色量在全片平滑过渡。若首尾姿势或构图改变，先检查采样框是否仍落在对应皮肤内部。验收时对照待机首帧和动作首尾，抽看抬手、侧身等中段姿势，检查衣袖、枫叶和透明轮廓，然后再压缩。
 
 将验收后的母版以正式文件名备份到项目外，例如 `C:\file\pet-image\webm\lossless\leaf-hug.webm`。从母版目录单独生成播放版，`--files` 填文件名，可在素材登记前运行：
 

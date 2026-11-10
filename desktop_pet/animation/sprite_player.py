@@ -36,6 +36,17 @@ DEFAULT_SPRITE_CONFIG = {
 }
 
 
+# 仅存在于视频素材的动作在旧图集里的近似替代，保证回退后动作不会消失。
+LEGACY_ACTION_ALIASES = {
+    "yawn": "sleepy",
+    "one-arm-stretch": "happy",
+    "guide-right": "review",
+    "listen-nod": "waiting",
+    "hair-adjust": "waving",
+    "look-right": "review",
+}
+
+
 class SpritePlayer(QObject):
     frame_changed = Signal(QPixmap)
     action_changed = Signal(str)
@@ -85,8 +96,12 @@ class SpritePlayer(QObject):
     ) -> None:
         """切换当前动作，并可选择强制只播放一轮后回退。"""
         if action_name not in self.frames_by_action:
-            logger.warning("Unknown action requested: %s", action_name)
-            action_name = "idle"
+            alias = LEGACY_ACTION_ALIASES.get(action_name)
+            if alias in self.frames_by_action:
+                action_name = alias
+            else:
+                logger.warning("Unknown action requested: %s", action_name)
+                action_name = "idle"
         self.current_action = action_name
         self.fallback_action = fallback_action if fallback_action in self.frames_by_action else "idle"
         self.current_index = 0
@@ -94,6 +109,14 @@ class SpritePlayer(QObject):
         self._restart_timer_for_action(action_name)
         self.action_changed.emit(self.current_action)
         self.frame_changed.emit(self.current_pixmap())
+
+    # 判断动作在图集中是否有素材或近似替代，供自主动作过滤缺失素材。
+    def has_dedicated_clip(self, action_name: str) -> bool:
+        """图集模式判断动作能否播放，避免自主动作回落到待机。"""
+        if action_name in self.frames_by_action:
+            return True
+        alias = LEGACY_ACTION_ALIASES.get(action_name)
+        return bool(alias) and alias in self.frames_by_action
 
     # 返回当前动作下应显示的帧图像。
     def current_pixmap(self) -> QPixmap:

@@ -42,6 +42,25 @@ class SpritePlayerLoadingTests(unittest.TestCase):
         finally:
             player.timer.stop()
             del app
+    # 验证仅存在于视频素材的动作回退到图集时播放近似动作，不会静默变成待机。
+    def test_video_only_actions_fall_back_to_legacy_rows(self) -> None:
+        """视频专用动作回退图集时映射到近似动作，并仍被视为可用素材。"""
+        app = ensure_app()
+        player = SpritePlayer(DESKTOP_PET_ROOT / "assets" / "sprite_config.json", scale=0.9)
+        try:
+            for action_name, expected in (
+                ("yawn", "sleepy"),
+                ("one-arm-stretch", "happy"),
+                ("guide-right", "review"),
+                ("listen-nod", "waiting"),
+            ):
+                with self.subTest(action=action_name):
+                    self.assertTrue(player.has_dedicated_clip(action_name))
+                    player.set_action(action_name, force_single_cycle=True)
+                    self.assertEqual(player.current_action, expected)
+        finally:
+            player.timer.stop()
+            del app
 
 
 if __name__ == "__main__":

@@ -20,7 +20,16 @@ logger_module = types.ModuleType("utils.logger")
 logger_module.get_logger = logging.getLogger
 sys.modules.setdefault("utils.logger", logger_module)
 
-from PySide6.QtCore import QAbstractAnimation, QEvent, QPoint, QPointF, QRect, Qt  # noqa: E402
+from PySide6.QtCore import (  # noqa: E402
+    QAbstractAnimation,
+    QEvent,
+    QObject,
+    QPoint,
+    QPointF,
+    QRect,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QMouseEvent, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
@@ -47,6 +56,25 @@ class FakeSpritePlayer:
     def set_action(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         """记录动作请求。"""
         self.actions.append((args, kwargs))
+
+
+class FakeContextMenu(QObject):
+    """记录右键卡片展示请求，并提供互动信号。"""
+
+    interacted = Signal()
+
+    def __init__(self) -> None:
+        """初始化展示记录。"""
+        super().__init__()
+        self.shown: list[tuple] = []
+
+    def show_near(self, geometry, position_service, always_on_top) -> None:  # type: ignore[no-untyped-def]
+        """记录卡片展示参数。"""
+        self.shown.append((geometry, position_service, always_on_top))
+
+    def close(self) -> None:
+        """关闭卡片时不做任何界面操作。"""
+        return None
 
 
 class FakeBehaviorController:
@@ -216,21 +244,37 @@ class InteractionActionConflictTests(unittest.TestCase):
         DesktopPetWindow._on_video_frame_presented(fake, "running_right", old_serial + 1, 268)
         self.assertLessEqual(fake.pos().x() + fake.width(), 999)
 
-    def test_video_auto_move_filters_out_jump_and_unavailable_emotions(self):
-        """视频自主移动只选择左右行走，不执行缺失的跳跃或困倦素材。"""
+    def test_video_auto_move_keeps_only_available_actions(self):
+        """视频自主序列只保留左右行走和有专属素材的原地动作。"""
         fake, _saved = self._walking_window()
         requests = []
         fake._refresh_auto_move_timer = lambda: None
         fake._interaction_busy = lambda: False
         fake.bubble = types.SimpleNamespace(isVisible=lambda: False)
         fake.sprite_player.current_action = "idle"
-        fake._current_screen = lambda: types.SimpleNamespace(availableGeometry=lambda: QRect(0, 0, 1000, 800))
+        fake._current_screen = lambda: types.SimpleNamespace(
+            availableGeometry=lambda: QRect(0, 0, 1000, 800)
+        )
         fake._start_horizontal_move_test = lambda delta, **kwargs: requests.append(delta)
-        with patch("app.desktop_pet_window.random.choices", return_value=["right"]) as choices:
-            with patch("app.desktop_pet_window.random.choice", return_value=140):
-                DesktopPetWindow._trigger_auto_move(fake)
-        self.assertEqual(tuple(choices.call_args.args[0]), ("left", "right"))
-        self.assertEqual(requests, [140])
+
+        for hour, dedicated, expected in (
+            (12, ("one-arm-stretch",), ("left", "right", "one-arm-stretch")),
+            (23, ("yawn",), ("left", "right", "yawn")),
+        ):
+            with self.subTest(hour=hour):
+                requests.clear()
+                fake.sprite_player.has_dedicated_clip = lambda name, allowed=dedicated: name in allowed
+                with patch(
+                    "app.desktop_pet_window.datetime",
+                    types.SimpleNamespace(now=lambda h=hour: types.SimpleNamespace(hour=h)),
+                ):
+                    with patch(
+                        "app.desktop_pet_window.random.choices", return_value=["right"]
+                    ) as choices:
+                        with patch("app.desktop_pet_window.random.choice", return_value=140):
+                            DesktopPetWindow._trigger_auto_move(fake)
+                self.assertEqual(tuple(choices.call_args.args[0]), expected)
+                self.assertEqual(requests, [140])
 
     def test_behavior_nested_settings_take_precedence_over_legacy_paths(self) -> None:
         """提醒和聊天设置应优先从 behavior 的新层级读取。"""
@@ -261,48 +305,63 @@ class InteractionActionConflictTests(unittest.TestCase):
         self.assertTrue(DesktopPetWindow._formal_qa_enabled(fake))
         self.assertEqual(DesktopPetWindow._formal_answer_display_mode(fake), "append")
 
-    def test_sleepy_is_only_available_in_late_night_auto_actions(self) -> None:
-        """23:00 至次日 06:00 的自主动作候选应额外包含 sleepy。"""
+    def test_self_care_actions_are_split_between_night_and_day(self) -> None:
+        """深夜用哈欠与抱叶替代跳跃，白天在行走之外保留伸展与整理头发。"""
         for hour in (23, 0, 5):
             with self.subTest(hour=hour):
                 actions, weights = _auto_move_choices(hour)
-                self.assertEqual(actions, ("left", "right", "sleepy"))
-                self.assertEqual(weights, (2, 2, 6))
+                self.assertEqual(
+                    actions,
+                    ("left", "right", "yawn", "sleepy", "hair-adjust", "leaf-hug"),
+                )
+                self.assertEqual(weights, (2, 2, 3, 3, 1, 2))
                 self.assertNotIn("jump", actions)
 
         for hour in (6, 12, 22):
             with self.subTest(hour=hour):
                 actions, weights = _auto_move_choices(hour)
-                self.assertEqual(actions, ("left", "right", "jump"))
-                self.assertEqual(weights, (4, 4, 2))
-
-    def test_selected_sleepy_auto_action_plays_one_cycle_then_returns_idle(self) -> None:
-        """自主序列选中 sleepy 后应播放一轮，并由精灵播放器回到 idle。"""
-        fake = types.SimpleNamespace(
-            _refresh_auto_move_timer=lambda: None,
-            _interaction_busy=lambda: False,
-            _movement_locked=lambda: False,
-            bubble=types.SimpleNamespace(isVisible=lambda: False),
-            sprite_player=FakeSpritePlayer(),
-            _current_screen=lambda: types.SimpleNamespace(availableGeometry=lambda: object()),
-            pos=lambda: object(),
-            move_animation=None,
-        )
-        fake.sprite_player.current_action = "idle"
-
-        with patch("app.desktop_pet_window.random.choices", return_value=["sleepy"]):
-            DesktopPetWindow._trigger_auto_move(fake)
-
-        self.assertEqual(
-            fake.sprite_player.actions,
-            [
-                (
-                    ("sleepy",),
-                    {"fallback_action": "idle", "force_single_cycle": True},
+                self.assertEqual(
+                    actions,
+                    ("left", "right", "jump", "one-arm-stretch", "hair-adjust", "leaf-hug"),
                 )
-            ],
-        )
-        self.assertEqual(fake._sprite_action_owner, "auto_action")
+                self.assertEqual(weights, (4, 4, 2, 2, 2, 1))
+                self.assertNotIn("yawn", actions)
+
+    def test_selected_self_care_auto_action_plays_one_cycle_then_returns_idle(self) -> None:
+        """自主序列选中原地动作后播放一轮，并由播放器回到 idle。"""
+        for action_name in (
+            "sleepy",
+            "yawn",
+            "one-arm-stretch",
+            "hair-adjust",
+            "leaf-hug",
+        ):
+            with self.subTest(action=action_name):
+                fake = types.SimpleNamespace(
+                    _refresh_auto_move_timer=lambda: None,
+                    _interaction_busy=lambda: False,
+                    _movement_locked=lambda: False,
+                    bubble=types.SimpleNamespace(isVisible=lambda: False),
+                    sprite_player=FakeSpritePlayer(),
+                    _current_screen=lambda: types.SimpleNamespace(availableGeometry=lambda: object()),
+                    pos=lambda: object(),
+                    move_animation=None,
+                )
+                fake.sprite_player.current_action = "idle"
+
+                with patch("app.desktop_pet_window.random.choices", return_value=[action_name]):
+                    DesktopPetWindow._trigger_auto_move(fake)
+
+                self.assertEqual(
+                    fake.sprite_player.actions,
+                    [
+                        (
+                            (action_name,),
+                            {"fallback_action": "idle", "force_single_cycle": True},
+                        )
+                    ],
+                )
+                self.assertEqual(fake._sprite_action_owner, "auto_action")
 
     def test_drag_release_clears_movement_lock_for_follow_up_jump(self) -> None:
         """拖动结束后必须解除移动锁，保证测试跳跃可以继续执行。"""
@@ -331,7 +390,7 @@ class InteractionActionConflictTests(unittest.TestCase):
         del app
 
     def test_open_chat_input_immediately_shows_local_opening_line(self) -> None:
-        """左键打开聊天输入框时应立即展示专用的打开招呼话术。"""
+        """左键打开聊天输入框时先播放倾听点头，并立即展示打开招呼话术。"""
         displayed: list[tuple] = []
         timer_starts: list[int] = []
         shown_near: list[object] = []
@@ -363,7 +422,10 @@ class InteractionActionConflictTests(unittest.TestCase):
         self.assertEqual(shown_near, ["pet-geometry"])
         self.assertEqual(displayed, [("我在哦，想和我聊点什么？", 6000, "system")])
         self.assertEqual(timer_starts, [30_000])
-        self.assertEqual(fake.sprite_player.actions[0][0], ("waiting",))
+        self.assertEqual(
+            fake.sprite_player.actions[0],
+            (("listen-nod",), {"fallback_action": "waiting", "force_single_cycle": True}),
+        )
         self.assertEqual(fake._sprite_action_owner, "chat_input")
 
     def test_double_click_starts_waving_after_mouse_event_without_settling(self) -> None:
@@ -502,6 +564,102 @@ class InteractionActionConflictTests(unittest.TestCase):
         self.assertIn("把这个问题拆开", reply)
         self.assertIn("目标、现象或报错", reply)
 
+    def test_context_menu_open_points_at_card_with_guide_action(self) -> None:
+        """右键卡片弹出后用指向动作指向卡片，动作结束后回到待机。"""
+        menu = FakeContextMenu()
+        recorded: list[str] = []
+        callback_names = [
+            "_handle_test_action", "_test_move_left", "_test_move_right", "_test_jump",
+            "_test_proactive_speak_once", "_test_idle_prompt_once",
+            "_test_api_proactive_speak_once", "_test_knowledge_speak_once", "_test_poetry",
+            "request_exit", "_set_scale", "_open_scale_dialog", "_toggle_do_not_disturb",
+            "_toggle_auto_move", "_toggle_api_chat", "_set_api_provider",
+            "_toggle_formal_qa_mode", "_set_formal_answer_display", "_toggle_always_on_top",
+            "_reload_config", "_clear_informal_chat_history", "_clear_formal_chat_history",
+            "_add_ten_minute_reminder", "_add_custom_minute_reminder",
+            "_view_current_reminders", "_clear_completed_reminders",
+            "_handle_clipboard_assistant", "_handle_screenshot_analysis",
+        ]
+        fake = types.SimpleNamespace(
+            **{name: (lambda *args, **kwargs: None) for name in callback_names}
+        )
+        fake._context_menu = None
+        fake._record_user_interaction = lambda source, **_kwargs: recorded.append(source)
+        fake.config_service = types.SimpleNamespace(
+            get_bool=lambda *_args: True,
+            get_str=lambda *_args: "小桃",
+        )
+        fake.sprite_player = FakeSpritePlayer()
+        fake.sprite_player.video_enabled = False
+        fake.sprite_player.horizontal_movement_enabled = True
+        fake.bubble_position_service = object()
+        fake.geometry = lambda: QRect(10, 10, 240, 320)
+        fake._ui_scale = lambda: 0.9
+        fake._api_provider = lambda: "deepseek"
+        fake._formal_qa_enabled = lambda: False
+        fake._formal_answer_display_mode = lambda: "new_panel"
+        fake.behavior_controller = types.SimpleNamespace(pick_context_menu_line=lambda: "")
+        fake._display_message = lambda *args: displayed.append(args)
+        displayed: list[tuple] = []
+        fake._guide_toward_panel = lambda owner, action_names=("guide-right",): (
+            DesktopPetWindow._guide_toward_panel(fake, owner, action_names)
+        )
+
+        with patch("app.desktop_pet_window.build_pet_context_menu", return_value=menu):
+            with patch(
+                "app.desktop_pet_window.random.choice", return_value="look-right"
+            ) as choice:
+                DesktopPetWindow._show_context_menu(fake, QPoint(0, 0))
+
+        self.assertEqual(recorded, ["context_menu_open"])
+        self.assertEqual(len(menu.shown), 1)
+        # 卡片弹出时在"右侧指引"和"朝右侧看"之间等概率二选一。
+        self.assertEqual(tuple(choice.call_args.args[0]), ("guide-right", "look-right"))
+        self.assertEqual(
+            fake.sprite_player.actions[0],
+            (("look-right",), {"fallback_action": "idle", "force_single_cycle": True}),
+        )
+        self.assertEqual(fake._sprite_action_owner, "context_menu")
+
+    def test_daily_catchup_uses_chat_stores_for_history_check(self) -> None:
+        """启动补跑用聊天存储判断历史，不能把摘要器当作存储调用。"""
+        started: list[tuple] = []
+        scheduled: list[bool] = []
+        summarizer = types.SimpleNamespace()
+        with_message = types.SimpleNamespace(all_messages=lambda: [{"role": "user"}])
+        without_message = types.SimpleNamespace(all_messages=lambda: [])
+        fake = types.SimpleNamespace(
+            chat_store_formal=without_message,
+            chat_store_informal=with_message,
+            chat_store_clipboard=without_message,
+            summarizer_formal=summarizer,
+            summarizer_informal=summarizer,
+            summarizer_clipboard=summarizer,
+            conversation_maintenance_state_path=types.SimpleNamespace(exists=lambda: False),
+            _closing_or_closed=lambda: False,
+            _schedule_next_daily_conversation_maintenance=lambda: scheduled.append(True),
+            _start_conversation_maintenance=lambda modes, kind, force=False: started.append(
+                (list(modes), kind, force)
+            ),
+        )
+        fake._conversation_chat_stores = lambda: DesktopPetWindow._conversation_chat_stores(fake)
+        fake._conversation_summarizers = lambda: DesktopPetWindow._conversation_summarizers(fake)
+
+        with patch("app.desktop_pet_window.should_run_daily_catchup", return_value=True):
+            DesktopPetWindow._initialize_conversation_maintenance(fake)
+
+        self.assertEqual(scheduled, [True])
+        self.assertEqual(
+            started,
+            [(["formal", "informal", "clipboard"], "daily", True)],
+        )
+
+        started.clear()
+        with patch("app.desktop_pet_window.should_run_daily_catchup", return_value=False):
+            DesktopPetWindow._initialize_conversation_maintenance(fake)
+
+        self.assertEqual(started, [([], "startup", False)])
+
     def test_menu_follow_up_interaction_does_not_settle_new_action(self) -> None:
         """二级菜单完成信号只记录互动，不能覆盖刚启动的动作。"""
         notified: list[tuple[str, bool]] = []
@@ -605,11 +763,17 @@ class InteractionActionConflictTests(unittest.TestCase):
         )
         fake._closing_or_closed = lambda: False
         fake._chat_in_progress = lambda: False
+        fake._guide_toward_panel = lambda owner: DesktopPetWindow._guide_toward_panel(fake, owner)
 
         DesktopPetWindow._show_next_reminder_reply(fake)
 
         self.assertEqual(fake._active_reminder_reply_id, "r-1")
         self.assertEqual(displayed, [("小桃来提醒你啦：休息一下", 8000, "reminder")])
+        self.assertEqual(
+            fake.sprite_player.actions[0],
+            (("guide-right",), {"fallback_action": "idle", "force_single_cycle": True}),
+        )
+        self.assertEqual(fake._sprite_action_owner, "reminder")
 
     def test_sprite_timer_cannot_apply_an_old_action_fallback_after_replacement(self) -> None:
         """精灵定时器只推进当前动作，旧挥手不会在之后把 review 切回 idle。"""

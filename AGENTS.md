@@ -82,6 +82,8 @@
 
 视频校验或播放失败时，本次运行整体回退旧图集。视频行走根据 `frame_presented` 推进位移，裁剪或换片时须核对 `movement_frames` 与真实帧数。测试菜单受 `ui.show_test_menu` 控制，普通动作测试播完一轮回待机，左右行走走专用移动入口。
 
+动作触发约定：`listen-nod` 在打开聊天输入框时播放一轮，随后回落到 `waiting` 输入等待；`yawn`、`one-arm-stretch`、`hair-adjust`、`leaf-hug` 与 `sleepy` 组成自主动作池，深夜用哈欠与抱叶替代跳跃，白天保留跳跃、伸展与整理头发；`guide-right` 在提醒、正式问答面板和剪贴板面板出现时指向卡片一侧，右键卡片弹出时在该动作与 `look-right` 之间等概率二选一。仅有视频素材的动作登记在 `LEGACY_ACTION_ALIASES`，回退旧图集时映射到近似动作。
+
 ### 4.5 本地存储与后台维护
 
 | 文件 | 功能 |
