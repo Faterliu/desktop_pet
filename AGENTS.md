@@ -47,8 +47,8 @@
 
 | 文件 | 功能 |
 | --- | --- |
-| `desktop_pet/setup_env.bat`、`desktop_pet/requirements.txt` | 创建或复用 `.desktop_pet_venv`，安装 PySide6-Essentials、requests 和提供 FFmpeg 的 imageio-ffmpeg，并记录运行解释器。 |
-| `desktop_pet/start_main.vbs` | 读取解释器记录，尝试 `git pull --ff-only`，随后隐藏终端启动程序。 |
+| `desktop_pet/setup_env.bat`、`desktop_pet/requirements.txt`、`desktop_pet/setup_shortcut.py` | 创建或复用 `.desktop_pet_venv`，安装 PySide6-Essentials、requests 和提供 FFmpeg 的 imageio-ffmpeg，记录运行解释器，并用 `assets/character.ico` 在桌面建立启动快捷方式（失败只警告，不影响环境就绪）。 |
+| `desktop_pet/start_main.vbs`、`desktop_pet/launch.py` | 两个启动入口：`.vbs` 隐藏终端启动并写 `data/start_main_error.log`；`launch.py` 由 `pythonw.exe` 运行，避开脚本宿主的安全警告，日志写入 `data/launch.log`。两者都会先尝试 `git pull --ff-only`。 |
 | `desktop_pet/main.py` | 在导入 PySide6 和业务模块前写入启动诊断，初始化日志和 Qt 应用，显示桌宠窗口。 |
 | `desktop_pet/app/config_service.py` | 以点分隔路径读取已加载的配置。 |
 

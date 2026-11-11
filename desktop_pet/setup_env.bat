@@ -148,12 +148,22 @@ if exist "%LEGACY_PIP_CACHE_DIR%" (
 
 > "%RUNTIME_FILE%" <nul set /p "=%VENV_PYTHON%"
 
+rem Create the desktop shortcut from Python so the non-ASCII name never passes
+rem through cmd.exe. A failure here must not fail the whole setup.
+echo.
+echo Creating the desktop shortcut...
+"%VENV_PYTHON%" "%~dp0setup_shortcut.py"
+if errorlevel 1 (
+    echo Warning: the desktop shortcut was not created.
+    echo You can still start the pet with start_main.vbs.
+)
+
 echo.
 echo Environment is ready.
 echo Runtime Python path was saved to:
 echo %RUNTIME_FILE%
 echo.
-echo You can now run start_main.vbs.
+echo You can now start the pet from the desktop shortcut or start_main.vbs.
 pause
 exit /b 0
 
