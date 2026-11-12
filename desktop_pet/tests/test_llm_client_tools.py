@@ -593,5 +593,135 @@ class LlmClientToolTests(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
 
 
+    # 验证视觉请求优先使用 DeepSeek 的 Chat Completions 图片输入。
+    def test_vision_prefers_deepseek_chat_completions(self) -> None:
+        """验证 DeepSeek 配置完整时视觉请求先走它的图片输入。"""
+        config = {
+            "api": {
+                "provider": "deepseek",
+                "deepseek": {
+                    "api_key": "deepseek-key",
+                    "base_url": "https://deepseek.test/v1",
+                    "model": "cn:deepseek-v4.1-flash",
+                    "timeout_seconds": 25,
+                },
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://vision.test/v1",
+                    "model": "gpt-5.5",
+                },
+            }
+        }
+        response = FakeResponse({"choices": [{"message": {"content": "图里是设置页面。"}}]})
+        client = LlmClient("unused-vision.json")
+        with patch("ai.llm_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.llm_client.requests.post", return_value=response) as post:
+                self.assertTrue(client.is_vision_configured())
+                reply = client.analyze_image(
+                    b"\x89PNG\r\n",
+                    "image/png",
+                    "请解析截图",
+                    detail="auto",
+                    max_output_tokens=80,
+                )
+
+        self.assertEqual(reply, "图里是设置页面。")
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(post.call_args.args[0], "https://deepseek.test/v1/chat/completions")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer deepseek-key")
+        self.assertEqual(post.call_args.kwargs["timeout"], 25)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "cn:deepseek-v4.1-flash")
+        content = payload["messages"][0]["content"]
+        self.assertEqual([part["type"] for part in content], ["text", "image_url"])
+        self.assertEqual(content[1]["image_url"]["url"], "data:image/png;base64,iVBORw0K")
+        self.assertEqual(content[1]["image_url"]["detail"], "auto")
+
+    # 验证 DeepSeek 视觉线路失败后回退到 OpenAI Responses。
+    def test_vision_falls_back_to_openai_when_deepseek_fails(self) -> None:
+        """验证 DeepSeek 线路报错时改用 OpenAI 的 Responses 线路。"""
+        config = {
+            "api": {
+                "provider": "deepseek",
+                "deepseek": {
+                    "api_key": "deepseek-key",
+                    "base_url": "https://deepseek.test/v1",
+                    "model": "cn:deepseek-v4.1-flash",
+                },
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://vision.test/v1",
+                    "model": "gpt-5.5",
+                },
+            }
+        }
+        failure = FakeResponse({"error": "boom"}, status_code=500)
+        success = FakeResponse({"output_text": "回退线路解析结果"})
+        client = LlmClient("unused-vision.json")
+        with patch("ai.llm_client.load_json_prefer_primary", return_value=config):
+            with patch("ai.llm_client.requests.post", side_effect=[failure, success]) as post:
+                reply = client.analyze_image(b"png", "image/png", "解析")
+
+        self.assertEqual(reply, "回退线路解析结果")
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(post.call_args_list[0].args[0], "https://deepseek.test/v1/chat/completions")
+        self.assertEqual(post.call_args_list[1].args[0], "https://vision.test/v1/responses")
+
+    # 验证两条视觉线路都失败时抛出最后一次的错误。
+    def test_vision_reports_last_error_when_all_routes_fail(self) -> None:
+        """验证所有视觉线路失败时按最后一条线路的错误上报。"""
+        config = {
+            "api": {
+                "deepseek": {
+                    "api_key": "deepseek-key",
+                    "base_url": "https://deepseek.test/v1",
+                    "model": "cn:deepseek-v4.1-flash",
+                },
+                "openai": {
+                    "api_key": "openai-key",
+                    "base_url": "https://vision.test/v1",
+                    "model": "gpt-5.5",
+                },
+            }
+        }
+        failure = FakeResponse({"error": "boom"}, status_code=500)
+        client = LlmClient("unused-vision.json")
+        with patch("ai.llm_client.load_json_prefer_primary", return_value=config):
+            with patch(
+                "ai.llm_client.requests.post",
+                side_effect=[failure, requests.Timeout("late")],
+            ) as post:
+                with self.assertRaisesRegex(LlmError, "超时"):
+                    client.analyze_image(b"png", "image/png", "解析")
+
+        self.assertEqual(post.call_count, 2)
+
+    # 验证仅配置 DeepSeek 时视觉能力依旧被判定为可用。
+    def test_vision_configured_with_deepseek_only(self) -> None:
+        """验证只填 DeepSeek 配置也视为视觉可用。"""
+        config = {
+            "api": {
+                "provider": "deepseek",
+                "deepseek": {
+                    "api_key": "deepseek-key",
+                    "base_url": "https://deepseek.test/v1",
+                    "model": "cn:deepseek-v4.1-flash",
+                },
+            }
+        }
+        client = LlmClient("unused-vision.json")
+        with patch("ai.llm_client.load_json_prefer_primary", return_value=config):
+            self.assertTrue(client.is_vision_configured())
+
+    # 验证没有任何视觉线路时给出明确错误。
+    def test_vision_requires_configured_route(self) -> None:
+        """验证缺少两条线路配置时拒绝解析并提示未配置。"""
+        client = LlmClient("unused-vision.json")
+        with patch("ai.llm_client.load_json_prefer_primary", return_value={"api": {}}):
+            self.assertFalse(client.is_vision_configured())
+            with self.assertRaisesRegex(LlmError, "视觉模型未配置"):
+                client.analyze_image(b"png", "image/png", "解析")
+
+
 if __name__ == "__main__":
     unittest.main()

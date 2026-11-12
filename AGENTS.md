@@ -32,12 +32,12 @@
 | `QApplication.clipboard()`、`QScreen.grabWindow()` | 输入 | 读取系统剪贴板文本和屏幕像素，供辅助分析。 |
 | `desktop_pet/config/app_config.json` | 双向 | 读取本机运行配置，保存设置变更。缺少本机配置时读取示例模板。 |
 | 文本模型 `/chat/completions`、`/responses` | 双向 | 按所选供应商及协议发送文本上下文，接收回复或工具调用。 |
-| 视觉模型 `/responses` | 双向 | 使用 `api.openai` 配置发送内存截图的 Data URL，接收文字分析。 |
+| 视觉模型 `/chat/completions`、`/responses` | 双向 | 优先用 `api.deepseek` 的图片输入发送内存截图 Data URL，失败回退 `api.openai` 的 `/responses`，接收文字分析。 |
 | 提醒工具 `create_reminder` | 双向 | 校验模型给出的提醒参数并写入本地提醒，返回执行结果。 |
 | `desktop_pet/data/` | 双向 | 持久化会话历史、摘要、记忆、提醒和运行状态。 |
 | `desktop_pet/assets/sprite_config.json` | 输入 | 定义图集动作，以及视频素材、逻辑动作映射和行走位移区间。 |
 
-配置为 KLD Responses 文本服务时，主备线路对可重试错误依次尝试，两者均不可用后可回退到已配置的 DeepSeek。视觉请求独立于文本供应商。截图只在内存中处理，`screenshot` 历史仅记录成功返回的文本。提醒优先使用原生工具调用，端点不支持时使用严格 JSON 协议。
+配置为 KLD Responses 文本服务时，主备线路对可重试错误依次尝试，两者均不可用后可回退到已配置的 DeepSeek。视觉请求不跟随文本供应商：优先用 `api.deepseek` 的图片输入，任一步失败再回退 `api.openai` 的 `/responses`。截图只在内存中处理，`screenshot` 历史仅记录成功返回的文本。提醒优先使用原生工具调用，端点不支持时使用严格 JSON 协议。
 
 ## 4. 已有功能
 
@@ -47,7 +47,7 @@
 
 | 文件 | 功能 |
 | --- | --- |
-| `desktop_pet/setup_env.bat`、`desktop_pet/requirements.txt`、`desktop_pet/setup_shortcut.py` | 创建或复用 `.desktop_pet_venv`，安装 PySide6-Essentials、requests 和提供 FFmpeg 的 imageio-ffmpeg，记录运行解释器，并用 `assets/character.ico` 在桌面建立启动快捷方式（失败只警告，不影响环境就绪）。 |
+| `desktop_pet/setup_env.bat`、`desktop_pet/requirements.txt`、`desktop_pet/setup_shortcut.py` | 创建或复用 `.desktop_pet_venv`，安装 PySide6-Essentials、requests 和提供 FFmpeg 的 imageio-ffmpeg，记录运行解释器，并把 `assets/character.ico` 复制到 `%LOCALAPPDATA%\DesktopPet` 后在桌面建立启动快捷方式（失败只警告，不影响环境就绪）。 |
 | `desktop_pet/start_main.vbs`、`desktop_pet/launch.py` | 两个启动入口：`.vbs` 隐藏终端启动并写 `data/start_main_error.log`；`launch.py` 由 `pythonw.exe` 运行，避开脚本宿主的安全警告，日志写入 `data/launch.log`。两者都会先尝试 `git pull --ff-only`。 |
 | `desktop_pet/main.py` | 在导入 PySide6 和业务模块前写入启动诊断，初始化日志和 Qt 应用，显示桌宠窗口。 |
 | `desktop_pet/app/config_service.py` | 以点分隔路径读取已加载的配置。 |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from setup_shortcut import (  # noqa: E402
     clean_powershell_error,
     encode_powershell,
     parse_verification,
+    prepare_icon,
     validate_shortcut_name,
 )
 
@@ -115,6 +117,34 @@ class ShortcutScriptTests(unittest.TestCase):
         """非 CLIXML 的错误只保留第一行，避免提示被堆栈淹没。"""
         self.assertEqual(clean_powershell_error("boom\nstack"), "boom")
         self.assertEqual(clean_powershell_error(""), "")
+
+
+class IconPreparationTests(unittest.TestCase):
+    """验证图标被复制到用户配置区，快捷方式不再引用仓库内的路径。"""
+
+    def test_icon_is_copied_into_icon_home(self) -> None:
+        """把仓库图标复制到指定目录，并返回复制后的路径。"""
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "assets" / "character.ico"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"icon-bytes")
+
+            target = prepare_icon(source, icon_home=base / "appdata")
+
+            self.assertEqual(target, base / "appdata" / "character.ico")
+            self.assertEqual(target.read_bytes(), b"icon-bytes")
+
+    def test_missing_or_absent_icon_is_skipped(self) -> None:
+        """图标缺失或调用方明确不提供图标时返回 None，不创建目录。"""
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+
+            self.assertIsNone(prepare_icon(None, icon_home=base / "appdata"))
+            self.assertIsNone(
+                prepare_icon(base / "missing.ico", icon_home=base / "appdata")
+            )
+            self.assertFalse((base / "appdata").exists())
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ import argparse
 import base64
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -23,11 +24,29 @@ BASE_DIR = Path(__file__).resolve().parent
 VENV_PYTHONW = BASE_DIR / ".desktop_pet_venv" / "Scripts" / "pythonw.exe"
 LAUNCH_SCRIPT = BASE_DIR / "launch.py"
 DEFAULT_ICON = BASE_DIR / "assets" / "character.ico"
+# 图标放在用户配置区：仓库所在目录可能受 ACL 或沙箱保护，外壳取图标会读不到。
+ICON_HOME = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "DesktopPet"
 DEFAULT_NAME = "(´•ω•)`"
 DEFAULT_DESCRIPTION = "小桃桌面宠物"
 INVALID_NAME_CHARS = set('\\/:*?"<>|')
 
 CREATE_NO_WINDOW = 0x08000000
+
+
+# 把仓库里的图标复制到用户配置区，返回快捷方式应引用的路径。
+def prepare_icon(source: Path | None, icon_home: Path | None = None) -> Path | None:
+    """复制图标到本地应用目录；源文件不存在时返回 None，跳过图标设置。"""
+    if source is None:
+        return None
+    source_path = Path(source)
+    if not source_path.is_file():
+        return None
+    target_dir = Path(icon_home) if icon_home else ICON_HOME
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / "character.ico"
+    if source_path.resolve() != target.resolve():
+        shutil.copyfile(source_path, target)
+    return target
 
 
 # 把纯文本转成 PowerShell 单引号字面量，内部单引号按 PowerShell 规则加倍。
@@ -159,7 +178,7 @@ def create_desktop_shortcut(
     """创建或覆盖桌面快捷方式，返回 .lnk 完整路径。"""
     if not Path(target).exists():
         raise FileNotFoundError(f"shortcut target is missing: {target}")
-    icon_path = Path(icon) if icon and Path(icon).exists() else None
+    icon_path = prepare_icon(icon)
     script = build_shortcut_script(
         name=name,
         target=str(target),

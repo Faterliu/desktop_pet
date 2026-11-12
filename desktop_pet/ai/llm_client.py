@@ -164,17 +164,26 @@ class LlmClient:
         """判断必需配置是否完整，并返回客户端是否可以调用。"""
         return bool(self._api_config().get("api_key", "").strip())
 
-    # 判断 OpenAI 视觉请求所需配置是否完整。
+    # 判断视觉请求是否至少有一条可用线路。
     def is_vision_configured(self) -> bool:
-        """判断 OpenAI 视觉请求所需的 API key、地址和模型是否完整。"""
-        api = self._openai_api_config()
-        return bool(
-            str(api.get("api_key", "")).strip()
-            and str(api.get("base_url", "")).strip()
-            and str(api.get("model", "")).strip()
-        )
+        """判断视觉请求能否找到可用的线路配置。"""
+        return bool(self._vision_route_candidates())
 
-    # 将内存图片作为 Data URL 发送给固定 OpenAI Responses API。
+    # 按优先级返回视觉线路：先用 DeepSeek，再用 OpenAI 兜底。
+    def _vision_route_candidates(self) -> list[dict[str, Any]]:
+        """返回可用的视觉线路配置，DeepSeek 在前、OpenAI 在后。"""
+        candidates: list[dict[str, Any]] = []
+        for api in (self._deepseek_api_config(), self._openai_api_config()):
+            if not (
+                str(api.get("api_key", "")).strip()
+                and str(api.get("base_url", "")).strip()
+                and str(api.get("model", "")).strip()
+            ):
+                continue
+            candidates.append(api)
+        return candidates
+
+    # 将内存图片按 Data URL 发送给视觉线路，主线路失败时回退下一条。
     def analyze_image(
         self,
         image_bytes: bytes,
@@ -184,7 +193,7 @@ class LlmClient:
         detail: str = "auto",
         max_output_tokens: int = 80,
     ) -> str:
-        """发送单张内存图片并返回 Responses API 提取出的文字结果。"""
+        """优先使用 DeepSeek 视觉线路解析内存图片，失败时回退 OpenAI。"""
         if not image_bytes:
             raise LlmError("截图内容为空，无法解析。")
         normalized_mime = str(mime_type).strip().lower()
@@ -194,15 +203,9 @@ class LlmClient:
         if not normalized_prompt:
             raise LlmError("截图解析提示不能为空。")
 
-        api = self._openai_api_config()
-        api_key = str(api.get("api_key", "")).strip()
-        if not api_key:
-            raise LlmError("OpenAI API key 未配置，暂时不能解析截图。")
-        base_url = str(api.get("base_url", "https://api.openai.com/v1")).rstrip("/")
-        model = str(api.get("model", "")).strip()
-        if not model:
-            raise LlmError("OpenAI 模型未配置，暂时不能解析截图。")
-        timeout_seconds = api.get("timeout_seconds", 30)
+        candidates = self._vision_route_candidates()
+        if not candidates:
+            raise LlmError("视觉模型未配置，暂时不能解析截图。")
         normalized_detail = str(detail).strip().lower()
         if normalized_detail not in {"low", "high", "original", "auto"}:
             normalized_detail = "auto"
@@ -211,31 +214,85 @@ class LlmClient:
         except (TypeError, ValueError):
             output_limit = 80
 
-        encoded = base64.b64encode(image_bytes).decode("ascii")
-        payload = {
-            "model": model,
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": normalized_prompt},
-                        {
-                            "type": "input_image",
-                            "image_url": f"data:{normalized_mime};base64,{encoded}",
-                            "detail": normalized_detail,
-                        },
-                    ],
-                }
-            ],
-            "max_output_tokens": output_limit,
-        }
+        data_url = f"data:{normalized_mime};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        last_error = LlmError("截图解析服务暂时无法完成请求。")
+        for index, api in enumerate(candidates):
+            try:
+                return self._request_image_analysis(
+                    api,
+                    data_url,
+                    normalized_prompt,
+                    normalized_detail,
+                    output_limit,
+                )
+            except LlmError as exc:
+                last_error = exc
+                if index + 1 < len(candidates):
+                    logger.warning(
+                        "Vision route unavailable; provider=%s next_provider=%s",
+                        api.get("provider"),
+                        candidates[index + 1].get("provider"),
+                    )
+        raise last_error
+
+    # 按线路协议发送一次图片请求，并提取可显示文本。
+    def _request_image_analysis(
+        self,
+        api: dict[str, Any],
+        data_url: str,
+        prompt: str,
+        detail: str,
+        output_limit: int,
+    ) -> str:
+        """按线路协议发送一次图片请求并返回其中的文字结果。"""
+        provider = str(api.get("provider", "openai")).strip().lower()
+        base_url = str(api.get("base_url", "")).rstrip("/")
+        api_key = str(api.get("api_key", "")).strip()
+        model = str(api.get("model", "")).strip()
+        timeout_seconds = api.get("timeout_seconds", 30)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
+        if provider == "deepseek":
+            endpoint = "/chat/completions"
+            payload = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": data_url, "detail": detail},
+                            },
+                        ],
+                    }
+                ],
+            }
+        else:
+            endpoint = "/responses"
+            payload = {
+                "model": model,
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": prompt},
+                            {
+                                "type": "input_image",
+                                "image_url": data_url,
+                                "detail": detail,
+                            },
+                        ],
+                    }
+                ],
+                "max_output_tokens": output_limit,
+            }
         try:
             response = requests.post(
-                f"{base_url}/responses",
+                f"{base_url}{endpoint}",
                 headers=headers,
                 json=payload,
                 timeout=timeout_seconds,
@@ -243,24 +300,46 @@ class LlmClient:
             response.raise_for_status()
             data = response.json()
         except requests.Timeout as exc:
-            logger.error("Vision API request timed out: %s", safe_exception(exc))
+            logger.error(
+                "Vision API request timed out: %s provider=%s",
+                safe_exception(exc),
+                provider,
+            )
             raise LlmError("截图解析超时了，请稍后再试。") from exc
         except requests.HTTPError as exc:
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
             logger.error(
-                "Vision API request failed: %s status_code=%s",
+                "Vision API request failed: %s status_code=%s provider=%s",
                 safe_exception(exc),
                 status_code,
+                provider,
             )
             raise LlmError("截图解析服务暂时无法完成请求。") from exc
         except ValueError as exc:
-            logger.error("Vision API returned invalid JSON: %s", safe_exception(exc))
+            logger.error("Vision API returned invalid JSON: %s provider=%s", safe_exception(exc), provider)
             raise LlmError("截图解析服务返回了无法解析的响应。") from exc
         except requests.RequestException as exc:
-            logger.error("Vision API request failed: %s", safe_exception(exc))
+            logger.error(
+                "Vision API request failed: %s provider=%s",
+                safe_exception(exc),
+                provider,
+            )
             raise LlmError("截图解析服务暂时无法连接。") from exc
 
-        reply = self._message_content(self._responses_message(data))
+        if provider == "deepseek":
+            message: Any = data
+            try:
+                message = data["choices"][0]["message"]
+            except (KeyError, IndexError, TypeError) as exc:
+                logger.error(
+                    "Vision API response structure mismatch: %s response=%s",
+                    safe_exception(exc),
+                    response_shape(data),
+                )
+                raise LlmError("截图解析没有返回可显示的文字。") from exc
+            reply = self._message_content(message)
+        else:
+            reply = self._message_content(self._responses_message(data))
         if not reply:
             raise LlmError("截图解析没有返回可显示的文字。")
         return reply
