@@ -25,6 +25,12 @@ def main() -> int:
     _write_boot_log(project_root, "[boot] entering main()")
 
     try:
+        # 崩溃捕获需要早于 Qt 导入，导入期的原生崩溃同样能留下栈。
+        from utils.crash_reporter import install_crash_reporting, install_qt_message_handler
+
+        crash_log = install_crash_reporting(project_root / "data")
+        _write_boot_log(project_root, f"[boot] crash reporting enabled: {crash_log}")
+
         from PySide6.QtWidgets import QApplication
 
         from app.desktop_pet_window import DesktopPetWindow
@@ -37,6 +43,8 @@ def main() -> int:
         app = QApplication(sys.argv)
         app.setQuitOnLastWindowClosed(False)
         app.setApplicationName("小桃 Desktop Pet")
+        # Qt 自身的告警写进运行日志，不再只出现在被隐藏的控制台上。
+        install_qt_message_handler()
         _write_boot_log(project_root, "[boot] QApplication created")
 
         window = DesktopPetWindow(project_root)

@@ -11,7 +11,7 @@
 ### 项目维护
 
 - 读写源代码、配置和文档时显式指定 UTF-8。PowerShell 读取文本使用 `Get-Content -Encoding UTF8`。通过管道传入内联 Python 时用 Unicode 转义表示中文，或用 `apply_patch` 直接编辑文件。遇到乱码先核对源字节。
-- 新增或修改的代码注释和文档字符串使用中文，标识符与外部接口术语保留原文。`.bat` 文件仅使用 ASCII，避免 `cmd.exe` 按 OEM 代码页误读。
+- 新增或修改的代码注释和文档字符串使用中文，标识符与外部接口术语保留原文。`.bat` 文件仅使用 ASCII，避免 `cmd.exe` 按 OEM 代码页误读。界面样式表字号统一写 `pt`，`px` 字号在 100% 缩放的屏幕上会触发 Qt 的 `QFont::setPointSize` 警告。
 - 优先修改现有文件。职责独立且确有需要时再新增文件。纯逻辑留在服务模块，控件创建和信号连接留在界面模块。
 - 新增后台任务使用 `BackgroundTaskRegistry` 管理。耗时操作放到后台，结果通过信号回主线程更新界面。退出时限时回收任务和解码器，防止回调访问正在关闭的窗口。
 - 角色动作统一经 `_set_pet_action()` 请求，异步完成经 `_finish_pet_action_if_owned()` 收尾。修改动作时验证移动结束、延迟交互和过期回调不会覆盖新动作。
@@ -50,9 +50,10 @@
 | `desktop_pet/setup_env.bat`、`desktop_pet/requirements.txt`、`desktop_pet/setup_shortcut.py` | 创建或复用 `.desktop_pet_venv`，安装 PySide6-Essentials、requests 和提供 FFmpeg 的 imageio-ffmpeg，记录运行解释器，并把 `assets/character.ico` 复制到 `%LOCALAPPDATA%\DesktopPet` 后在桌面建立启动快捷方式（失败只警告，不影响环境就绪）。 |
 | `desktop_pet/start_main.vbs`、`desktop_pet/launch.py` | 两个启动入口：`.vbs` 隐藏终端启动并写 `data/start_main_error.log`；`launch.py` 由 `pythonw.exe` 运行，避开脚本宿主的安全警告，日志写入 `data/launch.log`。两者都会先尝试 `git pull --ff-only`。 |
 | `desktop_pet/main.py` | 在导入 PySide6 和业务模块前写入启动诊断，初始化日志和 Qt 应用，显示桌宠窗口。 |
+| `desktop_pet/utils/crash_reporter.py`、`desktop_pet/tools/enable_crash_dumps.ps1` | 在 `main.py` 早期启用 faulthandler 与异常钩子，把未捕获异常和原生崩溃栈追加到 `desktop_pet/data/crash.log`，并把 Qt 告警转入运行日志；配套脚本按需开启或关闭 Windows LocalDumps 转储。 |
 | `desktop_pet/app/config_service.py` | 以点分隔路径读取已加载的配置。 |
 
-首次配置和日常启动见 [README 的运行说明](README.md)。静默启动失败时先查 `desktop_pet/data/start_main_error.log` 和 `desktop_pet/data/startup_bootstrap.log`，常规运行日志在 `desktop_pet/data/app.log`。
+首次配置和日常启动见 [README 的运行说明](README.md)。静默启动失败时先查 `desktop_pet/data/start_main_error.log` 和 `desktop_pet/data/startup_bootstrap.log`，常规运行日志在 `desktop_pet/data/app.log`，进程被原生错误终止时看 `desktop_pet/data/crash.log`。
 
 ### 4.2 交互采集与调度
 

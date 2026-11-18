@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -406,6 +407,14 @@ class PetContextMenuTests(unittest.TestCase):
         self.assertEqual(exit_requests, [True])
         self.assertFalse(card.isVisible())
         parent.close()
+
+    # 验证菜单样式表不再使用像素字号，避免 100% 缩放屏幕上的 QFont 点值警告。
+    def test_menu_styles_use_point_sizes(self) -> None:
+        """验证一级卡片与二级菜单的字号统一为 pt。"""
+        source = (DESKTOP_PET_ROOT / "app" / "context_menu.py").read_text(encoding="utf-8")
+
+        self.assertEqual(re.findall(r"font-size:\s*[\d.]+px", source), [])
+        self.assertTrue(re.findall(r"font-size:\s*[\d.]+pt", source))
 
 
 if __name__ == "__main__":

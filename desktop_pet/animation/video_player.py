@@ -20,6 +20,8 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 WALK_ACTIONS = frozenset({"running_left", "running_right"})
+# 同时保留的解码线程上限，防止长时间运行后线程与工作对象持续累积。
+MAX_LIVE_SESSIONS = 8
 OPTIONAL_SINGLE_ACTIONS = frozenset({
     "happy", "failed", "leaf-hug", "deep-breath",
     "hair-adjust", "yawn", "one-arm-stretch", "guide-right", "look-right", "listen-nod",
@@ -49,14 +51,20 @@ class _DecodeWorker(QObject):
         self._process = None
 
     def stop(self):
-        """允许主线程中断管道读取及队列等待，不等待线程退出。"""
+        """允许主线程中断管道读取及队列等待，不长时间阻塞界面线程。"""
         self.cancelled.set()
-        with self._lock:
-            if self._process is not None and self._process.poll() is None:
+        # 启动与取消共用同一把锁；锁被解码线程占用时只设标志，避免卡住界面。
+        locked = self._lock.acquire(timeout=0.2)
+        try:
+            process = self._process
+            if process is not None and process.poll() is None:
                 try:
-                    self._process.kill()
+                    process.kill()
                 except OSError:
                     pass
+        finally:
+            if locked:
+                self._lock.release()
 
     def _launch(self, arguments):
         """原子地启动隐藏进程，防止取消后又启动新进程。"""
@@ -161,6 +169,8 @@ class VideoPlayer(QObject):
     action_finished = Signal(str, int)
     playback_failed = Signal(int, str)
     backend_changed = Signal()
+    # 线程退出回调可能发生在解码线程，用信号排回界面线程再回收对象。
+    _session_finished = Signal(int)
 
     def __init__(self, config_path, scale=1.0, legacy_scale=0.6, enabled=True):
         """准备播放状态，后台验证素材后交付首帧。"""
@@ -188,6 +198,8 @@ class VideoPlayer(QObject):
         self._done = False
         self._dpr = 1.0
         self._closed = False
+        self._worker_serial = None
+        self._session_finished.connect(self._reap, Qt.ConnectionType.QueuedConnection)
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.timer.timeout.connect(self._tick)
@@ -275,6 +287,8 @@ class VideoPlayer(QObject):
         for _, worker in list(self._sessions.values()):
             worker.stop()
         self._worker = None
+        self._worker_serial = None
+        self._trim_sessions()
 
     def _clip_name(self, action):
         """把业务动作映射到新版素材，不改变外部动作名称。"""
@@ -347,16 +361,74 @@ class VideoPlayer(QObject):
         name = f"video:{serial}"
         self._sessions[serial] = (thread, worker)
         self.tasks.register(name, thread, worker, wait_timeout_ms=1000)
-        thread.finished.connect(lambda seq=serial: self._reap(seq))
+        # 回收通过信号排回界面线程，绝不在解码线程里删除它自己的 QThread。
+        thread.finished.connect(lambda seq=serial: self._session_finished.emit(seq))
         self._worker = worker
+        self._worker_serial = serial
         thread.start()
         self.timer.start(5)
         self.action_changed.emit(action_name)
+        self._trim_sessions()
 
+    @Slot(int)
     def _reap(self, serial):
-        """仅在线程退出后释放注册项，队列中的末帧由播放引用保留。"""
+        """只在界面线程回收已经退出的解码线程，仍在运行的保留引用。"""
+        session = self._sessions.get(serial)
+        if session is None:
+            return
+        thread, _worker = session
+        if self._thread_running(thread):
+            # 线程尚未退出时保留引用，等它自己的 finished 回调再次触发回收。
+            return
+        self._discard_session(serial)
+
+    # 移除会话并交还注册项，调用方负责确认线程已经退出。
+    def _discard_session(self, serial) -> None:
+        """移除解码会话并清理对应的后台任务注册。"""
         self._sessions.pop(serial, None)
         self.tasks.unregister(f"video:{serial}")
+
+    # 判断 QThread 是否仍在运行，已销毁对象按未运行处理。
+    @staticmethod
+    def _thread_running(thread) -> bool:
+        """线程对象已销毁时返回未运行。"""
+        try:
+            return bool(thread.isRunning())
+        except RuntimeError:
+            return False
+
+    # 请求 QThread 退出，避免已销毁对象阻断回收流程。
+    @staticmethod
+    def _request_thread_stop(thread) -> None:
+        """请求线程退出，忽略已经销毁的线程对象。"""
+        try:
+            thread.quit()
+        except RuntimeError:
+            pass
+
+    # 限时等待 QThread 结束，返回是否已经退出。
+    @staticmethod
+    def _wait_thread(thread, timeout_ms: float) -> bool:
+        """等待线程退出；无法等待的对象按已结束处理。"""
+        wait = getattr(thread, "wait", None)
+        if not callable(wait):
+            return True
+        try:
+            return bool(wait(max(0, round(timeout_ms))))
+        except RuntimeError:
+            return True
+
+    # 限制同时保留的解码线程数量，避免长时间运行后线程与工作对象累积。
+    def _trim_sessions(self) -> None:
+        """超出上限时先停最旧的解码线程，未退出的保留引用等待其回调。"""
+        overflow = len(self._sessions) - MAX_LIVE_SESSIONS
+        if overflow <= 0:
+            return
+        for serial in sorted(self._sessions)[:overflow]:
+            thread, _worker = self._sessions[serial]
+            self._request_thread_stop(thread)
+            if self._wait_thread(thread, 50):
+                self._reap(serial)
 
     @Slot(int, str)
     def _fail(self, serial, reason):
@@ -373,7 +445,7 @@ class VideoPlayer(QObject):
     def _tick(self):
         """按实际经过时间取帧，末帧显示足一帧后才发送结束事件。"""
         worker = self._worker
-        if worker is None or self._done:
+        if worker is None or self._done or self._worker_serial != self.playback_serial:
             return
         now = time.monotonic()
         fps = float(self.clips[worker.clip_name]["fps"])
@@ -507,8 +579,9 @@ class VideoPlayer(QObject):
         if self._legacy is not None:
             self._legacy.timer.stop()
         deadline = time.monotonic() + timeout_ms / 1000
-        for serial, (thread, _) in list(self._sessions.items()):
-            thread.quit()
-            if thread.wait(max(0, round((deadline - time.monotonic()) * 1000))):
-                self._reap(serial)
+        for serial, (thread, _worker) in list(self._sessions.items()):
+            self._request_thread_stop(thread)
+            if self._wait_thread(thread, (deadline - time.monotonic()) * 1000):
+                # 已确认退出就直接移除，避免退出流程反复重试。
+                self._discard_session(serial)
         return not self._sessions

@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 
+# 样式表字号统一用 pt：Qt 在 100% 缩放屏幕上按像素字号反算点值时会打印
+# “QFont::setPointSize: Point size <= 0 (-1)” 警告；两者都按设备像素比换算，视觉一致。
 MENU_STYLE = """
 QMenu {
     background: #f7f2ea;
@@ -27,7 +29,7 @@ QMenu {
     border-radius: 10px;
     padding: 4px;
     color: #5a4331;
-    font-size: 11px;
+    font-size: 8.25pt;
 }
 QMenu::item {
     background: #f8f4ed;
@@ -139,14 +141,14 @@ class PetContextMenu(QWidget):
                 border: none;
                 color: #4e3a2a;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 9pt;
             }
             QPushButton#menu_exit {
                 background: #f6efef;
                 border: none;
                 border-radius: 5px;
                 color: #c86a6a;
-                font-size: 10px;
+                font-size: 7.5pt;
                 font-weight: 600;
                 padding: 0 4px;
             }
@@ -159,7 +161,7 @@ class PetContextMenu(QWidget):
                 border: 1px solid #ddb98c;
                 border-radius: 9px;
                 color: #5a4331;
-                font-size: 11px;
+                font-size: 8.25pt;
                 font-weight: 500;
                 padding: 4px 11px;
                 text-align: left;
